@@ -1,0 +1,522 @@
+{
+  "VD3579": {
+    "distance_accum": 26.03544399992097,
+    "fuel_accum_gal": 0.25394176478461605,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 26.8,
+    "last_odometer_mi": 626246.587551,
+    "last_timestamp": 1764128397,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 16
+    }
+  },
+  "JC1282": {
+    "distance_accum": 7.270040999981575,
+    "fuel_accum_gal": 0.05296534347226148,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 52.0,
+    "last_odometer_mi": 889575.72594,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 4,
+      "fallback": 0
+    }
+  },
+  "JC9352": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": 5.697148923834087,
+    "window_count": 2,
+    "last_fuel_lvl_pct": 19.2,
+    "last_odometer_mi": 461401.39726,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 2,
+      "fallback": 0
+    }
+  },
+  "NQ6975": {
+    "distance_accum": 25.41408000001684,
+    "fuel_accum_gal": 0.3206586909348435,
+    "mpg_current": 6.035170503395291,
+    "window_count": 2,
+    "last_fuel_lvl_pct": 65.2,
+    "last_odometer_mi": 1100212.23071,
+    "last_timestamp": 1764130810,
+    "fuel_source_stats": {
+      "sensor": 2,
+      "fallback": 37
+    }
+  },
+  "GP9677": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 75.6,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "JB8004": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "FM2416": {
+    "distance_accum": 0.90098795,
+    "fuel_accum_gal": 0.1453206370967742,
+    "mpg_current": 6.1934474322867175,
+    "window_count": 5,
+    "last_fuel_lvl_pct": 51.6,
+    "last_odometer_mi": 448266.297822929,
+    "last_timestamp": 1764129480,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 60
+    }
+  },
+  "FM3679": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 34.0,
+    "last_odometer_mi": 657702.313822,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "FM9838": {
+    "distance_accum": 1.6207426916666665,
+    "fuel_accum_gal": 0.2677988921803723,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 70.0,
+    "last_odometer_mi": 458354.17572865996,
+    "last_timestamp": 1764128273,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 7
+    }
+  },
+  "JB6858": {
+    "distance_accum": 6.151572999951895,
+    "fuel_accum_gal": 0.19000364267786268,
+    "mpg_current": 6.184788503976465,
+    "window_count": 4,
+    "last_fuel_lvl_pct": 40.4,
+    "last_odometer_mi": 308582.90481,
+    "last_timestamp": 1764130940,
+    "fuel_source_stats": {
+      "sensor": 2,
+      "fallback": 55
+    }
+  },
+  "JP3281": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "JR7099": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "RA9250": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "RH1522": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "RR1272": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "BV6395": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "CO0681": {
+    "distance_accum": 5.033105100003013,
+    "fuel_accum_gal": 0.17080160500233393,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 61.6,
+    "last_odometer_mi": 39408.4051507,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 1,
+      "fallback": 0
+    }
+  },
+  "CS8087": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "DR6664": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "DO9356": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "DO9693": {
+    "distance_accum": 18.019758999929763,
+    "fuel_accum_gal": 0.16500432427839165,
+    "mpg_current": 4.91125173406971,
+    "window_count": 1,
+    "last_fuel_lvl_pct": 34.8,
+    "last_odometer_mi": 772126.478593,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 4,
+      "fallback": 0
+    }
+  },
+  "FS7166": {
+    "distance_accum": 2.6211106482442945,
+    "fuel_accum_gal": 0.9142488054276238,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 48.0,
+    "last_odometer_mi": 622275.6762218447,
+    "last_timestamp": 1764130940,
+    "fuel_source_stats": {
+      "sensor": 3,
+      "fallback": 24
+    }
+  },
+  "MA8159": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "MO0195": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "PC1280": {
+    "distance_accum": 42.116008270806944,
+    "fuel_accum_gal": 0.4700556615903229,
+    "mpg_current": 3.941929334795476,
+    "window_count": 1,
+    "last_fuel_lvl_pct": 72.4,
+    "last_odometer_mi": 272003.291137,
+    "last_timestamp": 1764135554,
+    "fuel_source_stats": {
+      "sensor": 5,
+      "fallback": 14
+    }
+  },
+  "RD5229": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "RR3094": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": 937835.933808,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "RT9127": {
+    "distance_accum": 0.4970970000140369,
+    "fuel_accum_gal": 0.13208599999779835,
+    "mpg_current": 8.051205154068208,
+    "window_count": 3,
+    "last_fuel_lvl_pct": 91.2,
+    "last_odometer_mi": 423612.595621,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 5,
+      "fallback": 0
+    }
+  },
+  "SG5760": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "YM6023": {
+    "distance_accum": 44.67657999997027,
+    "fuel_accum_gal": 0.40936945931880553,
+    "mpg_current": 6.35658594578898,
+    "window_count": 2,
+    "last_fuel_lvl_pct": 6.0,
+    "last_odometer_mi": 1330437.45625,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 3,
+      "fallback": 0
+    }
+  },
+  "MJ9547": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "FM3363": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "GC9751": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "LV1422": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "LC6799": {
+    "distance_accum": 51.57378999993671,
+    "fuel_accum_gal": 0.42508799762333094,
+    "mpg_current": 5.864038317039872,
+    "window_count": 7,
+    "last_fuel_lvl_pct": 64.8,
+    "last_odometer_mi": 1040822.52258,
+    "last_timestamp": 1764135435,
+    "fuel_source_stats": {
+      "sensor": 16,
+      "fallback": 53
+    }
+  },
+  "RC6625": {
+    "distance_accum": 1.7398389999871142,
+    "fuel_accum_gal": 0.2641720000101486,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 18.4,
+    "last_odometer_mi": 474448.572695,
+    "last_timestamp": 1764128267,
+    "fuel_source_stats": {
+      "sensor": 1,
+      "fallback": 4
+    }
+  },
+  "FF7702": {
+    "distance_accum": 6.524394999956712,
+    "fuel_accum_gal": 0.07570704384289505,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": 41.6,
+    "last_odometer_mi": 444909.77596,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "OG2033": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "OS3717": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  },
+  "EM8514": {
+    "distance_accum": 0.0,
+    "fuel_accum_gal": 0.0,
+    "mpg_current": null,
+    "window_count": 0,
+    "last_fuel_lvl_pct": null,
+    "last_odometer_mi": null,
+    "last_timestamp": null,
+    "fuel_source_stats": {
+      "sensor": 0,
+      "fallback": 0
+    }
+  }
+}

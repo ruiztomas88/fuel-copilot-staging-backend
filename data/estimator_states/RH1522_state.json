@@ -1,0 +1,26 @@
+{
+  "x": [
+    [
+      50.0
+    ],
+    [
+      0.0
+    ]
+  ],
+  "P": [
+    [
+      10.0,
+      0.0
+    ],
+    [
+      0.0,
+      10.0
+    ]
+  ],
+  "last_timestamp": null,
+  "truck_id": "RH1522",
+  "mpg_current": null,
+  "mpg_distance_accum": 0.0,
+  "mpg_fuel_accum_gal": 0.0,
+  "initialized": false
+}

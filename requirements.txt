@@ -1,35 +1,81 @@
-# FastAPI Backend Requirements
-# Version: 3.10.8
-# Date: December 1, 2025
+# Fuel Copilot - Dependencias Python
 
-# Core FastAPI
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+# ============================================================================
+# CORE DEPENDENCIES (Required)
+# ============================================================================
 
-# Data validation
-pydantic==2.4.2
-
-# WebSockets
-websockets==12.0
-
-# Database
+# Base de datos
 pymysql==1.1.0
 PyMySQL[rsa]==1.1.0
-sqlalchemy==2.0.23
+SQLAlchemy==2.0.23
 
-# Data processing
-pandas>=2.1.0
+# Procesamiento de datos
 numpy>=1.26.0
+pandas>=2.1.0
 
-# Environment variables
+# Gráficos y visualización
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Dashboard web - FastAPI (new)
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Dashboard web - Flask (legacy, keep for compatibility)
+Flask==2.3.3
+Flask-CORS==4.0.0
+Werkzeug==2.3.7
+
+# Configuración
 python-dotenv==1.0.0
+PyYAML==6.0.1
 
-# HTTP client
-httpx==0.25.0
+# Monitoreo y performance
+psutil==5.9.6
 
-# 🆕 v3.10.8: Authentication
-PyJWT==2.8.0
+# Fechas y horas
+python-dateutil==2.8.2
+pytz==2023.3
 
-# CORS
-python-multipart==0.0.6
+# Utilidades
+requests==2.31.0
+tenacity==8.2.3  # Retry with exponential backoff
+twilio==8.10.0   # SMS and WhatsApp alerts
+
+# ============================================================================
+# OPTIONAL: Redis Caching (for production scale)
+# ============================================================================
+# Install with: pip install redis hiredis
+redis==5.0.1
+hiredis==2.2.3  # Performance boost for Redis
+
+# ============================================================================
+# OPTIONAL: Celery + Azure Service Bus (for async processing)
+# ============================================================================
+# Install with: pip install celery azure-servicebus
+celery==5.3.4
+azure-servicebus==7.11.4
+kombu==5.3.4  # Celery dependency
+
+# ============================================================================
+# OPTIONAL: Monitoring & Observability
+# ============================================================================
+# Install with: pip install prometheus-client
+prometheus-client==0.19.0
+
+# ============================================================================
+# OPTIONAL: Testing
+# ============================================================================
+# Install with: pip install pytest pytest-asyncio
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+
+# ============================================================================
+# OPTIONAL: JWT Authentication (Auth0)
+# ============================================================================
+# Install with: pip install python-jose
+python-jose[cryptography]==3.3.0
+cryptography==41.0.7
