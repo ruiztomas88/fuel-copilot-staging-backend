@@ -1,9 +1,6 @@
-# ============================================================================
-# FUEL COPILOT BACKEND - REQUIREMENTS
-# ============================================================================
+# FastAPI Backend Requirements
 # Version: 3.10.8
-# Platform: Windows Azure VM + Linux
-# Date: December 2025
+# Date: December 1, 2025
 
 # Core FastAPI
 fastapi==0.104.1
@@ -31,15 +28,8 @@ python-dotenv==1.0.0
 # HTTP client
 httpx==0.25.0
 
-# Authentication
+# 🆕 v3.10.8: Authentication
 PyJWT==2.8.0
 
-# YAML config
-PyYAML==6.0.1
-
-# Prometheus metrics (optional)
-prometheus-client==0.19.0
-prometheus-fastapi-instrumentator==6.1.0
-
-# Redis cache (optional)
-redis==5.0.1
+# CORS
+python-multipart==0.0.6
