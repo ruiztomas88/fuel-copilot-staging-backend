@@ -1,16 +1,15 @@
 """
-FastAPI Backend for Fuel Copilot Dashboard v3.10.8
-Modern async API with WebSocket support for real-time updates
+FastAPI Backend for Fuel Copilot Dashboard v3.10.9
+Modern async API with HTTP polling (WebSocket removed for simplicity)
 
 🔧 FIX v3.9.3: Migrated from deprecated @app.on_event to lifespan handlers
 🆕 v3.10.8: Added JWT authentication and multi-tenant support
+🆕 v3.10.9: Removed WebSocket - dashboard uses HTTP polling
 """
 
 from contextlib import asynccontextmanager
 from fastapi import (
     FastAPI,
-    WebSocket,
-    WebSocketDisconnect,
     HTTPException,
     Query,
     Depends,
@@ -59,7 +58,6 @@ try:
         Alert,
         KPIData,
         HealthCheck,
-        WebSocketMessage,
         RefuelEvent,
     )
     from .database import db  # CSV-based database (optimized with 30s updates)
@@ -77,7 +75,6 @@ except ImportError:
         Alert,
         KPIData,
         HealthCheck,
-        WebSocketMessage,
         RefuelEvent,
     )
     from database import db  # CSV-based database (optimized with 30s updates)
@@ -207,8 +204,8 @@ Currently no authentication required (internal fleet API).
 No rate limits enforced. Recommended: max 10 req/s per client.
 """,
     version="3.10.2",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
+    docs_url="/fuelAnalytics/api/docs",
+    redoc_url="/fuelAnalytics/api/redoc",
     openapi_tags=[
         {
             "name": "Fleet",
@@ -302,6 +299,8 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3001",
         "http://127.0.0.1:5173",
+        "https://fuelanalytics.fleetbooster.net",
+        "https://fleetbooster.net",
         "https://uninterrogative-unputrefiable-maleah.ngrok-free.dev",  # ngrok tunnel
     ],
     allow_credentials=True,
@@ -311,64 +310,11 @@ app.add_middleware(
 
 
 # ============================================================================
-# WEBSOCKET CONNECTION MANAGER
-# ============================================================================
-
-
-class ConnectionManager:
-    """Manages WebSocket connections for real-time updates"""
-
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        print(f"✅ WebSocket connected. Total: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-            print(f"❌ WebSocket disconnected. Total: {len(self.active_connections)}")
-
-    async def broadcast(self, message: dict):
-        """Send message to all connected clients with robust error handling"""
-        disconnected = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except WebSocketDisconnect:
-                logger.debug("WebSocket disconnected during broadcast")
-                disconnected.append(connection)
-            except RuntimeError as e:
-                if "closed" in str(e).lower() or "websocket" in str(e).lower():
-                    logger.debug(f"Connection closed: {e}")
-                    disconnected.append(connection)
-            except ConnectionResetError:
-                logger.debug("Connection reset by peer")
-                disconnected.append(connection)
-            except Exception as e:
-                logger.warning(f"Error sending to client: {e}")
-                disconnected.append(connection)
-
-        # Remove disconnected clients
-        for conn in disconnected:
-            if conn in self.active_connections:
-                self.active_connections.remove(conn)
-                logger.info(
-                    f"🧹 Cleaned up dead connection. Total: {len(self.active_connections)}"
-                )
-
-
-manager = ConnectionManager()
-
-
-# ============================================================================
 # 🆕 v3.10.8: AUTHENTICATION ENDPOINTS
 # ============================================================================
 
 
-@app.post("/api/auth/login", response_model=Token, tags=["Authentication"])
+@app.post("/fuelAnalytics/api/auth/login", response_model=Token, tags=["Authentication"])
 async def login(credentials: UserLogin):
     """
     Authenticate user and return JWT token.
@@ -408,7 +354,7 @@ async def login(credentials: UserLogin):
     )
 
 
-@app.get("/api/auth/me", tags=["Authentication"])
+@app.get("/fuelAnalytics/api/auth/me", tags=["Authentication"])
 async def get_current_user_info(current_user: TokenData = Depends(require_auth)):
     """Get current authenticated user info."""
     user_data = USERS_DB.get(current_user.username, {})
@@ -426,7 +372,7 @@ async def get_current_user_info(current_user: TokenData = Depends(require_auth))
     }
 
 
-@app.post("/api/auth/refresh", response_model=Token, tags=["Authentication"])
+@app.post("/fuelAnalytics/api/auth/refresh", response_model=Token, tags=["Authentication"])
 async def refresh_token(current_user: TokenData = Depends(require_auth)):
     """Refresh JWT token before it expires."""
     user_data = USERS_DB.get(current_user.username)
@@ -460,7 +406,7 @@ async def refresh_token(current_user: TokenData = Depends(require_auth)):
 # ============================================================================
 
 
-@app.get("/api/admin/carriers", tags=["Admin"])
+@app.get("/fuelAnalytics/api/admin/carriers", tags=["Admin"])
 async def list_carriers(current_user: TokenData = Depends(require_super_admin)):
     """
     List all carriers (super_admin only).
@@ -504,7 +450,7 @@ async def list_carriers(current_user: TokenData = Depends(require_super_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/admin/users", tags=["Admin"])
+@app.get("/fuelAnalytics/api/admin/users", tags=["Admin"])
 async def list_users(current_user: TokenData = Depends(require_super_admin)):
     """List all users (super_admin only)."""
     users = []
@@ -522,7 +468,7 @@ async def list_users(current_user: TokenData = Depends(require_super_admin)):
     return {"users": users, "total": len(users)}
 
 
-@app.get("/api/admin/stats", tags=["Admin"])
+@app.get("/fuelAnalytics/api/admin/stats", tags=["Admin"])
 async def get_admin_stats(current_user: TokenData = Depends(require_super_admin)):
     """
     Get system-wide statistics (super_admin only).
@@ -576,7 +522,7 @@ async def get_admin_stats(current_user: TokenData = Depends(require_super_admin)
 # ============================================================================
 
 
-@app.get("/api/status", response_model=HealthCheck, tags=["Health"])
+@app.get("/fuelAnalytics/api/status", response_model=HealthCheck, tags=["Health"])
 async def api_status():
     """Quick API status check. Returns basic health info."""
     trucks = db.get_all_trucks()
@@ -588,7 +534,7 @@ async def api_status():
     }
 
 
-@app.get("/api/cache/stats", tags=["Health"])
+@app.get("/fuelAnalytics/api/cache/stats", tags=["Health"])
 async def get_cache_stats():
     """
     Get Redis cache statistics and performance metrics.
@@ -608,7 +554,7 @@ async def get_cache_stats():
         return {"available": False, "error": str(e)}
 
 
-@app.get("/api/health", response_model=HealthCheck, tags=["Health"])
+@app.get("/fuelAnalytics/api/health", response_model=HealthCheck, tags=["Health"])
 async def health_check():
     """
     Comprehensive system health check.
@@ -653,7 +599,6 @@ async def health_check():
         "mysql_status": mysql_status,
         "cache_status": cache_status,
         "data_freshness": "fresh" if data_fresh else "stale",
-        "websocket_connections": len(manager.active_connections),
     }
 
     if bulk_stats:
@@ -667,7 +612,7 @@ async def health_check():
 # ============================================================================
 
 
-@app.get("/api/fleet", response_model=FleetSummary, tags=["Fleet"])
+@app.get("/fuelAnalytics/api/fleet", response_model=FleetSummary, tags=["Fleet"])
 async def get_fleet_summary():
     """
     Get fleet-wide summary statistics.
@@ -696,7 +641,7 @@ async def get_fleet_summary():
         )
 
 
-@app.get("/api/trucks", response_model=List[str], tags=["Trucks"])
+@app.get("/fuelAnalytics/api/trucks", response_model=List[str], tags=["Trucks"])
 async def get_all_trucks():
     """
     Get list of all available truck IDs.
@@ -715,7 +660,7 @@ async def get_all_trucks():
 # ============================================================================
 
 
-@app.get("/api/trucks/{truck_id}", tags=["Trucks"])
+@app.get("/fuelAnalytics/api/trucks/{truck_id}", tags=["Trucks"])
 async def get_truck_detail(truck_id: str):
     """
     Get detailed information for a specific truck.
@@ -793,7 +738,7 @@ async def get_truck_detail(truck_id: str):
 
 
 @app.get(
-    "/api/trucks/{truck_id}/refuels", response_model=List[RefuelEvent], tags=["Trucks"]
+    "/fuelAnalytics/api/trucks/{truck_id}/refuels", response_model=List[RefuelEvent], tags=["Trucks"]
 )
 async def get_truck_refuel_history(
     truck_id: str,
@@ -843,7 +788,7 @@ def sanitize_nan(value):
     return value
 
 
-@app.get("/api/trucks/{truck_id}/history", response_model=List[HistoricalRecord])
+@app.get("/fuelAnalytics/api/trucks/{truck_id}/history", response_model=List[HistoricalRecord])
 async def get_truck_history(
     truck_id: str,
     hours: int = Query(
@@ -893,7 +838,7 @@ async def get_truck_history(
 # ============================================================================
 
 
-@app.get("/api/efficiency", response_model=List[EfficiencyRanking], tags=["Efficiency"])
+@app.get("/fuelAnalytics/api/efficiency", response_model=List[EfficiencyRanking], tags=["Efficiency"])
 async def get_efficiency_rankings():
     """
     Get efficiency rankings for all active trucks.
@@ -948,7 +893,7 @@ async def get_efficiency_rankings():
 # ============================================================================
 
 
-@app.get("/api/refuels", response_model=List[RefuelEvent])
+@app.get("/fuelAnalytics/api/refuels", response_model=List[RefuelEvent])
 async def get_all_refuels(
     days: int = Query(
         7, ge=1, le=30, description="Days of refuel history to fetch (1-30)"
@@ -978,7 +923,7 @@ async def get_all_refuels(
         raise HTTPException(status_code=500, detail=f"Error fetching refuels: {str(e)}")
 
 
-@app.get("/api/refuels/analytics", tags=["Refuels"])
+@app.get("/fuelAnalytics/api/refuels/analytics", tags=["Refuels"])
 async def get_refuel_analytics(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze")
 ):
@@ -1007,7 +952,7 @@ async def get_refuel_analytics(
         )
 
 
-@app.get("/api/theft-analysis", tags=["Security"])
+@app.get("/fuelAnalytics/api/theft-analysis", tags=["Security"])
 async def get_theft_analysis(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze")
 ):
@@ -1042,7 +987,7 @@ async def get_theft_analysis(
 # ============================================================================
 
 
-@app.get("/api/alerts", response_model=List[Alert], tags=["Alerts"])
+@app.get("/fuelAnalytics/api/alerts", response_model=List[Alert], tags=["Alerts"])
 async def get_alerts(
     severity: Optional[str] = Query(
         None, description="Filter by severity (critical, warning, info)"
@@ -1075,7 +1020,7 @@ async def get_alerts(
 # ============================================================================
 
 
-@app.get("/api/kpis", tags=["KPIs"])
+@app.get("/fuelAnalytics/api/kpis", tags=["KPIs"])
 async def get_kpis(
     days: int = Query(1, ge=1, le=90, description="Number of days to analyze")
 ):
@@ -1139,7 +1084,7 @@ async def get_kpis(
 # ============================================================================
 
 
-@app.get("/api/loss-analysis")
+@app.get("/fuelAnalytics/api/loss-analysis")
 async def get_loss_analysis(days: int = 1):
     """
     🆕 v3.9.0: Fuel Loss Analysis by Root Cause
@@ -1177,7 +1122,7 @@ async def get_loss_analysis(days: int = 1):
 # ============================================================================
 
 
-@app.get("/api/analytics/driver-scorecard")
+@app.get("/fuelAnalytics/api/analytics/driver-scorecard")
 async def get_driver_scorecard_endpoint(
     days: int = Query(default=7, ge=1, le=30, description="Days to analyze")
 ):
@@ -1207,7 +1152,7 @@ async def get_driver_scorecard_endpoint(
         )
 
 
-@app.get("/api/analytics/enhanced-kpis")
+@app.get("/fuelAnalytics/api/analytics/enhanced-kpis")
 async def get_enhanced_kpis_endpoint(
     days: int = Query(default=1, ge=1, le=30, description="Days to analyze")
 ):
@@ -1235,7 +1180,7 @@ async def get_enhanced_kpis_endpoint(
         raise HTTPException(status_code=500, detail=f"Error in enhanced KPIs: {str(e)}")
 
 
-@app.get("/api/analytics/enhanced-loss-analysis")
+@app.get("/fuelAnalytics/api/analytics/enhanced-loss-analysis")
 async def get_enhanced_loss_analysis_endpoint(
     days: int = Query(default=1, ge=1, le=30, description="Days to analyze")
 ):
@@ -1265,286 +1210,6 @@ async def get_enhanced_loss_analysis_endpoint(
         raise HTTPException(
             status_code=500, detail=f"Error in enhanced loss analysis: {str(e)}"
         )
-
-
-# ============================================================================
-# WEBSOCKET FOR REAL-TIME UPDATES
-# ============================================================================
-
-
-@app.websocket("/ws/updates")
-async def websocket_endpoint(websocket: WebSocket):
-    """
-    WebSocket endpoint for real-time updates with intelligent diff
-
-    Only sends changes instead of full data every time
-    Reduces bandwidth and improves dashboard performance
-
-    Features:
-    - Sends full data on first connection
-    - Sends only changes (diffs) on subsequent updates
-    - Detects new/removed trucks
-    - Tracks alert changes
-    - Robust error handling and task cleanup
-    """
-    await manager.connect(websocket)
-
-    update_task = None
-    receive_task = None
-    shutdown_event = asyncio.Event()
-
-    # Track previous state for diff calculation
-    previous_fleet = None
-    previous_alerts = None
-
-    try:
-        # Create a task for sending periodic updates
-        async def send_updates():
-            nonlocal previous_fleet, previous_alerts
-
-            first_update = True
-            consecutive_errors = 0
-            max_consecutive_errors = 3
-
-            while not shutdown_event.is_set():
-                try:
-                    fleet_summary = db.get_fleet_summary()
-                    alerts = db.get_alerts()
-
-                    # On first update, send full data
-                    if first_update or previous_fleet is None:
-                        message = {
-                            "type": "fleet_update",
-                            "update_type": "full",
-                            "data": {"fleet": fleet_summary, "alerts": alerts},
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                        previous_fleet = fleet_summary
-                        previous_alerts = alerts
-                        first_update = False
-                    else:
-                        # Calculate diff for subsequent updates
-                        fleet_changes = calculate_fleet_diff(
-                            previous_fleet, fleet_summary
-                        )
-                        alert_changes = calculate_alert_diff(previous_alerts, alerts)
-
-                        # Only send if there are changes
-                        if fleet_changes or alert_changes:
-                            message = {
-                                "type": "fleet_update",
-                                "update_type": "diff",
-                                "changes": {
-                                    "fleet": fleet_changes,
-                                    "alerts": alert_changes,
-                                },
-                                "timestamp": datetime.now().isoformat(),
-                            }
-                        else:
-                            # No changes, send heartbeat only
-                            message = {
-                                "type": "heartbeat",
-                                "timestamp": datetime.now().isoformat(),
-                            }
-
-                        previous_fleet = fleet_summary
-                        previous_alerts = alerts
-
-                    # Send message with error handling
-                    try:
-                        await websocket.send_json(message)
-                        consecutive_errors = 0  # Reset on success
-                    except (WebSocketDisconnect, RuntimeError) as e:
-                        logger.info(f"WebSocket disconnected during send: {e}")
-                        break
-                    except Exception as e:
-                        consecutive_errors += 1
-                        logger.error(
-                            f"Error sending WebSocket message ({consecutive_errors}/{max_consecutive_errors}): {e}"
-                        )
-                        if consecutive_errors >= max_consecutive_errors:
-                            logger.error(
-                                "Max consecutive errors reached, stopping updates"
-                            )
-                            break
-
-                    # Wait for next update or shutdown
-                    try:
-                        await asyncio.wait_for(shutdown_event.wait(), timeout=30.0)
-                        break  # Shutdown requested
-                    except asyncio.TimeoutError:
-                        continue  # Continue with next update
-
-                except asyncio.CancelledError:
-                    logger.info("Send updates task cancelled")
-                    break
-                except Exception as e:
-                    logger.error(f"Unexpected error in send_updates: {e}")
-                    consecutive_errors += 1
-                    if consecutive_errors >= max_consecutive_errors:
-                        break
-                    await asyncio.sleep(5)  # Backoff on error
-
-        # Create a task for receiving messages (pings)
-        async def receive_messages():
-            nonlocal previous_fleet
-
-            while not shutdown_event.is_set():
-                try:
-                    data = await websocket.receive_text()
-                    try:
-                        message = json.loads(data)
-                    except json.JSONDecodeError:
-                        logger.warning("Invalid JSON received from WebSocket client")
-                        continue
-
-                    # Respond to ping with pong
-                    if message.get("type") == "ping":
-                        try:
-                            await websocket.send_json({"type": "pong"})
-                        except Exception as e:
-                            logger.warning(f"Failed to send pong: {e}")
-                            break
-
-                    # Handle force full update request
-                    elif message.get("type") == "request_full_update":
-                        previous_fleet = None  # Force full update on next cycle
-
-                except WebSocketDisconnect:
-                    logger.info("WebSocket disconnected")
-                    break
-                except asyncio.CancelledError:
-                    logger.info("Receive messages task cancelled")
-                    break
-                except Exception as e:
-                    logger.error(f"Error receiving message: {e}")
-                    break
-
-        # Run both tasks concurrently
-        update_task = asyncio.create_task(send_updates())
-        receive_task = asyncio.create_task(receive_messages())
-
-        # Wait for either task to complete (indicates disconnection)
-        done, pending = await asyncio.wait(
-            [update_task, receive_task], return_when=asyncio.FIRST_COMPLETED
-        )
-
-        # Signal shutdown to both tasks
-        shutdown_event.set()
-
-    except WebSocketDisconnect:
-        logger.info("Client disconnected normally")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}", exc_info=True)
-    finally:
-        # Ensure shutdown is signaled
-        shutdown_event.set()
-
-        # Cancel and cleanup tasks properly
-        tasks_to_cleanup = []
-        if update_task and not update_task.done():
-            update_task.cancel()
-            tasks_to_cleanup.append(update_task)
-        if receive_task and not receive_task.done():
-            receive_task.cancel()
-            tasks_to_cleanup.append(receive_task)
-
-        # Wait for tasks to finish cancellation
-        if tasks_to_cleanup:
-            await asyncio.gather(*tasks_to_cleanup, return_exceptions=True)
-
-        # Disconnect from manager
-        manager.disconnect(websocket)
-        logger.info(
-            f"WebSocket cleanup complete. Active connections: {len(manager.active_connections)}"
-        )
-
-
-def calculate_fleet_diff(previous: Dict, current: Dict) -> Dict:
-    """
-    Calculate changes between previous and current fleet data
-    Returns dict with changed trucks only
-
-    🔧 FIX v3.9.1: Changed 'trucks' to 'truck_details' (correct field name)
-    """
-    if not previous or not current:
-        return None
-
-    changes = {
-        "updated_trucks": [],
-        "new_trucks": [],
-        "removed_trucks": [],
-        "summary_changed": False,
-    }
-
-    # 🔧 FIX: Use 'truck_details' instead of 'trucks'
-    prev_trucks = {t["truck_id"]: t for t in previous.get("truck_details", [])}
-    curr_trucks = {t["truck_id"]: t for t in current.get("truck_details", [])}
-
-    # Find updated and new trucks
-    for truck_id, truck_data in curr_trucks.items():
-        if truck_id in prev_trucks:
-            # Check if truck data changed
-            if truck_data != prev_trucks[truck_id]:
-                changes["updated_trucks"].append(truck_data)
-        else:
-            changes["new_trucks"].append(truck_data)
-
-    # Find removed trucks
-    for truck_id in prev_trucks:
-        if truck_id not in curr_trucks:
-            changes["removed_trucks"].append(truck_id)
-
-    # Check summary changes (active_trucks, etc.)
-    if (
-        previous.get("active_trucks") != current.get("active_trucks")
-        or previous.get("offline_trucks") != current.get("offline_trucks")
-        or previous.get("critical_alerts") != current.get("critical_alerts")
-    ):
-        changes["summary_changed"] = True
-        changes["summary"] = {
-            "active_trucks": current.get("active_trucks"),
-            "offline_trucks": current.get("offline_trucks"),
-            "critical_alerts": current.get("critical_alerts"),
-            "total_trucks": current.get("total_trucks"),
-        }
-
-    # Return None if no changes
-    if (
-        not changes["updated_trucks"]
-        and not changes["new_trucks"]
-        and not changes["removed_trucks"]
-        and not changes["summary_changed"]
-    ):
-        return None
-
-    return changes
-
-
-def calculate_alert_diff(previous: List, current: List) -> Dict:
-    """
-    Calculate changes in alerts
-    Returns dict with new and resolved alerts
-    """
-    if previous is None:
-        return None
-
-    prev_alert_ids = {f"{a['truck_id']}_{a['type']}" for a in previous}
-    curr_alert_ids = {f"{a['truck_id']}_{a['type']}" for a in current}
-
-    new_alerts = [
-        a for a in current if f"{a['truck_id']}_{a['type']}" not in prev_alert_ids
-    ]
-    resolved_alerts = list(prev_alert_ids - curr_alert_ids)
-
-    if not new_alerts and not resolved_alerts:
-        return None
-
-    return {
-        "new_alerts": new_alerts,
-        "resolved_alerts": resolved_alerts,
-        "total_count": len(current),
-    }
 
 
 # ============================================================================
@@ -1580,14 +1245,14 @@ if FRONTEND_DIR.exists():
     print(f"📦 Serving frontend from: {FRONTEND_DIR}")
 
 
-# Root route - serve frontend (lower priority than /api/health)
+# Root route - serve frontend (lower priority than /fuelAnalytics/api/health)
 @app.get("/", include_in_schema=False)
 async def root():
     """Serve React frontend at root"""
     index_file = FRONTEND_DIR / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
-    return {"message": "Fuel Copilot API v3.1.0", "docs": "/api/docs"}
+    return {"message": "Fuel Copilot API v3.1.0", "docs": "/fuelAnalytics/api/docs"}
 
 
 # Catch-all route for React Router (must be AFTER all API routes)
@@ -1615,7 +1280,7 @@ async def catch_all_routes(full_path: str):
 # ============================================================================
 
 
-@app.get("/api/trucks/{truck_id}/sensor-history")
+@app.get("/fuelAnalytics/api/trucks/{truck_id}/sensor-history")
 async def get_truck_sensor_history(
     truck_id: str,
     hours: int = Query(default=48, ge=1, le=168),
@@ -1649,7 +1314,7 @@ async def get_truck_sensor_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/trucks/{truck_id}/fuel-trend")
+@app.get("/fuelAnalytics/api/trucks/{truck_id}/fuel-trend")
 async def get_truck_fuel_trend(
     truck_id: str,
     hours: int = Query(default=48, ge=1, le=168),
@@ -1666,7 +1331,7 @@ async def get_truck_fuel_trend(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/fleet/sensor-health")
+@app.get("/fuelAnalytics/api/fleet/sensor-health")
 async def get_fleet_sensor_health():
     """
     Check sensor health status for entire fleet
@@ -1720,7 +1385,7 @@ except ImportError as e:
     logger.warning(f"⚠️ Truck Health Monitor not available: {e}")
 
 
-@app.get("/api/health/truck/{truck_id}", tags=["Health Monitoring"])
+@app.get("/fuelAnalytics/api/health/truck/{truck_id}", tags=["Health Monitoring"])
 async def get_truck_health_report(truck_id: str):
     """
     Get comprehensive health report for a specific truck.
@@ -1761,7 +1426,7 @@ async def get_truck_health_report(truck_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/health/fleet/summary", tags=["Health Monitoring"])
+@app.get("/fuelAnalytics/api/health/fleet/summary", tags=["Health Monitoring"])
 async def get_fleet_health_summary():
     """
     Get health summary for entire fleet.
@@ -1788,7 +1453,7 @@ async def get_fleet_health_summary():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/health/truck/{truck_id}/alerts", tags=["Health Monitoring"])
+@app.get("/fuelAnalytics/api/health/truck/{truck_id}/alerts", tags=["Health Monitoring"])
 async def get_truck_health_alerts(
     truck_id: str,
     hours: int = Query(default=24, ge=1, le=168, description="Hours of alert history"),
@@ -1818,7 +1483,7 @@ async def get_truck_health_alerts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/health/record", tags=["Health Monitoring"])
+@app.post("/fuelAnalytics/api/health/record", tags=["Health Monitoring"])
 async def record_health_data(
     truck_id: str,
     coolant_temp: Optional[float] = None,
@@ -1863,7 +1528,7 @@ async def record_health_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/health/sensors", tags=["Health Monitoring"])
+@app.get("/fuelAnalytics/api/health/sensors", tags=["Health Monitoring"])
 async def get_monitored_sensors():
     """
     Get list of monitored sensors and their configurations.

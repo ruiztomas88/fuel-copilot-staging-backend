@@ -663,7 +663,7 @@ def load_truck_config(yaml_path: str = "tanks.yaml") -> Dict[str, Dict]:
         logger.error(f"❌ tanks.yaml not found at {yaml_path}")
         return {}
 
-    with open(yaml_file, "r") as f:
+    with open(yaml_file, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     trucks = config.get("trucks", {})

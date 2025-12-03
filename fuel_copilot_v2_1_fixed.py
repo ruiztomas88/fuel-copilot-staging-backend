@@ -3488,6 +3488,13 @@ def main():
         logger.info("💾 Finalizing pending refuels...")
         flush_stale_pending_refuels(tanks_config, max_age_minutes=0)  # Force flush all
 
+        # 🆕 v3.11.6: Flush any pending MySQL records before shutdown
+        try:
+            from bulk_mysql_handler import flush_pending_records
+            flush_pending_records()
+        except Exception as flush_err:
+            logger.warning(f"⚠️ Could not flush pending MySQL records: {flush_err}")
+
         # 🆕 v3.11.0: Save all states before shutdown
         logger.info("💾 Saving states before shutdown...")
         save_mpg_states(mpg_states)
@@ -3503,6 +3510,12 @@ def main():
             reporter.close()
     except Exception as e:
         logger.critical(f"🔥 FATAL CRASH: {e}", exc_info=True)
+        try:
+            # 🆕 v3.11.6: Flush pending MySQL records even on crash
+            from bulk_mysql_handler import flush_pending_records
+            flush_pending_records()
+        except Exception as flush_err:
+            logger.warning(f"⚠️ Could not flush pending MySQL records: {flush_err}")
         try:
             # 🆕 v3.11.0: Try to save states even on crash
             save_mpg_states(mpg_states)

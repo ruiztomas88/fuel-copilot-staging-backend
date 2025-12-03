@@ -199,12 +199,12 @@ class BulkMySQLHandler:
                     # Build UPSERT statement (INSERT ON DUPLICATE KEY UPDATE)
                     stmt = mysql_insert(FuelMetrics).values(**values)
 
-                    # On duplicate key, update all fields except primary key
-                    # 🔧 v3.10.8: carrier_id now included in UPSERT for multi-tenant support
+                    # On duplicate key, update only the fields we're actually inserting
+                    # 🔧 Fix: Only update columns that are in the values dict
                     update_dict = {
-                        col.name: stmt.inserted[col.name]
-                        for col in FuelMetrics.__table__.columns
-                        if col.name
+                        col_name: stmt.inserted[col_name]
+                        for col_name in values.keys()
+                        if col_name
                         not in (
                             "id",
                             "truck_id",
@@ -261,19 +261,21 @@ class BulkMySQLHandler:
                             # Simplified retry - just try single inserts
                             from tools.database_models import FuelMetrics
 
-                            stmt = mysql_insert(FuelMetrics).values(
-                                truck_id=truck_id,
-                                timestamp_utc=row_data.get("timestamp_utc"),
+                            values = {
+                                "truck_id": truck_id,
+                                "timestamp_utc": row_data.get("timestamp_utc"),
                                 **{
                                     k: v
                                     for k, v in row_data.items()
                                     if k not in ("truck_id", "timestamp_utc")
                                 },
-                            )
+                            }
+                            stmt = mysql_insert(FuelMetrics).values(**values)
+                            # 🔧 Fix: Only update columns that are in the values dict
                             update_dict = {
-                                col.name: stmt.inserted[col.name]
-                                for col in FuelMetrics.__table__.columns
-                                if col.name
+                                col_name: stmt.inserted[col_name]
+                                for col_name in values.keys()
+                                if col_name
                                 not in (
                                     "id",
                                     "truck_id",
@@ -390,3 +392,26 @@ def save_to_mysql_bulk(truck_id: str, row_data: Dict) -> bool:
     """
     handler = get_bulk_handler()
     return handler.add_record(truck_id, row_data)
+
+
+def flush_pending_records() -> bool:
+    """
+    Force flush all pending records to MySQL.
+    Call this during shutdown to ensure no records are lost.
+
+    Returns:
+        True if flush successful or no pending records, False if error
+    """
+    global _bulk_handler_instance
+
+    with _handler_lock:
+        if _bulk_handler_instance is not None:
+            pending_count = len(_bulk_handler_instance.pending_records)
+            if pending_count > 0:
+                logger.info(f"💾 Flushing {pending_count} pending MySQL records before shutdown...")
+                result = _bulk_handler_instance._flush_batch()
+                logger.info(f"✅ Shutdown flush complete: {_bulk_handler_instance.total_batches} batches, {_bulk_handler_instance.successful_records} records saved")
+                return result
+            else:
+                logger.info("✅ No pending MySQL records to flush")
+        return True

@@ -261,14 +261,6 @@ class RefuelEvent(BaseModel):
     )
 
 
-class WebSocketMessage(BaseModel):
-    """WebSocket message format"""
-
-    type: str  # "fleet_update", "truck_update", "alert"
-    data: Dict[str, Any]
-    timestamp: datetime
-
-
 class HealthCheck(BaseModel):
     """API health check response"""
 
