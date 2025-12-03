@@ -1,17 +1,17 @@
 {
   "truck_id": "JC9352",
   "initialized": true,
-  "level_liters": 641.4807113010764,
-  "level_pct": 84.730901793876,
-  "consumption_lph": 11.4970968,
-  "drift_pct": 2.330901793875995,
-  "P": 0.04146982497043688,
-  "L": 641.4807113010764,
+  "level_liters": 641.2868571742613,
+  "level_pct": 84.70529629289656,
+  "consumption_lph": 11.4349597,
+  "drift_pct": 2.305296292896557,
+  "P": 0.04153851113723008,
+  "L": 641.2868571742613,
   "P_L": 20.0,
   "last_fuel_lvl_pct": 82.4,
-  "last_timestamp": "2025-12-03T16:58:26.846119+00:00",
-  "saved_at": "2025-12-03T16:58:26.846119+00:00",
+  "last_timestamp": "2025-12-03T17:00:41.936049+00:00",
+  "saved_at": "2025-12-03T17:00:41.936049+00:00",
   "mpg_current": 6.449095072724241,
-  "mpg_distance_accum": 21.74798500002362,
-  "mpg_fuel_accum_gal": 1.4846723565831268
+  "mpg_distance_accum": 0.0,
+  "mpg_fuel_accum_gal": 0.0
 }
