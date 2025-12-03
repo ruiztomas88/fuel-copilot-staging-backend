@@ -138,9 +138,23 @@ class DatabaseManager:
         # Try MySQL first
         if self.mysql_available:
             try:
-                df = self.mysql_get_latest(hours_back=24)
-                if not df.empty:
-                    trucks = sorted(df["truck_id"].unique().tolist())
+                # 🔧 FIX v3.11.1: Query truck IDs directly from fuel_metrics
+                try:
+                    from database_mysql import get_sqlalchemy_engine
+                except ImportError:
+                    from .database_mysql import get_sqlalchemy_engine
+                
+                from sqlalchemy import text
+                
+                engine = get_sqlalchemy_engine()
+                with engine.connect() as conn:
+                    result = conn.execute(text("""
+                        SELECT DISTINCT truck_id 
+                        FROM fuel_metrics 
+                        WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
+                        ORDER BY truck_id
+                    """))
+                    trucks = [row[0] for row in result]
                     logger.info(f"✅ Found {len(trucks)} trucks in MySQL")
                     return trucks
             except Exception as e:
