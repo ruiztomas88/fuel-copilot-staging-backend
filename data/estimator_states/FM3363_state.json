@@ -1,26 +1,17 @@
 {
-  "x": [
-    [
-      7.197180920282808
-    ],
-    [
-      2.8108664837716234e-05
-    ]
-  ],
-  "P": [
-    [
-      740194328.8929994,
-      -87817.82999999996
-    ],
-    [
-      -87817.82999999996,
-      10.629999999999987
-    ]
-  ],
-  "last_timestamp": "2025-11-25T16:26:33+00:00",
   "truck_id": "FM3363",
+  "initialized": false,
+  "level_liters": 0.0,
+  "level_pct": 0.0,
+  "consumption_lph": 0.0,
+  "drift_pct": 0.0,
+  "P": 1.0,
+  "L": null,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": null,
+  "last_timestamp": "2025-12-03T16:46:11.379042+00:00",
+  "saved_at": "2025-12-03T16:46:11.379042+00:00",
   "mpg_current": null,
   "mpg_distance_accum": 0.0,
-  "mpg_fuel_accum_gal": 0.0,
-  "initialized": true
+  "mpg_fuel_accum_gal": 0.0
 }

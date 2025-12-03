@@ -1,26 +1,17 @@
 {
-  "x": [
-    [
-      50.0
-    ],
-    [
-      0.0
-    ]
-  ],
-  "P": [
-    [
-      10.0,
-      0.0
-    ],
-    [
-      0.0,
-      10.0
-    ]
-  ],
-  "last_timestamp": null,
   "truck_id": "FF7702",
-  "mpg_current": null,
-  "mpg_distance_accum": 0.0,
-  "mpg_fuel_accum_gal": 0.0,
-  "initialized": false
+  "initialized": true,
+  "level_liters": 706.9270990228183,
+  "level_pct": 93.37548198642392,
+  "consumption_lph": 0.0,
+  "drift_pct": 0.5754819864239238,
+  "P": 0.10565544405969281,
+  "L": 706.9270990228183,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 92.8,
+  "last_timestamp": "2025-12-03T16:46:11.384040+00:00",
+  "saved_at": "2025-12-03T16:46:11.384040+00:00",
+  "mpg_current": 7.260016357333868,
+  "mpg_distance_accum": 7.456452000013087,
+  "mpg_fuel_accum_gal": 6.4683176661758734
 }

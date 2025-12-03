@@ -1,26 +1,17 @@
 {
-  "x": [
-    [
-      71.35465853132526
-    ],
-    [
-      2.7139400532967398e-05
-    ]
-  ],
-  "P": [
-    [
-      1613934058.0919993,
-      -130729.19999999991
-    ],
-    [
-      -130729.19999999991,
-      10.91999999999998
-    ]
-  ],
-  "last_timestamp": "2025-11-25T16:26:32+00:00",
   "truck_id": "FS7166",
-  "mpg_current": 4.725445166093348,
-  "mpg_distance_accum": 1.5057994128437713,
-  "mpg_fuel_accum_gal": 1.5225533985515645,
-  "initialized": true
+  "initialized": false,
+  "level_liters": 0.0,
+  "level_pct": 0.0,
+  "consumption_lph": 0.0,
+  "drift_pct": 0.0,
+  "P": 1.0,
+  "L": null,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": null,
+  "last_timestamp": "2025-12-03T16:46:11.369842+00:00",
+  "saved_at": "2025-12-03T16:46:11.369842+00:00",
+  "mpg_current": null,
+  "mpg_distance_accum": 2.6211106482442945,
+  "mpg_fuel_accum_gal": 0.9142488054276238
 }

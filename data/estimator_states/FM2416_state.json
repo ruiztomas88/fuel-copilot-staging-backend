@@ -1,26 +1,17 @@
 {
-  "x": [
-    [
-      46.0421575581459
-    ],
-    [
-      0.025453507429249525
-    ]
-  ],
-  "P": [
-    [
-      0.9933289446075109,
-      -0.008167900212202523
-    ],
-    [
-      -0.008167900212202373,
-      0.010134419061655965
-    ]
-  ],
-  "last_timestamp": "2025-11-25T16:26:23+00:00",
   "truck_id": "FM2416",
-  "mpg_current": 6.123825110476584,
-  "mpg_distance_accum": 9.189225811744109,
-  "mpg_fuel_accum_gal": 16.421752653841345,
-  "initialized": true
+  "initialized": false,
+  "level_liters": 0.0,
+  "level_pct": 0.0,
+  "consumption_lph": 0.0,
+  "drift_pct": 0.0,
+  "P": 1.0,
+  "L": null,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": null,
+  "last_timestamp": "2025-12-03T16:46:11.357836+00:00",
+  "saved_at": "2025-12-03T16:46:11.357836+00:00",
+  "mpg_current": 6.1934474322867175,
+  "mpg_distance_accum": 0.90098795,
+  "mpg_fuel_accum_gal": 0.1453206370967742
 }

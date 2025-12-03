@@ -1,26 +1,17 @@
 {
-  "x": [
-    [
-      87.20866386871627
-    ],
-    [
-      0.011660512864815861
-    ]
-  ],
-  "P": [
-    [
-      0.9932506286539177,
-      -0.00818396817831534
-    ],
-    [
-      -0.008183968178315348,
-      0.010135453374066693
-    ]
-  ],
-  "last_timestamp": "2025-11-25T16:26:28+00:00",
   "truck_id": "SG5760",
-  "mpg_current": 4.395596368245618,
-  "mpg_distance_accum": 1.081085499288747,
-  "mpg_fuel_accum_gal": 1.5653427050265534,
-  "initialized": true
+  "initialized": false,
+  "level_liters": 0.0,
+  "level_pct": 0.0,
+  "consumption_lph": 0.0,
+  "drift_pct": 0.0,
+  "P": 1.0,
+  "L": null,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": null,
+  "last_timestamp": "2025-12-03T16:46:11.374844+00:00",
+  "saved_at": "2025-12-03T16:46:11.374844+00:00",
+  "mpg_current": null,
+  "mpg_distance_accum": 0.0,
+  "mpg_fuel_accum_gal": 0.0
 }

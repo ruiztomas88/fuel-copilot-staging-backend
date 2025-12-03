@@ -1,0 +1,17 @@
+{
+  "truck_id": "EM8514",
+  "initialized": false,
+  "level_liters": 0.0,
+  "level_pct": 0.0,
+  "consumption_lph": 0.0,
+  "drift_pct": 0.0,
+  "P": 1.0,
+  "L": null,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": null,
+  "last_timestamp": "2025-12-03T16:46:11.387040+00:00",
+  "saved_at": "2025-12-03T16:46:11.387040+00:00",
+  "mpg_current": null,
+  "mpg_distance_accum": 0.0,
+  "mpg_fuel_accum_gal": 0.0
+}

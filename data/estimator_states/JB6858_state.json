@@ -1,26 +1,17 @@
 {
-  "x": [
-    [
-      50.0
-    ],
-    [
-      0.0
-    ]
-  ],
-  "P": [
-    [
-      10.0,
-      0.0
-    ],
-    [
-      0.0,
-      10.0
-    ]
-  ],
-  "last_timestamp": null,
   "truck_id": "JB6858",
-  "mpg_current": null,
-  "mpg_distance_accum": 0.0,
-  "mpg_fuel_accum_gal": 0.0,
-  "initialized": false
+  "initialized": true,
+  "level_liters": 155.1871223912253,
+  "level_pct": 20.498114121522864,
+  "consumption_lph": 17.7729439,
+  "drift_pct": -0.30466027385820027,
+  "P": 0.08800393014579087,
+  "L": 155.1871223912253,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 21.2,
+  "last_timestamp": "2025-12-03T16:46:11.360836+00:00",
+  "saved_at": "2025-12-03T16:46:11.360836+00:00",
+  "mpg_current": 6.6594288134817745,
+  "mpg_distance_accum": 7.083629000000656,
+  "mpg_fuel_accum_gal": 0.4706060541218344
 }

@@ -1,26 +1,17 @@
 {
-  "x": [
-    [
-      50.0
-    ],
-    [
-      0.0
-    ]
-  ],
-  "P": [
-    [
-      10.0,
-      0.0
-    ],
-    [
-      0.0,
-      10.0
-    ]
-  ],
-  "last_timestamp": null,
   "truck_id": "JR7099",
+  "initialized": true,
+  "level_liters": 319.2072337859887,
+  "level_pct": 42.16294629180386,
+  "consumption_lph": 0.0,
+  "drift_pct": -0.6370537081961345,
+  "P": 0.1472316872284731,
+  "L": 319.2072337859887,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 42.8,
+  "last_timestamp": "2025-12-03T16:46:11.362845+00:00",
+  "saved_at": "2025-12-03T16:46:11.362845+00:00",
   "mpg_current": null,
-  "mpg_distance_accum": 0.0,
-  "mpg_fuel_accum_gal": 0.0,
-  "initialized": false
+  "mpg_distance_accum": 9.320566000067629,
+  "mpg_fuel_accum_gal": 10.233971937004222
 }
