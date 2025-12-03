@@ -664,7 +664,7 @@ async def get_all_trucks():
 @app.get("/fuelAnalytics/api/trucks/{truck_id}", tags=["Trucks"])
 async def get_truck_detail(truck_id: str):
     """
-    Get  detailed information for a specific truck.
+    Get a detailed information for a specific truck.
 
     Returns complete real-time data including:
     - Fuel level (sensor and Kalman-estimated)
