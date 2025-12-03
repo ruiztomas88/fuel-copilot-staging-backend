@@ -167,8 +167,10 @@ def sync_cycle(reader: WialonReader, local_conn):
                 speed = sensor_data.get("speed")
                 fuel = sensor_data.get("fuel_lvl")
                 status = "🟢" if inserted > 0 else "⚪"
+                speed_str = f"{speed:.1f}" if speed is not None else "N/A"
+                fuel_str = f"{fuel:.1f}" if fuel is not None else "N/A"
                 logger.info(
-                    f"{status} {truck_id}: synced (Speed: {speed:.1f if speed else 0} mph, Fuel: {fuel:.1f if fuel else 0}%)"
+                    f"{status} {truck_id}: synced (Speed: {speed_str} mph, Fuel: {fuel_str}%)"
                 )
             else:
                 logger.warning(f"⚠️ {truck_id}: No data from Wialon")
