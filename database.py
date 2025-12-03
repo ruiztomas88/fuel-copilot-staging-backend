@@ -193,11 +193,64 @@ class DatabaseManager:
                     mysql_summary['warning_count'] = 0
                     mysql_summary['healthy_count'] = mysql_summary['total_trucks']
                     mysql_summary['avg_idle_gph'] = mysql_summary.get('avg_consumption', 0)
-                    mysql_summary['truck_details'] = []  # Empty for now
+                    
+                    # 🔧 FIX v3.11.2: Populate truck_details for dashboard table
+                    truck_details = self._get_truck_details_from_mysql()
+                    mysql_summary['truck_details'] = truck_details
                     mysql_summary['timestamp'] = datetime.now()
                     return mysql_summary
             except Exception as e:
                 logger.warning(f"MySQL fleet summary failed, using CSV: {e}")
+    
+    def _get_truck_details_from_mysql(self) -> List[Dict]:
+        """Get individual truck details for fleet summary table"""
+        try:
+            from sqlalchemy import text
+            try:
+                from database_mysql import get_sqlalchemy_engine
+            except ImportError:
+                from .database_mysql import get_sqlalchemy_engine
+            
+            engine = get_sqlalchemy_engine()
+            with engine.connect() as conn:
+                result = conn.execute(text("""
+                    SELECT 
+                        t1.truck_id,
+                        t1.truck_status,
+                        t1.estimated_pct as fuel_level,
+                        t1.sensor_pct,
+                        t1.drift_pct,
+                        t1.mpg_current,
+                        t1.consumption_gph as idle_gph,
+                        t1.speed_mph,
+                        t1.timestamp_utc
+                    FROM fuel_metrics t1
+                    INNER JOIN (
+                        SELECT truck_id, MAX(timestamp_utc) as max_time
+                        FROM fuel_metrics
+                        WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
+                        GROUP BY truck_id
+                    ) t2 ON t1.truck_id = t2.truck_id AND t1.timestamp_utc = t2.max_time
+                    ORDER BY t1.truck_id
+                """))
+                
+                trucks = []
+                for row in result:
+                    trucks.append({
+                        'truck_id': row[0],
+                        'status': row[1],
+                        'fuel_level': round(row[2], 1) if row[2] else 0,
+                        'sensor_pct': round(row[3], 1) if row[3] else 0,
+                        'drift': round(row[4], 1) if row[4] else 0,
+                        'mpg': round(row[5], 1) if row[5] else 0,
+                        'idle_gph': round(row[6], 2) if row[6] else 0,
+                        'speed': round(row[7], 1) if row[7] else 0,
+                        'last_update': row[8].isoformat() if row[8] else None
+                    })
+                return trucks
+        except Exception as e:
+            logger.error(f"Error getting truck details: {e}")
+            return []
 
         # Fallback to CSV
         logger.info("⚠️ Using CSV fallback for fleet summary")
