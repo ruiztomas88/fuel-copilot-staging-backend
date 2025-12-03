@@ -77,11 +77,11 @@ jobs:
           
           if ($netstat) {
             $line = $netstat.Line
-            $pid = $line -split '\s+' | Select-Object -Last 1
+            $processId = $line -split '\s+' | Select-Object -Last 1
             
-            if ($pid -match '^\d+$') {
-              Write-Host "Found process $pid on port 8000, terminating..."
-              Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            if ($processId -match '^\d+$') {
+              Write-Host "Found process $processId on port 8000, terminating..."
+              Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
               Start-Sleep -Seconds 2
               Write-Host "Process terminated"
             }
