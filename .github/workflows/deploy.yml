@@ -16,23 +16,23 @@ jobs:
       
       - name: Copy files to deployment directory
         run: |
-          Write-Host "Copying files to C:\Users\Proyectos\fuel-analytics-backend"
+          Write-Host "Copying files to C:\Users\devteam\Proyectos\fuel-analytics-backend"
           
           # Crear directorio si no existe
-          if (-not (Test-Path "C:\Users\Proyectos\fuel-analytics-backend")) {
-            New-Item -ItemType Directory -Path "C:\Users\Proyectos\fuel-analytics-backend" -Force
+          if (-not (Test-Path "C:\Users\devteam\Proyectos\fuel-analytics-backend")) {
+            New-Item -ItemType Directory -Path "C:\Users\devteam\Proyectos\fuel-analytics-backend" -Force
           }
           
           # Copiar archivos (excluyendo .git, .github, __pycache__, etc)
           $exclude = @('.git', '.github', '__pycache__', '.venv', 'venv', '.pytest_cache', '.mypy_cache', 'logs', 'data')
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Exclude $exclude | Copy-Item -Destination "C:\Users\Proyectos\fuel-analytics-backend" -Recurse -Force
+          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Exclude $exclude | Copy-Item -Destination "C:\Users\devteam\Proyectos\fuel-analytics-backend" -Recurse -Force
           
           Write-Host "Files copied successfully"
         shell: powershell
       
       - name: Install dependencies if requirements.txt changed
         run: |
-          cd C:\Users\Proyectos\fuel-analytics-backend
+          cd C:\Users\devteam\Proyectos\fuel-analytics-backend
           
           # Verificar si requirements.txt cambió
           $requirementsHash = (Get-FileHash -Path "requirements.txt" -Algorithm SHA256).Hash
@@ -70,5 +70,5 @@ jobs:
       - name: Deployment complete
         run: |
           Write-Host "Deployment completed successfully!"
-          Write-Host "Application files updated in C:\Users\Proyectos\fuel-analytics-backend"
+          Write-Host "Application files updated in C:\Users\devteam\Proyectos\fuel-analytics-backend"
         shell: powershell
