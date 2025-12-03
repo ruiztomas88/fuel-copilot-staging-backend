@@ -6,6 +6,7 @@ Modern async API with HTTP polling (WebSocket removed for simplicity)
 🆕 v3.10.8: Added JWT authentication and multi-tenant support
 🆕 v3.10.9: Removed WebSocket - dashboard uses HTTP polling
 """
+# agregamos comentarios
 
 from contextlib import asynccontextmanager
 from fastapi import (
