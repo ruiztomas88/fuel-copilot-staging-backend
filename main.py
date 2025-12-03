@@ -1400,6 +1400,34 @@ except ImportError as e:
     logger.warning(f"⚠️ Truck Health Monitor not available: {e}")
 
 
+# NOTE: Fleet summary must be defined BEFORE /truck/{truck_id} to avoid route capture
+@app.get("/fuelAnalytics/api/health/fleet/summary", tags=["Health Monitoring"])
+async def get_fleet_health_summary():
+    """
+    Get health summary for entire fleet.
+
+    Returns aggregated statistics including:
+        - total_trucks: Number of trucks with health data
+        - trucks_with_alerts: Trucks that need attention
+        - critical_count: Critical alerts count
+        - warning_count: Warning alerts count
+        - truck_scores: Health scores by truck
+        - recent_alerts: Last 24 hours of alerts
+    """
+    if not HEALTH_MONITOR_AVAILABLE:
+        raise HTTPException(
+            status_code=503, detail="Health monitoring service not available"
+        )
+
+    try:
+        summary = _health_monitor.get_fleet_health_summary()
+        return summary
+
+    except Exception as e:
+        logger.error(f"Error getting fleet health summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/fuelAnalytics/api/health/truck/{truck_id}", tags=["Health Monitoring"])
 async def get_truck_health_report(truck_id: str):
     """
@@ -1438,33 +1466,6 @@ async def get_truck_health_report(truck_id: str):
 
     except Exception as e:
         logger.error(f"Error getting health report for {truck_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/health/fleet/summary", tags=["Health Monitoring"])
-async def get_fleet_health_summary():
-    """
-    Get health summary for entire fleet.
-
-    Returns aggregated statistics including:
-        - total_trucks: Number of trucks with health data
-        - trucks_with_alerts: Trucks that need attention
-        - critical_count: Critical alerts count
-        - warning_count: Warning alerts count
-        - truck_scores: Health scores by truck
-        - recent_alerts: Last 24 hours of alerts
-    """
-    if not HEALTH_MONITOR_AVAILABLE:
-        raise HTTPException(
-            status_code=503, detail="Health monitoring service not available"
-        )
-
-    try:
-        summary = _health_monitor.get_fleet_health_summary()
-        return summary
-
-    except Exception as e:
-        logger.error(f"Error getting fleet health summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
