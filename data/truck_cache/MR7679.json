@@ -1,0 +1,21 @@
+{
+  "epoch_time": 1764797905,
+  "timestamp": "2025-12-03T21:38:25+00:00",
+  "fuel_lvl": 50.0,
+  "speed": 0.0,
+  "rpm": 608.0,
+  "odometer": 854187.839707,
+  "fuel_rate": 0.5811784,
+  "coolant_temp": 192.2,
+  "hdop": 0.6,
+  "altitude": 351.04988,
+  "pwr_ext": 14.02,
+  "oil_press": 23.20608,
+  "total_fuel_used": null,
+  "total_idle_fuel": null,
+  "engine_load": null,
+  "ambient_temp": null,
+  "capacity_gallons": 200,
+  "capacity_liters": 757.08,
+  "synced_at": "2025-12-03T22:09:58.118750+00:00"
+}
