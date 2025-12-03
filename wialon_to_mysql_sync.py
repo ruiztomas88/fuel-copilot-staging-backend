@@ -52,35 +52,39 @@ def determine_truck_status(speed, rpm):
 def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
     """
     Insert sensor data into fuel_metrics table for backend analytics
+    Uses column names expected by database_mysql.py queries
     """
     try:
         with connection.cursor() as cursor:
             measure_dt = sensor_data["timestamp"]
 
             # Extract sensor values
-            speed = sensor_data.get("speed")
+            speed = sensor_data.get("speed")  # mph
             rpm = sensor_data.get("rpm")
             fuel_lvl = sensor_data.get("fuel_lvl")  # Percentage
             fuel_rate = sensor_data.get("fuel_rate")  # L/h
-            odometer = sensor_data.get("odometer")
-            altitude = sensor_data.get("altitude")
+            odometer = sensor_data.get("odometer")  # miles
+            altitude = sensor_data.get("altitude")  # feet
             latitude = sensor_data.get("latitude")
             longitude = sensor_data.get("longitude")
             engine_hours = sensor_data.get("engine_hours")
+            hdop = sensor_data.get("hdop")
+            coolant_temp = sensor_data.get("coolant_temp")
 
             # Derived values
             truck_status = determine_truck_status(speed, rpm)
             tank_capacity = TANK_CAPACITIES.get(truck_id, TANK_CAPACITIES["default"])
 
             # Calculate fuel in liters/gallons if we have percentage
-            fuel_level_liters = None
-            fuel_percent = fuel_lvl
+            estimated_liters = None
+            estimated_gallons = None
+            estimated_pct = fuel_lvl
             if fuel_lvl is not None:
-                fuel_level_liters = (
-                    (fuel_lvl / 100.0) * tank_capacity * 3.785
-                )  # gallons to liters
+                estimated_gallons = (fuel_lvl / 100.0) * tank_capacity
+                estimated_liters = estimated_gallons * 3.785
 
             # Convert fuel_rate from L/h to gph
+            consumption_lph = fuel_rate
             consumption_gph = None
             if fuel_rate is not None:
                 consumption_gph = fuel_rate / 3.785  # L/h to gal/h
@@ -90,27 +94,46 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
             if speed and speed > 5 and consumption_gph and consumption_gph > 0:
                 mpg_current = speed / consumption_gph  # mph / gph = mpg
 
+            # Determine idle method
+            idle_method = "NOT_IDLE"
+            if truck_status == "IDLE":
+                idle_method = "RPM_BASED"
+            elif truck_status == "STOPPED" and rpm and rpm > 400:
+                idle_method = "FALLBACK_CONSENSUS"
+
             query = """
                 INSERT INTO fuel_metrics 
                 (timestamp_utc, truck_id, carrier_id, truck_status,
-                 latitude, longitude, speed,
-                 fuel_level_raw, fuel_level_filtered, fuel_capacity, fuel_percent,
-                 consumption_gph, mpg_current,
-                 engine_rpm, engine_hours, odometer)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 latitude, longitude, speed_mph,
+                 estimated_liters, estimated_gallons, estimated_pct,
+                 sensor_pct, sensor_liters, sensor_gallons,
+                 consumption_lph, consumption_gph, mpg_current,
+                 rpm, engine_hours, odometer_mi,
+                 altitude_ft, hdop, coolant_temp_f,
+                 idle_method, drift_pct, drift_warning,
+                 anchor_detected, anchor_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
                     longitude = VALUES(longitude),
-                    speed = VALUES(speed),
-                    fuel_level_raw = VALUES(fuel_level_raw),
-                    fuel_level_filtered = VALUES(fuel_level_filtered),
-                    fuel_percent = VALUES(fuel_percent),
+                    speed_mph = VALUES(speed_mph),
+                    estimated_liters = VALUES(estimated_liters),
+                    estimated_gallons = VALUES(estimated_gallons),
+                    estimated_pct = VALUES(estimated_pct),
+                    sensor_pct = VALUES(sensor_pct),
+                    sensor_liters = VALUES(sensor_liters),
+                    sensor_gallons = VALUES(sensor_gallons),
+                    consumption_lph = VALUES(consumption_lph),
                     consumption_gph = VALUES(consumption_gph),
                     mpg_current = VALUES(mpg_current),
-                    engine_rpm = VALUES(engine_rpm),
+                    rpm = VALUES(rpm),
                     engine_hours = VALUES(engine_hours),
-                    odometer = VALUES(odometer)
+                    odometer_mi = VALUES(odometer_mi),
+                    altitude_ft = VALUES(altitude_ft),
+                    hdop = VALUES(hdop),
+                    coolant_temp_f = VALUES(coolant_temp_f),
+                    idle_method = VALUES(idle_method)
             """
 
             values = (
@@ -120,16 +143,27 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
                 truck_status,
                 latitude,
                 longitude,
-                speed,
-                fuel_level_liters,  # fuel_level_raw (liters)
-                fuel_level_liters,  # fuel_level_filtered (same for now)
-                tank_capacity,
-                fuel_percent,
+                speed,  # speed_mph
+                estimated_liters,
+                estimated_gallons,
+                estimated_pct,
+                fuel_lvl,  # sensor_pct (same as fuel_lvl)
+                estimated_liters,  # sensor_liters
+                estimated_gallons,  # sensor_gallons
+                consumption_lph,
                 consumption_gph,
                 mpg_current,
                 int(rpm) if rpm else None,
                 engine_hours,
-                odometer,
+                odometer,  # odometer_mi
+                altitude,  # altitude_ft
+                hdop,
+                coolant_temp,  # coolant_temp_f
+                idle_method,
+                0.0,  # drift_pct
+                "NO",  # drift_warning
+                "NO",  # anchor_detected
+                "AnchorType.NONE",  # anchor_type
             )
 
             cursor.execute(query, values)
