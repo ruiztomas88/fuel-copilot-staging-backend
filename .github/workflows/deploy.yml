@@ -1,0 +1,65 @@
+name: Deploy to Azure VM
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Copy files to deployment directory
+        run: |
+          Write-Host "Copying files to C:\Users\Proyectos\fuel-analytics-backend"
+          
+          # Crear directorio si no existe
+          if (-not (Test-Path "C:\Users\Proyectos\fuel-analytics-backend")) {
+            New-Item -ItemType Directory -Path "C:\Users\Proyectos\fuel-analytics-backend" -Force
+          }
+          
+          # Copiar archivos (excluyendo .git, .github, __pycache__, etc)
+          $exclude = @('.git', '.github', '__pycache__', '.venv', 'venv', '.pytest_cache', '.mypy_cache', 'logs', 'data')
+          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Exclude $exclude | Copy-Item -Destination "C:\Users\Proyectos\fuel-analytics-backend" -Recurse -Force
+          
+          Write-Host "Files copied successfully"
+        shell: powershell
+      
+      - name: Install dependencies
+        run: |
+          Write-Host "Installing dependencies..."
+          cd C:\Users\Proyectos\fuel-analytics-backend
+          
+          # Activar virtual environment
+          if (Test-Path ".venv\Scripts\Activate.ps1") {
+            & .venv\Scripts\Activate.ps1
+            Write-Host "Virtual environment activated"
+          } else {
+            Write-Host "Creating virtual environment..."
+            python -m venv .venv
+            & .venv\Scripts\Activate.ps1
+          }
+          
+          # Instalar dependencias
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+          Write-Host "Dependencies installed successfully"
+        shell: powershell
+      
+      - name: Restart service (if applicable)
+        run: |
+          Write-Host "Deployment completed!"
+          Write-Host "If you have a Windows service running the app, restart it here"
+          # Ejemplo: Restart-Service -Name "YourServiceName"
+        shell: powershell
