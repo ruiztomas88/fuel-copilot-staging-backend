@@ -9,6 +9,7 @@ __pycache__/
 venv/
 ENV/
 *.csv
+*.json
 # Environment
 .env
 .env.local

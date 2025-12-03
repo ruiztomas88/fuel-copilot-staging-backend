@@ -1,17 +1,17 @@
 {
   "truck_id": "DR6664",
   "initialized": true,
-  "level_liters": 206.1581299698925,
-  "level_pct": 27.23069292147362,
-  "consumption_lph": 11.4518562,
-  "drift_pct": 3.630692921473617,
-  "P": 0.05222857358082455,
-  "L": 206.1581299698925,
+  "level_liters": 202.00844364802154,
+  "level_pct": 26.682575639037026,
+  "consumption_lph": 119.99991966039981,
+  "drift_pct": 3.0825756390370245,
+  "P": 0.049700358861170475,
+  "L": 202.00844364802154,
   "P_L": 20.0,
   "last_fuel_lvl_pct": 23.6,
-  "last_timestamp": "2025-12-03T16:56:25.562843+00:00",
-  "saved_at": "2025-12-03T16:56:25.562843+00:00",
-  "mpg_current": null,
-  "mpg_distance_accum": 14.229395999922417,
-  "mpg_fuel_accum_gal": 1.433197327149943
+  "last_timestamp": "2025-12-03T16:58:26.861025+00:00",
+  "saved_at": "2025-12-03T16:58:26.861025+00:00",
+  "mpg_current": 5.513482126389255,
+  "mpg_distance_accum": 0.0,
+  "mpg_fuel_accum_gal": 0.0
 }
