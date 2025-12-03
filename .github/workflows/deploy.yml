@@ -71,15 +71,20 @@ jobs:
         run: |
           cd C:\Users\Proyectos\fuel-analytics-backend
           
-          # Buscar y terminar proceso en puerto 8000
+          # Buscar y terminar proceso en puerto 8000 usando netstat
           Write-Host "Checking for process on port 8000..."
-          $process = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
+          $netstat = netstat -ano | Select-String ":8000" | Select-String "LISTENING"
           
-          if ($process) {
-            Write-Host "Found process $process on port 8000, terminating..."
-            Stop-Process -Id $process -Force
-            Start-Sleep -Seconds 2
-            Write-Host "Process terminated"
+          if ($netstat) {
+            $line = $netstat.Line
+            $pid = $line -split '\s+' | Select-Object -Last 1
+            
+            if ($pid -match '^\d+$') {
+              Write-Host "Found process $pid on port 8000, terminating..."
+              Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+              Start-Sleep -Seconds 2
+              Write-Host "Process terminated"
+            }
           } else {
             Write-Host "No process found on port 8000"
           }
