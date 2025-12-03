@@ -1270,25 +1270,8 @@ async def root():
     return {"message": "Fuel Copilot API v3.1.0", "docs": "/fuelAnalytics/api/docs"}
 
 
-# Catch-all route for React Router (must be AFTER all API routes)
-@app.api_route("/{full_path:path}", methods=["GET"], include_in_schema=False)
-async def catch_all_routes(full_path: str):
-    """Catch-all for React Router - serve index.html for non-API routes"""
-    # Don't interfere with API routes - check for fuelAnalytics prefix too
-    if (
-        full_path.startswith("api/")
-        or full_path.startswith("fuelAnalytics/api/")
-        or full_path.startswith("ws/")
-        or full_path.startswith("assets/")
-    ):
-        raise HTTPException(status_code=404, detail="Resource not found")
-
-    # Serve index.html for all other routes (React Router handles routing)
-    index_file = FRONTEND_DIR / "index.html"
-    if index_file.exists():
-        return FileResponse(index_file)
-
-    raise HTTPException(status_code=404, detail="Frontend not found")
+# NOTE: Catch-all moved to end of file to avoid capturing API routes
+# See bottom of file for the actual catch_all_routes function
 
 
 # ============================================================================
@@ -1586,6 +1569,29 @@ async def get_monitored_sensors():
             "Rule 7: 15+ points within 1σ (stuck sensor)",
         ],
     }
+
+
+# ============================================================================
+# CATCH-ALL ROUTE - Must be at the END of file after all API routes
+# ============================================================================
+@app.api_route("/{full_path:path}", methods=["GET"], include_in_schema=False)
+async def catch_all_routes(full_path: str):
+    """Catch-all for React Router - serve index.html for non-API routes"""
+    # Don't interfere with API routes
+    if (
+        full_path.startswith("api/")
+        or full_path.startswith("fuelAnalytics/")
+        or full_path.startswith("ws/")
+        or full_path.startswith("assets/")
+    ):
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    # Serve index.html for all other routes (React Router handles routing)
+    index_file = FRONTEND_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+
+    raise HTTPException(status_code=404, detail="Frontend not found")
 
 
 if __name__ == "__main__":
