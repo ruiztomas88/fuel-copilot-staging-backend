@@ -1,17 +1,17 @@
 {
   "truck_id": "JC1282",
   "initialized": true,
-  "level_liters": 674.3377388931538,
-  "level_pct": 89.07086951090423,
-  "consumption_lph": 0.0,
-  "drift_pct": 5.070869510904231,
-  "P": 0.03721236781850309,
-  "L": 674.3377388931538,
+  "level_liters": 674.1415187839673,
+  "level_pct": 89.04495149574248,
+  "consumption_lph": 5.4551518,
+  "drift_pct": 3.044951495742481,
+  "P": 0.03734796094311392,
+  "L": 674.1415187839673,
   "P_L": 20.0,
-  "last_fuel_lvl_pct": 84.0,
-  "last_timestamp": "2025-12-03T16:50:10.224729+00:00",
-  "saved_at": "2025-12-03T16:50:10.224729+00:00",
+  "last_fuel_lvl_pct": 86.0,
+  "last_timestamp": "2025-12-03T16:53:10.396863+00:00",
+  "saved_at": "2025-12-03T16:53:10.396863+00:00",
   "mpg_current": null,
-  "mpg_distance_accum": 16.155646999948658,
-  "mpg_fuel_accum_gal": 1.1984189390243651
+  "mpg_distance_accum": 16.342057999921963,
+  "mpg_fuel_accum_gal": 1.2384494758603868
 }

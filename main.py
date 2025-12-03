@@ -1,5 +1,5 @@
 """
-FastAPI Backend for Fuel Copilot Dashboard v3.10.9
+FastAPI Backend for Fuel Copilot Dashboard v3.10.9////
 Modern async API with HTTP polling (WebSocket removed for simplicity)
 
 🔧 FIX v3.9.3: Migrated from deprecated @app.on_event to lifespan handlers
