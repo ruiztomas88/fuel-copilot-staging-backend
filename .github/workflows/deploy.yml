@@ -67,9 +67,27 @@ jobs:
           }
         shell: powershell
       
-      - name: Restart service (if applicable)
+      - name: Restart application
         run: |
-          Write-Host "Deployment completed!"
-          Write-Host "If you have a Windows service running the app, restart it here"
-          # Ejemplo: Restart-Service -Name "YourServiceName"
+          cd C:\Users\Proyectos\fuel-analytics-backend
+          
+          # Buscar y terminar proceso en puerto 8000
+          Write-Host "Checking for process on port 8000..."
+          $process = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
+          
+          if ($process) {
+            Write-Host "Found process $process on port 8000, terminating..."
+            Stop-Process -Id $process -Force
+            Start-Sleep -Seconds 2
+            Write-Host "Process terminated"
+          } else {
+            Write-Host "No process found on port 8000"
+          }
+          
+          # Activar virtual environment y ejecutar main.py
+          Write-Host "Starting application..."
+          & .venv\Scripts\Activate.ps1
+          Start-Process -FilePath "python" -ArgumentList "main.py" -WorkingDirectory "C:\Users\Proyectos\fuel-analytics-backend" -WindowStyle Hidden
+          
+          Write-Host "Application started successfully"
         shell: powershell
