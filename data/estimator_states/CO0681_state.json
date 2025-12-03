@@ -1,17 +1,17 @@
 {
   "truck_id": "CO0681",
   "initialized": true,
-  "level_liters": 244.98742428358327,
-  "level_pct": 32.359516072751,
+  "level_liters": 244.2079540679447,
+  "level_pct": 32.25655862893548,
   "consumption_lph": 17.400121300000002,
-  "drift_pct": 3.9595160727510006,
-  "P": 0.03556563231604684,
-  "L": 244.98742428358327,
+  "drift_pct": 3.856558628935481,
+  "P": 0.035851054137949874,
+  "L": 244.2079540679447,
   "P_L": 20.0,
   "last_fuel_lvl_pct": 28.4,
-  "last_timestamp": "2025-12-03T16:46:11.366842+00:00",
-  "saved_at": "2025-12-03T16:46:11.366842+00:00",
+  "last_timestamp": "2025-12-03T16:48:10.143659+00:00",
+  "saved_at": "2025-12-03T16:48:10.143659+00:00",
   "mpg_current": null,
-  "mpg_distance_accum": 0.0,
-  "mpg_fuel_accum_gal": 0.0
+  "mpg_distance_accum": 2.174798499996541,
+  "mpg_fuel_accum_gal": 0.15322093071380205
 }

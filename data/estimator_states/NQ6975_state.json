@@ -1,17 +1,17 @@
 {
   "truck_id": "NQ6975",
   "initialized": true,
-  "level_liters": 182.43580917145627,
-  "level_pct": 24.097296081187753,
-  "consumption_lph": 11.2485484,
-  "drift_pct": -1.9027039188122465,
-  "P": 0.1618671839190064,
-  "L": 182.43580917145627,
+  "level_liters": 182.85612116001522,
+  "level_pct": 24.152813594338145,
+  "consumption_lph": 119.9999196868406,
+  "drift_pct": -2.2471864056618536,
+  "P": 0.15395567721311657,
+  "L": 182.85612116001522,
   "P_L": 20.0,
-  "last_fuel_lvl_pct": 26.0,
-  "last_timestamp": "2025-12-03T16:46:11.354840+00:00",
-  "saved_at": "2025-12-03T16:46:11.354840+00:00",
+  "last_fuel_lvl_pct": 26.4,
+  "last_timestamp": "2025-12-03T16:48:10.143659+00:00",
+  "saved_at": "2025-12-03T16:48:10.143659+00:00",
   "mpg_current": 6.035170503395291,
-  "mpg_distance_accum": 0.0,
-  "mpg_fuel_accum_gal": 0.0
+  "mpg_distance_accum": 0.6213700000662357,
+  "mpg_fuel_accum_gal": 1.0566880002152175
 }

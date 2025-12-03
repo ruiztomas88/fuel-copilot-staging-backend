@@ -8,7 +8,7 @@ __pycache__/
 .Python
 venv/
 ENV/
-
+*csv
 # Environment
 .env
 .env.local

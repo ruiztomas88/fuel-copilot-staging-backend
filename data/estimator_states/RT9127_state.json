@@ -1,17 +1,17 @@
 {
   "truck_id": "RT9127",
   "initialized": true,
-  "level_liters": 578.4021674636334,
-  "level_pct": 76.39908166424068,
-  "consumption_lph": 1.668608728,
-  "drift_pct": 0.0,
-  "P": 0.05750447718373583,
-  "L": 578.4021674636334,
+  "level_liters": 578.2942941948635,
+  "level_pct": 76.384833068482,
+  "consumption_lph": 5.0985196,
+  "drift_pct": 0.3848330684819956,
+  "P": 0.05775057812969666,
+  "L": 578.2942941948635,
   "P_L": 20.0,
-  "last_fuel_lvl_pct": 76.4,
-  "last_timestamp": "2025-12-03T16:46:11.374844+00:00",
-  "saved_at": "2025-12-03T16:46:11.374844+00:00",
+  "last_fuel_lvl_pct": 76.0,
+  "last_timestamp": "2025-12-03T16:48:10.166276+00:00",
+  "saved_at": "2025-12-03T16:48:10.166276+00:00",
   "mpg_current": 8.051205154068208,
-  "mpg_distance_accum": 0.4970970000140369,
-  "mpg_fuel_accum_gal": 0.13208599999779835
+  "mpg_distance_accum": 0.5592340000439435,
+  "mpg_fuel_accum_gal": 0.18259426330349046
 }
