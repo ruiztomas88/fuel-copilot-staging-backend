@@ -67,32 +67,8 @@ jobs:
           }
         shell: powershell
       
-      - name: Restart application
+      - name: Deployment complete
         run: |
-          cd C:\Users\Proyectos\fuel-analytics-backend
-          
-          # Buscar y terminar proceso en puerto 8000 usando netstat
-          Write-Host "Checking for process on port 8000..."
-          $netstat = netstat -ano | Select-String ":8000" | Select-String "LISTENING"
-          
-          if ($netstat) {
-            $line = $netstat.Line
-            $processId = $line -split '\s+' | Select-Object -Last 1
-            
-            if ($processId -match '^\d+$') {
-              Write-Host "Found process $processId on port 8000, terminating..."
-              Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-              Start-Sleep -Seconds 2
-              Write-Host "Process terminated"
-            }
-          } else {
-            Write-Host "No process found on port 8000"
-          }
-          
-          # Activar virtual environment y ejecutar main.py
-          Write-Host "Starting application..."
-          & .venv\Scripts\Activate.ps1
-          Start-Process -FilePath "python" -ArgumentList "main.py" -WorkingDirectory "C:\Users\Proyectos\fuel-analytics-backend" -WindowStyle Hidden
-          
-          Write-Host "Application started successfully"
+          Write-Host "Deployment completed successfully!"
+          Write-Host "Application files updated in C:\Users\Proyectos\fuel-analytics-backend"
         shell: powershell
