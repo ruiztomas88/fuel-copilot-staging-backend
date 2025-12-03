@@ -30,26 +30,41 @@ jobs:
           Write-Host "Files copied successfully"
         shell: powershell
       
-      - name: Install dependencies
+      - name: Install dependencies if requirements.txt changed
         run: |
-          Write-Host "Installing dependencies..."
           cd C:\Users\Proyectos\fuel-analytics-backend
           
-          # Activar virtual environment
-          if (Test-Path ".venv\Scripts\Activate.ps1") {
-            & .venv\Scripts\Activate.ps1
-            Write-Host "Virtual environment activated"
+          # Verificar si requirements.txt cambió
+          $requirementsHash = (Get-FileHash -Path "requirements.txt" -Algorithm SHA256).Hash
+          $hashFile = ".requirements.hash"
+          
+          $needsInstall = $false
+          if (Test-Path $hashFile) {
+            $oldHash = Get-Content $hashFile
+            if ($oldHash -ne $requirementsHash) {
+              Write-Host "requirements.txt has changed, installing dependencies..."
+              $needsInstall = $true
+            } else {
+              Write-Host "requirements.txt unchanged, skipping installation"
+            }
           } else {
-            Write-Host "Creating virtual environment..."
-            python -m venv .venv
-            & .venv\Scripts\Activate.ps1
+            Write-Host "First deployment, installing dependencies..."
+            $needsInstall = $true
           }
           
-          # Instalar dependencias
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          
-          Write-Host "Dependencies installed successfully"
+          if ($needsInstall) {
+            # Activar virtual environment
+            & .venv\Scripts\Activate.ps1
+            
+            # Instalar dependencias
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+            
+            # Guardar hash del requirements.txt
+            $requirementsHash | Out-File -FilePath $hashFile -Encoding utf8
+            
+            Write-Host "Dependencies installed successfully"
+          }
         shell: powershell
       
       - name: Restart service (if applicable)
