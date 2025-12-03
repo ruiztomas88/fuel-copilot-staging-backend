@@ -1274,13 +1274,14 @@ async def root():
 @app.api_route("/{full_path:path}", methods=["GET"], include_in_schema=False)
 async def catch_all_routes(full_path: str):
     """Catch-all for React Router - serve index.html for non-API routes"""
-    # Don't interfere with API routes
+    # Don't interfere with API routes - check for fuelAnalytics prefix too
     if (
         full_path.startswith("api/")
+        or full_path.startswith("fuelAnalytics/api/")
         or full_path.startswith("ws/")
         or full_path.startswith("assets/")
     ):
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="Resource not found")
 
     # Serve index.html for all other routes (React Router handles routing)
     index_file = FRONTEND_DIR / "index.html"
