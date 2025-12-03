@@ -167,15 +167,21 @@ class DatabaseManager:
         # Try MySQL first for real-time data
         if self.mysql_available:
             try:
-                # 🔧 FIX v3.9.0: Use 24h window to ensure we get trucks even if sync is delayed
-                df = self.mysql_get_latest(
-                    hours_back=24
-                )  # Get last 24h of data (handles sync delays)
-                if not df.empty:
+                # 🔧 FIX v3.11.0: Use direct MySQL fleet summary function
+                mysql_summary = self.mysql_get_fleet_summary()
+                if mysql_summary and mysql_summary.get('total_trucks', 0) > 0:
                     logger.info(
-                        f"✅ Using MySQL for fleet summary - {len(df)} trucks found"
+                        f"✅ Using MySQL for fleet summary - {mysql_summary['total_trucks']} trucks found"
                     )
-                    return self._process_fleet_data(df, source="mysql")
+                    # Enrich with missing fields required by FleetSummary model
+                    mysql_summary['data_source'] = 'MySQL'
+                    mysql_summary['critical_count'] = 0  # TODO: implement health calculation
+                    mysql_summary['warning_count'] = 0
+                    mysql_summary['healthy_count'] = mysql_summary['total_trucks']
+                    mysql_summary['avg_idle_gph'] = mysql_summary.get('avg_consumption', 0)
+                    mysql_summary['truck_details'] = []  # Empty for now
+                    mysql_summary['timestamp'] = datetime.now()
+                    return mysql_summary
             except Exception as e:
                 logger.warning(f"MySQL fleet summary failed, using CSV: {e}")
 
