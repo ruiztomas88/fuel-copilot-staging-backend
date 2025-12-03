@@ -143,17 +143,21 @@ class DatabaseManager:
                     from database_mysql import get_sqlalchemy_engine
                 except ImportError:
                     from .database_mysql import get_sqlalchemy_engine
-                
+
                 from sqlalchemy import text
-                
+
                 engine = get_sqlalchemy_engine()
                 with engine.connect() as conn:
-                    result = conn.execute(text("""
+                    result = conn.execute(
+                        text(
+                            """
                         SELECT DISTINCT truck_id 
                         FROM fuel_metrics 
                         WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
                         ORDER BY truck_id
-                    """))
+                    """
+                        )
+                    )
                     trucks = [row[0] for row in result]
                     logger.info(f"✅ Found {len(trucks)} trucks in MySQL")
                     return trucks
@@ -183,37 +187,44 @@ class DatabaseManager:
             try:
                 # 🔧 FIX v3.11.0: Use direct MySQL fleet summary function
                 mysql_summary = self.mysql_get_fleet_summary()
-                if mysql_summary and mysql_summary.get('total_trucks', 0) > 0:
+                if mysql_summary and mysql_summary.get("total_trucks", 0) > 0:
                     logger.info(
                         f"✅ Using MySQL for fleet summary - {mysql_summary['total_trucks']} trucks found"
                     )
                     # Enrich with missing fields required by FleetSummary model
-                    mysql_summary['data_source'] = 'MySQL'
-                    mysql_summary['critical_count'] = 0  # TODO: implement health calculation
-                    mysql_summary['warning_count'] = 0
-                    mysql_summary['healthy_count'] = mysql_summary['total_trucks']
-                    mysql_summary['avg_idle_gph'] = mysql_summary.get('avg_consumption', 0)
-                    
+                    mysql_summary["data_source"] = "MySQL"
+                    mysql_summary["critical_count"] = (
+                        0  # TODO: implement health calculation
+                    )
+                    mysql_summary["warning_count"] = 0
+                    mysql_summary["healthy_count"] = mysql_summary["total_trucks"]
+                    mysql_summary["avg_idle_gph"] = mysql_summary.get(
+                        "avg_consumption", 0
+                    )
+
                     # 🔧 FIX v3.11.2: Populate truck_details for dashboard table
                     truck_details = self._get_truck_details_from_mysql()
-                    mysql_summary['truck_details'] = truck_details
-                    mysql_summary['timestamp'] = datetime.now()
+                    mysql_summary["truck_details"] = truck_details
+                    mysql_summary["timestamp"] = datetime.now()
                     return mysql_summary
             except Exception as e:
                 logger.warning(f"MySQL fleet summary failed, using CSV: {e}")
-    
+
     def _get_truck_details_from_mysql(self) -> List[Dict]:
         """Get individual truck details for fleet summary table"""
         try:
             from sqlalchemy import text
+
             try:
                 from database_mysql import get_sqlalchemy_engine
             except ImportError:
                 from .database_mysql import get_sqlalchemy_engine
-            
+
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
-                result = conn.execute(text("""
+                result = conn.execute(
+                    text(
+                        """
                     SELECT 
                         t1.truck_id,
                         t1.truck_status,
@@ -223,7 +234,10 @@ class DatabaseManager:
                         t1.mpg_current,
                         t1.consumption_gph as idle_gph,
                         t1.speed_mph,
-                        t1.timestamp_utc
+                        t1.timestamp_utc,
+                        t1.rpm,
+                        t1.idle_method,
+                        t1.idle_mode
                     FROM fuel_metrics t1
                     INNER JOIN (
                         SELECT truck_id, MAX(timestamp_utc) as max_time
@@ -232,21 +246,54 @@ class DatabaseManager:
                         GROUP BY truck_id
                     ) t2 ON t1.truck_id = t2.truck_id AND t1.timestamp_utc = t2.max_time
                     ORDER BY t1.truck_id
-                """))
-                
+                """
+                    )
+                )
+
                 trucks = []
                 for row in result:
-                    trucks.append({
-                        'truck_id': row[0],
-                        'status': row[1],
-                        'fuel_level': round(row[2], 1) if row[2] else 0,
-                        'sensor_pct': round(row[3], 1) if row[3] else 0,
-                        'drift': round(row[4], 1) if row[4] else 0,
-                        'mpg': round(row[5], 1) if row[5] else 0,
-                        'idle_gph': round(row[6], 2) if row[6] else 0,
-                        'speed': round(row[7], 1) if row[7] else 0,
-                        'last_update': row[8].isoformat() if row[8] else None
-                    })
+                    truck_id = row[0]
+                    status = row[1]
+                    fuel_level = row[2]
+                    sensor_pct = row[3]
+                    drift_pct = row[4]
+                    mpg_current = row[5]
+                    consumption_gph = row[6]
+                    speed_mph = row[7]
+                    timestamp = row[8]
+                    rpm = row[9]
+                    idle_method = row[10]
+                    idle_mode = row[11]
+
+                    # 🔧 v2.0: Display MPG only for MOVING, Idle only for IDLE
+                    display_mpg = None
+                    display_idle = None
+
+                    if status == "MOVING" and mpg_current is not None:
+                        # Only show MPG if it's in a reasonable range
+                        if 2.5 <= mpg_current <= 15:
+                            display_mpg = round(mpg_current, 1)
+
+                    if status == "IDLE" and consumption_gph is not None:
+                        # Only show idle if it's in a reasonable range
+                        if 0.3 <= consumption_gph <= 3.0:
+                            display_idle = round(consumption_gph, 2)
+
+                    trucks.append(
+                        {
+                            "truck_id": truck_id,
+                            "status": status if status else "OFFLINE",
+                            "fuel_level": round(fuel_level, 1) if fuel_level else 0,
+                            "sensor_pct": round(sensor_pct, 1) if sensor_pct else 0,
+                            "drift": round(drift_pct, 1) if drift_pct else 0,
+                            "mpg": display_mpg,
+                            "idle_gph": display_idle,
+                            "speed": round(speed_mph, 1) if speed_mph else 0,
+                            "rpm": int(rpm) if rpm else None,
+                            "idle_method": idle_method,
+                            "last_update": timestamp.isoformat() if timestamp else None,
+                        }
+                    )
                 return trucks
         except Exception as e:
             logger.error(f"Error getting truck details: {e}")

@@ -1394,52 +1394,187 @@ async def get_fleet_health_summary():
         - total_trucks: Number of trucks with health data
         - healthy/watch/warning/critical: Counts by status
         - trucks: Array of truck health reports for frontend
+
+    🔧 v2.0: Falls back to fuel_metrics data if health monitor has no data
     """
-    if not HEALTH_MONITOR_AVAILABLE:
-        raise HTTPException(
-            status_code=503, detail="Health monitoring service not available"
-        )
-
     try:
-        summary = _health_monitor.get_fleet_health_summary()
+        # First try the specialized health monitor
+        if HEALTH_MONITOR_AVAILABLE:
+            summary = _health_monitor.get_fleet_health_summary()
 
-        # Transform to format expected by frontend
-        trucks_list = []
-        for truck_id, score in summary.get("truck_scores", {}).items():
-            report = _health_monitor.get_truck_health_report(truck_id)
-            if report:
+            # If health monitor has data, use it
+            if summary.get("total_trucks", 0) > 0:
+                trucks_list = []
+                for truck_id, score in summary.get("truck_scores", {}).items():
+                    report = _health_monitor.get_truck_health_report(truck_id)
+                    if report:
+                        trucks_list.append(
+                            {
+                                "truck_id": truck_id,
+                                "truck_name": truck_id,
+                                "overall_status": (
+                                    "CRITICAL"
+                                    if score < 40
+                                    else (
+                                        "WARNING"
+                                        if score < 60
+                                        else "WATCH" if score < 80 else "NORMAL"
+                                    )
+                                ),
+                                "health_score": score,
+                                "sensors": [],
+                                "alerts": (
+                                    [a.to_dict() for a in report.alerts]
+                                    if report.alerts
+                                    else []
+                                ),
+                                "last_updated": datetime.now().isoformat(),
+                            }
+                        )
+
+                return {
+                    "total_trucks": summary.get("total_trucks", 0),
+                    "healthy": summary.get("healthy_count", 0),
+                    "watch": summary.get("watch_count", 0),
+                    "warning": summary.get("warning_count", 0),
+                    "critical": summary.get("critical_count", 0),
+                    "trucks": trucks_list,
+                }
+
+        # 🔧 v2.0: Fallback to fuel_metrics data
+        # Calculate health from existing fuel_metrics data
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+
+        engine = get_sqlalchemy_engine()
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                SELECT 
+                    t1.truck_id,
+                    t1.truck_status,
+                    t1.estimated_pct,
+                    t1.sensor_pct,
+                    t1.drift_pct,
+                    t1.coolant_temp_f,
+                    t1.speed_mph,
+                    t1.rpm,
+                    t1.timestamp_utc
+                FROM fuel_metrics t1
+                INNER JOIN (
+                    SELECT truck_id, MAX(timestamp_utc) as max_time
+                    FROM fuel_metrics
+                    WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
+                    GROUP BY truck_id
+                ) t2 ON t1.truck_id = t2.truck_id AND t1.timestamp_utc = t2.max_time
+                ORDER BY t1.truck_id
+            """
+                )
+            )
+
+            trucks_list = []
+            healthy = 0
+            watch = 0
+            warning = 0
+            critical = 0
+
+            for row in result:
+                truck_id = row[0]
+                status = row[1]
+                estimated_pct = row[2]
+                sensor_pct = row[3]
+                drift_pct = row[4]
+                coolant_temp = row[5]
+                speed = row[6]
+                rpm = row[7]
+                timestamp = row[8]
+
+                # Calculate health score based on available data
+                health_score = 100.0
+                alerts = []
+
+                # Check fuel level (critical if very low)
+                if estimated_pct is not None:
+                    if estimated_pct < 10:
+                        health_score -= 30
+                        alerts.append(
+                            {
+                                "type": "LOW_FUEL",
+                                "message": f"Critical fuel level: {estimated_pct:.1f}%",
+                            }
+                        )
+                    elif estimated_pct < 20:
+                        health_score -= 15
+                        alerts.append(
+                            {
+                                "type": "LOW_FUEL",
+                                "message": f"Low fuel level: {estimated_pct:.1f}%",
+                            }
+                        )
+
+                # Check drift (sensor vs estimated difference)
+                if drift_pct is not None and abs(drift_pct) > 10:
+                    health_score -= 20
+                    alerts.append(
+                        {"type": "DRIFT", "message": f"High drift: {drift_pct:.1f}%"}
+                    )
+
+                # Check coolant temperature (warning if too high)
+                if coolant_temp is not None and coolant_temp > 220:
+                    health_score -= 25
+                    alerts.append(
+                        {
+                            "type": "OVERHEATING",
+                            "message": f"High coolant temp: {coolant_temp:.1f}°F",
+                        }
+                    )
+
+                # Check offline status
+                if status == "OFFLINE":
+                    health_score -= 10
+
+                # Clamp score
+                health_score = max(0, min(100, health_score))
+
+                # Determine overall status
+                if health_score >= 80:
+                    overall_status = "NORMAL"
+                    healthy += 1
+                elif health_score >= 60:
+                    overall_status = "WATCH"
+                    watch += 1
+                elif health_score >= 40:
+                    overall_status = "WARNING"
+                    warning += 1
+                else:
+                    overall_status = "CRITICAL"
+                    critical += 1
+
                 trucks_list.append(
                     {
                         "truck_id": truck_id,
                         "truck_name": truck_id,
-                        "overall_status": (
-                            "CRITICAL"
-                            if score < 40
-                            else (
-                                "WARNING"
-                                if score < 60
-                                else "WATCH" if score < 80 else "NORMAL"
-                            )
-                        ),
-                        "health_score": score,
+                        "overall_status": overall_status,
+                        "health_score": round(health_score, 1),
                         "sensors": [],
-                        "alerts": (
-                            [a.to_dict() for a in report.alerts]
-                            if report.alerts
-                            else []
+                        "alerts": alerts,
+                        "last_updated": (
+                            timestamp.isoformat()
+                            if timestamp
+                            else datetime.now().isoformat()
                         ),
-                        "last_updated": datetime.now().isoformat(),
                     }
                 )
 
-        return {
-            "total_trucks": summary.get("total_trucks", 0),
-            "healthy": summary.get("healthy_count", 0),
-            "watch": summary.get("watch_count", 0),
-            "warning": summary.get("warning_count", 0),
-            "critical": summary.get("critical_count", 0),
-            "trucks": trucks_list,
-        }
+            return {
+                "total_trucks": len(trucks_list),
+                "healthy": healthy,
+                "watch": watch,
+                "warning": warning,
+                "critical": critical,
+                "trucks": trucks_list,
+            }
 
     except Exception as e:
         logger.error(f"Error getting fleet health summary: {e}")
