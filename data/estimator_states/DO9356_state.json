@@ -1,17 +1,17 @@
 {
   "truck_id": "DO9356",
   "initialized": true,
-  "level_liters": 319.1122902256674,
-  "level_pct": 38.31845846199731,
-  "consumption_lph": 19.548728,
-  "drift_pct": 8.31845846199731,
-  "P": 0.06725287756253283,
-  "L": 319.1122902256674,
+  "level_liters": 316.46797574037294,
+  "level_pct": 38.0009336976156,
+  "consumption_lph": 17.8972181,
+  "drift_pct": 8.800933697615601,
+  "P": 0.06549852655171583,
+  "L": 316.46797574037294,
   "P_L": 20.0,
-  "last_fuel_lvl_pct": 30.0,
-  "last_timestamp": "2025-12-03T16:53:10.410869+00:00",
-  "saved_at": "2025-12-03T16:53:10.410869+00:00",
+  "last_fuel_lvl_pct": 29.2,
+  "last_timestamp": "2025-12-03T16:56:25.563842+00:00",
+  "saved_at": "2025-12-03T16:56:25.563842+00:00",
   "mpg_current": null,
-  "mpg_distance_accum": 17.149838999961503,
-  "mpg_fuel_accum_gal": 1.278984533159332
+  "mpg_distance_accum": 0.0,
+  "mpg_fuel_accum_gal": 0.0
 }
