@@ -1,7 +1,7 @@
 """
 Wialon to MySQL Sync - Real-time Data Bridge
-Reads from Remote Wialon DB and writes to Local MySQL 'wialon_collect.sensors'
-Fixes data lag by ensuring local DB has fresh data.
+Reads from Remote Wialon DB and writes to Local MySQL
+Populates fuel_metrics table for backend analytics
 """
 
 import time
@@ -28,46 +28,115 @@ LOCAL_DB_CONFIG = {
     "autocommit": True,
 }
 
+# Tank capacities (gallons) - from tanks.yaml
+TANK_CAPACITIES = {
+    "default": 200,  # Most trucks have ~200 gallon tanks
+}
+
 
 def get_local_connection():
     return pymysql.connect(**LOCAL_DB_CONFIG)
 
 
-def save_to_local_db(connection, truck_id: str, sensor_data: dict):
+def determine_truck_status(speed, rpm):
+    """Determine truck status from speed and RPM"""
+    if speed is None:
+        return "OFFLINE"
+    if speed > 2:
+        return "MOVING"
+    if rpm and rpm > 500:
+        return "IDLE"
+    return "STOPPED"
+
+
+def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
     """
-    Insert sensor data into local fuel_copilot.telemetry_data table
+    Insert sensor data into fuel_metrics table for backend analytics
     """
     try:
         with connection.cursor() as cursor:
-            # Prepare insert
             measure_dt = sensor_data["timestamp"]
 
-            # Map fields
-            # telemetry_data columns: truck_id, timestamp, rpm, speed, fuel_lvl, fuel_rate, engine_hours, odometer, battery_voltage, altitude, hdop
+            # Extract sensor values
+            speed = sensor_data.get("speed")
+            rpm = sensor_data.get("rpm")
+            fuel_lvl = sensor_data.get("fuel_lvl")  # Percentage
+            fuel_rate = sensor_data.get("fuel_rate")  # L/h
+            odometer = sensor_data.get("odometer")
+            altitude = sensor_data.get("altitude")
+            latitude = sensor_data.get("latitude")
+            longitude = sensor_data.get("longitude")
+            engine_hours = sensor_data.get("engine_hours")
+
+            # Derived values
+            truck_status = determine_truck_status(speed, rpm)
+            tank_capacity = TANK_CAPACITIES.get(truck_id, TANK_CAPACITIES["default"])
+
+            # Calculate fuel in liters/gallons if we have percentage
+            fuel_level_liters = None
+            fuel_percent = fuel_lvl
+            if fuel_lvl is not None:
+                fuel_level_liters = (
+                    (fuel_lvl / 100.0) * tank_capacity * 3.785
+                )  # gallons to liters
+
+            # Convert fuel_rate from L/h to gph
+            consumption_gph = None
+            if fuel_rate is not None:
+                consumption_gph = fuel_rate / 3.785  # L/h to gal/h
+
+            # Calculate MPG if moving
+            mpg_current = None
+            if speed and speed > 5 and consumption_gph and consumption_gph > 0:
+                mpg_current = speed / consumption_gph  # mph / gph = mpg
 
             query = """
-                INSERT IGNORE INTO telemetry_data 
-                (truck_id, timestamp, rpm, speed, fuel_lvl, fuel_rate, odometer, altitude, hdop)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO fuel_metrics 
+                (timestamp_utc, truck_id, carrier_id, truck_status,
+                 latitude, longitude, speed,
+                 fuel_level_raw, fuel_level_filtered, fuel_capacity, fuel_percent,
+                 consumption_gph, mpg_current,
+                 engine_rpm, engine_hours, odometer)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    truck_status = VALUES(truck_status),
+                    latitude = VALUES(latitude),
+                    longitude = VALUES(longitude),
+                    speed = VALUES(speed),
+                    fuel_level_raw = VALUES(fuel_level_raw),
+                    fuel_level_filtered = VALUES(fuel_level_filtered),
+                    fuel_percent = VALUES(fuel_percent),
+                    consumption_gph = VALUES(consumption_gph),
+                    mpg_current = VALUES(mpg_current),
+                    engine_rpm = VALUES(engine_rpm),
+                    engine_hours = VALUES(engine_hours),
+                    odometer = VALUES(odometer)
             """
 
             values = (
-                truck_id,
                 measure_dt,
-                sensor_data.get("rpm"),
-                sensor_data.get("speed"),
-                sensor_data.get("fuel_lvl"),
-                sensor_data.get("fuel_rate"),
-                sensor_data.get("odometer"),
-                sensor_data.get("altitude"),
-                sensor_data.get("hdop"),
+                truck_id,
+                "skylord",  # carrier_id
+                truck_status,
+                latitude,
+                longitude,
+                speed,
+                fuel_level_liters,  # fuel_level_raw (liters)
+                fuel_level_liters,  # fuel_level_filtered (same for now)
+                tank_capacity,
+                fuel_percent,
+                consumption_gph,
+                mpg_current,
+                int(rpm) if rpm else None,
+                engine_hours,
+                odometer,
             )
 
             cursor.execute(query, values)
             return cursor.rowcount
 
     except Exception as e:
-        logger.error(f"Error saving to local DB for truck {truck_id}: {e}")
+        logger.error(f"Error saving to fuel_metrics for truck {truck_id}: {e}")
         return 0
 
 
@@ -90,14 +159,16 @@ def sync_cycle(reader: WialonReader, local_conn):
             sensor_data = reader.get_latest_sensor_data(unit_id)
 
             if sensor_data:
-                inserted = save_to_local_db(local_conn, truck_id, sensor_data)
+                inserted = save_to_fuel_metrics(local_conn, truck_id, sensor_data)
                 total_inserted += inserted
                 trucks_processed += 1
 
-                # Log status
+                # Log status with more detail
+                speed = sensor_data.get("speed")
+                fuel = sensor_data.get("fuel_lvl")
                 status = "🟢" if inserted > 0 else "⚪"
                 logger.info(
-                    f"{status} {truck_id}: {inserted} records synced (Time: {sensor_data['timestamp'].strftime('%H:%M:%S')})"
+                    f"{status} {truck_id}: synced (Speed: {speed:.1f if speed else 0} mph, Fuel: {fuel:.1f if fuel else 0}%)"
                 )
             else:
                 logger.warning(f"⚠️ {truck_id}: No data from Wialon")
@@ -107,7 +178,7 @@ def sync_cycle(reader: WialonReader, local_conn):
 
     cycle_duration = time.time() - cycle_start
     logger.info(
-        f"⏱️ Cycle completed in {cycle_duration:.2f}s. Total records: {total_inserted}"
+        f"⏱️ Cycle completed in {cycle_duration:.2f}s. Trucks: {trucks_processed}, Records: {total_inserted}"
     )
     logger.info("")
 

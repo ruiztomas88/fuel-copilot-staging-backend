@@ -1402,29 +1402,43 @@ async def get_fleet_health_summary():
 
     try:
         summary = _health_monitor.get_fleet_health_summary()
-        
+
         # Transform to format expected by frontend
         trucks_list = []
         for truck_id, score in summary.get("truck_scores", {}).items():
             report = _health_monitor.get_truck_health_report(truck_id)
             if report:
-                trucks_list.append({
-                    "truck_id": truck_id,
-                    "truck_name": truck_id,
-                    "overall_status": "CRITICAL" if score < 40 else "WARNING" if score < 60 else "WATCH" if score < 80 else "NORMAL",
-                    "health_score": score,
-                    "sensors": [],
-                    "alerts": [a.to_dict() for a in report.alerts] if report.alerts else [],
-                    "last_updated": datetime.now().isoformat()
-                })
-        
+                trucks_list.append(
+                    {
+                        "truck_id": truck_id,
+                        "truck_name": truck_id,
+                        "overall_status": (
+                            "CRITICAL"
+                            if score < 40
+                            else (
+                                "WARNING"
+                                if score < 60
+                                else "WATCH" if score < 80 else "NORMAL"
+                            )
+                        ),
+                        "health_score": score,
+                        "sensors": [],
+                        "alerts": (
+                            [a.to_dict() for a in report.alerts]
+                            if report.alerts
+                            else []
+                        ),
+                        "last_updated": datetime.now().isoformat(),
+                    }
+                )
+
         return {
             "total_trucks": summary.get("total_trucks", 0),
             "healthy": summary.get("healthy_count", 0),
             "watch": summary.get("watch_count", 0),
             "warning": summary.get("warning_count", 0),
             "critical": summary.get("critical_count", 0),
-            "trucks": trucks_list
+            "trucks": trucks_list,
         }
 
     except Exception as e:

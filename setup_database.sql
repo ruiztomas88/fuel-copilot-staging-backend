@@ -1,4 +1,4 @@
--- ============================================
+mysql -u fuel_admin -pFuelCopilot2025! fuel_copilot-- ============================================
 -- FUEL COPILOT - DATABASE SETUP
 -- Run this script to create required tables
 -- ============================================
