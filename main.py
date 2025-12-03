@@ -6,6 +6,7 @@ Modern async API with HTTP polling (WebSocket removed for simplicity)
 🆕 v3.10.8: Added JWT authentication and multi-tenant support
 🆕 v3.10.9: Removed WebSocket - dashboard uses HTTP polling
 """
+
 # agregamos comentarios
 
 from contextlib import asynccontextmanager
@@ -315,7 +316,9 @@ app.add_middleware(
 # ============================================================================
 
 
-@app.post("/fuelAnalytics/api/auth/login", response_model=Token, tags=["Authentication"])
+@app.post(
+    "/fuelAnalytics/api/auth/login", response_model=Token, tags=["Authentication"]
+)
 async def login(credentials: UserLogin):
     """
     Authenticate user and return JWT token.
@@ -373,7 +376,9 @@ async def get_current_user_info(current_user: TokenData = Depends(require_auth))
     }
 
 
-@app.post("/fuelAnalytics/api/auth/refresh", response_model=Token, tags=["Authentication"])
+@app.post(
+    "/fuelAnalytics/api/auth/refresh", response_model=Token, tags=["Authentication"]
+)
 async def refresh_token(current_user: TokenData = Depends(require_auth)):
     """Refresh JWT token before it expires."""
     user_data = USERS_DB.get(current_user.username)
@@ -739,7 +744,9 @@ async def get_truck_detail(truck_id: str):
 
 
 @app.get(
-    "/fuelAnalytics/api/trucks/{truck_id}/refuels", response_model=List[RefuelEvent], tags=["Trucks"]
+    "/fuelAnalytics/api/trucks/{truck_id}/refuels",
+    response_model=List[RefuelEvent],
+    tags=["Trucks"],
 )
 async def get_truck_refuel_history(
     truck_id: str,
@@ -789,7 +796,10 @@ def sanitize_nan(value):
     return value
 
 
-@app.get("/fuelAnalytics/api/trucks/{truck_id}/history", response_model=List[HistoricalRecord])
+@app.get(
+    "/fuelAnalytics/api/trucks/{truck_id}/history",
+    response_model=List[HistoricalRecord],
+)
 async def get_truck_history(
     truck_id: str,
     hours: int = Query(
@@ -839,7 +849,11 @@ async def get_truck_history(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/efficiency", response_model=List[EfficiencyRanking], tags=["Efficiency"])
+@app.get(
+    "/fuelAnalytics/api/efficiency",
+    response_model=List[EfficiencyRanking],
+    tags=["Efficiency"],
+)
 async def get_efficiency_rankings():
     """
     Get efficiency rankings for all active trucks.
@@ -1364,7 +1378,7 @@ async def get_fleet_sensor_health():
 # Import health monitor
 import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     from truck_health_monitor import (
@@ -1377,7 +1391,7 @@ try:
     HEALTH_MONITOR_AVAILABLE = True
     # Create singleton health monitor instance
     _health_monitor = TruckHealthMonitor(
-        data_dir=str(Path(__file__).parent.parent.parent / "data" / "health_stats")
+        data_dir=str(Path(__file__).parent / "data" / "health_stats")
     )
     logger.info("🏥 Truck Health Monitor initialized successfully")
 except ImportError as e:
@@ -1454,7 +1468,9 @@ async def get_fleet_health_summary():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/health/truck/{truck_id}/alerts", tags=["Health Monitoring"])
+@app.get(
+    "/fuelAnalytics/api/health/truck/{truck_id}/alerts", tags=["Health Monitoring"]
+)
 async def get_truck_health_alerts(
     truck_id: str,
     hours: int = Query(default=24, ge=1, le=168, description="Hours of alert history"),
