@@ -69,38 +69,39 @@ def get_local_connection():
     return pymysql.connect(**LOCAL_DB_CONFIG)
 
 
-def determine_truck_status(speed, rpm, fuel_rate):
+def determine_truck_status(speed, rpm, fuel_rate, data_age_min=0):
     """
-    Determine truck status from speed, RPM, and fuel consumption
+    Determine truck status from speed, RPM, fuel consumption and data freshness
+    
+    Logic from fuel_copilot_v2_1_fixed.py (aligned with Beyond App):
+    - MOVING: speed > 0 (truck is in motion)
+    - STOPPED: speed = 0 AND (rpm > 0 OR fuel_rate > 0.3) - engine ON, parked
+    - OFFLINE: data_age > 15 min OR no signs of activity
 
-    🔧 v2.0 IMPROVED LOGIC:
-    - MOVING: speed > 2 mph (truck is in motion)
-    - IDLE: speed <= 2 AND (rpm > 500 OR fuel_rate > 0.3) - engine running, stationary
-    - STOPPED: speed <= 2 AND rpm <= 500 AND fuel_rate <= 0.3 - engine likely off but sensor active
-    - OFFLINE: No valid speed data (sensor disconnected)
-
-    Returns: "MOVING", "IDLE", "STOPPED", or "OFFLINE"
+    Returns: "MOVING", "STOPPED", or "OFFLINE"
     """
-    # No speed data = offline
+    # Stale data (> 15 minutes) = offline
+    if data_age_min is not None and data_age_min > 15:
+        return "OFFLINE"
+    
+    # No speed data at all = offline  
     if speed is None:
         return "OFFLINE"
 
-    # Moving if speed > 2 mph
-    if speed > 2:
+    # Moving if speed > 0 (any movement)
+    if speed > 0:
         return "MOVING"
 
     # Stationary - check if engine is running
-    # Engine indicators: RPM > 500 or fuel consumption > 0.3 gph
-    engine_on = False
-    if rpm is not None and rpm > 500:
-        engine_on = True
-    elif fuel_rate is not None and fuel_rate > 1.0:  # > 1 L/h indicates engine running
-        engine_on = True
-
-    if engine_on:
-        return "IDLE"  # Engine on but not moving = IDLE
-    else:
-        return "STOPPED"  # Engine off = STOPPED
+    # Engine ON indicators: RPM > 0 or fuel consumption > 0.3 L/h
+    rpm_val = rpm or 0
+    fuel_rate_val = fuel_rate or 0
+    
+    if rpm_val > 0 or fuel_rate_val > 0.3:
+        return "STOPPED"  # Engine ON but not moving
+    
+    # No engine activity = offline
+    return "OFFLINE"
 
 
 def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
@@ -135,8 +136,16 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
             # Get tank capacity for this truck
             tank_capacity = TANK_CAPACITIES.get(truck_id, TANK_CAPACITIES["default"])
 
-            # 🔧 v2.0: Improved truck status determination
-            truck_status = determine_truck_status(speed, rpm, fuel_rate)
+            # Data age calculation (needed for status determination)
+            now_utc = datetime.now(timezone.utc)
+            data_age_min = 0.0
+            if measure_dt:
+                if measure_dt.tzinfo is None:
+                    measure_dt = measure_dt.replace(tzinfo=timezone.utc)
+                data_age_min = (now_utc - measure_dt).total_seconds() / 60.0
+
+            # 🔧 v2.1: Improved truck status determination with data_age
+            truck_status = determine_truck_status(speed, rpm, fuel_rate, data_age_min)
 
             # Calculate fuel in liters/gallons if we have percentage
             estimated_liters = None
@@ -175,17 +184,22 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
                 if mpg_current < 2.5 or mpg_current > 15:
                     mpg_current = None  # Invalid value, don't record
 
-            # 🔧 v2.0: Determine idle method and mode
+            # 🔧 v2.1: Determine idle method and mode
+            # STOPPED = engine ON but not moving (idle consumption applies)
             idle_method = "NOT_IDLE"
             idle_mode = None
-            if truck_status == "IDLE":
-                if rpm and rpm > 500:
+            if truck_status == "STOPPED":
+                # Engine is ON (we know because rpm > 0 or fuel_rate > 0.3)
+                if rpm and rpm > 0:
                     idle_method = "RPM_BASED"
                     idle_mode = "NORMAL"
-                elif consumption_gph and consumption_gph > 0.3:
+                elif consumption_gph and consumption_gph > 0.08:  # > 0.3 L/h
                     idle_method = "FUEL_RATE_BASED"
                     idle_mode = "NORMAL"
-            elif truck_status == "STOPPED":
+                else:
+                    idle_method = "FALLBACK_CONSENSUS"
+                    idle_mode = "NORMAL"
+            elif truck_status == "OFFLINE":
                 idle_method = "ENGINE_OFF"
                 idle_mode = None
 
@@ -193,14 +207,6 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
             # For now both are the same since we don't have Kalman, so drift = 0
             drift_pct = 0.0
             drift_warning = "NO"
-
-            # Data age calculation
-            now_utc = datetime.now(timezone.utc)
-            data_age_min = 0.0
-            if measure_dt:
-                if measure_dt.tzinfo is None:
-                    measure_dt = measure_dt.replace(tzinfo=timezone.utc)
-                data_age_min = (now_utc - measure_dt).total_seconds() / 60.0
 
             query = """
                 INSERT INTO fuel_metrics 
