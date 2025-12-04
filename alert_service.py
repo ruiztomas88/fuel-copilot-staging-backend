@@ -580,13 +580,41 @@ class AlertManager:
         truck_id: str,
         current_level_pct: float,
         estimated_miles_remaining: float = None,
+        send_sms: bool = False,
     ) -> bool:
-        """Send low fuel alert (logged only, no SMS per user request)"""
+        """
+        Send low fuel alert with configurable SMS threshold.
+
+        🆕 v3.12.21: Now supports SMS alerts for critical low fuel levels.
+        SMS sent when:
+        - current_level_pct <= 15% (CRITICAL) - always SMS
+        - current_level_pct <= 25% (HIGH) - SMS if send_sms=True
+
+        Args:
+            truck_id: Truck identifier
+            current_level_pct: Current fuel level percentage
+            estimated_miles_remaining: Optional estimated miles
+            send_sms: Whether to send SMS for HIGH priority (default False)
+        """
+        # Determine priority and channels based on fuel level
+        if current_level_pct <= 15:
+            priority = AlertPriority.CRITICAL
+            channels = ["sms", "email"]  # Always SMS for critical
+            emoji = "🚨"
+        elif current_level_pct <= 25:
+            priority = AlertPriority.HIGH
+            channels = ["sms", "email"] if send_sms else ["email"]
+            emoji = "⚠️"
+        else:
+            priority = AlertPriority.MEDIUM
+            channels = []  # Log only for > 25%
+            emoji = "⛽"
+
         alert = Alert(
             alert_type=AlertType.LOW_FUEL,
-            priority=AlertPriority.MEDIUM,  # Changed from HIGH to avoid SMS
+            priority=priority,
             truck_id=truck_id,
-            message=f"Low fuel warning: {current_level_pct:.1f}%",
+            message=f"{emoji} LOW FUEL ALERT: {current_level_pct:.1f}%",
             details={
                 "current_level": f"{current_level_pct:.1f}%",
                 "estimated_miles": (
@@ -594,9 +622,10 @@ class AlertManager:
                     if estimated_miles_remaining
                     else "N/A"
                 ),
+                "priority": priority.value,
             },
         )
-        return self.send_alert(alert, channels=[])  # Log only, no SMS
+        return self.send_alert(alert, channels=channels)
 
     def alert_sensor_offline(self, truck_id: str, offline_minutes: int) -> bool:
         """Send sensor offline alert (MEDIUM priority)"""
@@ -647,11 +676,19 @@ def send_theft_alert(
 
 
 def send_low_fuel_alert(
-    truck_id: str, current_level_pct: float, estimated_miles: float = None
+    truck_id: str,
+    current_level_pct: float,
+    estimated_miles: float = None,
+    send_sms: bool = False,
 ) -> bool:
-    """Quick function to send low fuel alert"""
+    """
+    Quick function to send low fuel alert.
+
+    🆕 v3.12.21: SMS automatically sent for critical levels (≤15%).
+    For HIGH levels (≤25%), set send_sms=True to also receive SMS.
+    """
     return get_alert_manager().alert_low_fuel(
-        truck_id, current_level_pct, estimated_miles
+        truck_id, current_level_pct, estimated_miles, send_sms
     )
 
 

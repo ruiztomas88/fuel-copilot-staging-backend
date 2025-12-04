@@ -31,6 +31,9 @@ class MockRequest:
         self.url = Mock()
         self.url.path = "/api/test"
         self.method = "GET"
+        # 🆕 v3.12.21: Add state mock for role-based rate limiting
+        self.state = Mock()
+        self.state.user = None
 
 
 class TestRateLimiter:
@@ -38,8 +41,9 @@ class TestRateLimiter:
 
     @pytest.fixture
     def limiter(self):
+        # 🆕 v3.12.21: Use anonymous limits (30 rpm) for testing
         return RateLimiter(
-            requests_per_minute=10,
+            requests_per_minute=30,  # Matches anonymous role
             requests_per_second=5,  # Higher to avoid burst limit in tests
         )
 
@@ -60,12 +64,12 @@ class TestRateLimiter:
 
         request = MockRequest()
 
-        # Make 10 requests (at limit) with delays
-        for _ in range(10):
+        # Make 30 requests (at anonymous limit) with delays
+        for _ in range(30):
             await limiter.check(request)
-            await asyncio.sleep(0.25)  # Avoid burst limit
+            await asyncio.sleep(0.25)  # Avoid burst limit (5 rps = 0.2s min)
 
-        # 11th request should be blocked
+        # 31st request should be blocked
         with pytest.raises(HTTPException) as exc_info:
             await limiter.check(request)
 
@@ -76,23 +80,19 @@ class TestRateLimiter:
         """Should block burst requests (per-second limit)"""
         from fastapi import HTTPException
 
-        # Create a strict limiter for burst testing
-        strict_limiter = RateLimiter(
-            requests_per_minute=100,
-            requests_per_second=2,  # Very low burst limit
-        )
-
+        # Using default limiter - anonymous role has 5 rps burst limit
         request = MockRequest()
 
-        # Make rapid requests
-        await strict_limiter.check(request)
-        await strict_limiter.check(request)
+        # Make 5 rapid requests (anonymous burst limit)
+        for _ in range(5):
+            await limiter.check(request, role="anonymous")
 
-        # 3rd rapid request should be blocked
+        # 6th rapid request should be blocked by burst limit
         with pytest.raises(HTTPException) as exc_info:
-            await strict_limiter.check(request)
+            await limiter.check(request, role="anonymous")
 
         assert exc_info.value.status_code == 429
+        assert "per second" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
     async def test_different_clients_separate_limits(self, limiter):
@@ -100,10 +100,10 @@ class TestRateLimiter:
         request1 = MockRequest(client_ip="192.168.1.1")
         request2 = MockRequest(client_ip="192.168.1.2")
 
-        # Max out client 1 (with delays)
-        for _ in range(10):
+        # Max out client 1 (with delays) - 30 requests for anonymous
+        for _ in range(30):
             await limiter.check(request1)
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.25)  # Avoid burst limit (5 rps = 0.2s min)
 
         # Client 2 should still be allowed
         await limiter.check(request2)  # Should not raise
@@ -127,8 +127,10 @@ class TestRateLimiter:
         assert "limit" in info
         assert "remaining" in info
         assert "reset" in info
-        assert info["limit"] == 10
-        assert info["remaining"] == 10
+        assert "role" in info
+        assert info["limit"] == 30  # Anonymous role limit
+        assert info["remaining"] == 30
+        assert info["role"] == "anonymous"
 
 
 class TestRateLimitMiddleware:

@@ -1,0 +1,197 @@
+"""
+Tests for Authentication Module (v3.12.21)
+Phase 5: Additional test coverage
+
+Tests the actual functions in auth.py
+"""
+
+import pytest
+from datetime import timedelta, datetime, timezone
+
+
+class TestPasswordHashing:
+    """Test password hashing functions"""
+
+    def test_hash_password(self):
+        """Should hash password consistently"""
+        from auth import hash_password
+
+        password = "test_password_123"
+        hash1 = hash_password(password)
+        hash2 = hash_password(password)
+
+        assert hash1 == hash2
+        assert hash1 != password  # Should not be plain text
+
+    def test_hash_password_with_salt(self):
+        """Should produce different hashes with different salts"""
+        from auth import hash_password
+
+        password = "test_password"
+        hash1 = hash_password(password, "salt1")
+        hash2 = hash_password(password, "salt2")
+
+        assert hash1 != hash2
+
+
+class TestAuthentication:
+    """Test user authentication"""
+
+    def test_authenticate_valid_user(self):
+        """Should authenticate valid user"""
+        from auth import authenticate_user
+
+        # Using known test user from USERS_DB
+        user = authenticate_user("admin", "FuelAdmin2025!")
+
+        assert user is not None
+        assert user["username"] == "admin"
+        assert user["role"] == "super_admin"
+
+    def test_authenticate_invalid_password(self):
+        """Should reject invalid password"""
+        from auth import authenticate_user
+
+        user = authenticate_user("admin", "wrong_password")
+        assert user is None
+
+    def test_authenticate_unknown_user(self):
+        """Should reject unknown user"""
+        from auth import authenticate_user
+
+        user = authenticate_user("unknown_user", "password")
+        assert user is None
+
+
+class TestJWTTokens:
+    """Test JWT token operations"""
+
+    def test_create_access_token(self):
+        """Should create valid JWT token"""
+        from auth import create_access_token
+
+        user_data = {
+            "username": "testuser",
+            "carrier_id": "test_carrier",
+            "role": "viewer",
+            "name": "Test User",
+        }
+        token = create_access_token(user_data)
+
+        assert token is not None
+        assert isinstance(token, str)
+        assert len(token) > 50  # JWT tokens are typically long
+
+    def test_create_access_token_with_expiry(self):
+        """Should create token with custom expiry"""
+        from auth import create_access_token, decode_token
+
+        user_data = {
+            "username": "testuser",
+            "carrier_id": "test_carrier",
+            "role": "admin",
+            "name": "Test Admin",
+        }
+        expires = timedelta(hours=1)
+        token = create_access_token(user_data, expires_delta=expires)
+
+        token_data = decode_token(token)
+        assert token_data is not None
+        # Token should expire in about 1 hour
+        time_diff = token_data.exp - datetime.now(timezone.utc)
+        assert 3500 < time_diff.total_seconds() < 3700
+
+    def test_decode_valid_token(self):
+        """Should decode valid token correctly"""
+        from auth import create_access_token, decode_token
+
+        user_data = {
+            "username": "testuser",
+            "carrier_id": "test_carrier",
+            "role": "carrier_admin",
+            "name": "Test Admin",
+        }
+        token = create_access_token(user_data)
+        decoded = decode_token(token)
+
+        assert decoded is not None
+        assert decoded.username == "testuser"
+        assert decoded.carrier_id == "test_carrier"
+        assert decoded.role == "carrier_admin"
+
+    def test_decode_expired_token(self):
+        """Should reject expired token"""
+        from auth import create_access_token, decode_token
+
+        user_data = {
+            "username": "testuser",
+            "carrier_id": "test_carrier",
+            "role": "viewer",
+            "name": "Test User",
+        }
+        # Create token that's already expired
+        token = create_access_token(user_data, expires_delta=timedelta(seconds=-1))
+        decoded = decode_token(token)
+
+        assert decoded is None  # Expired tokens should not decode
+
+    def test_decode_invalid_token(self):
+        """Should reject invalid token"""
+        from auth import decode_token
+
+        decoded = decode_token("not.a.valid.token")
+        assert decoded is None
+
+
+class TestUserRoles:
+    """Test user roles and permissions"""
+
+    def test_users_db_structure(self):
+        """Should have properly structured users"""
+        from auth import USERS_DB
+
+        assert "admin" in USERS_DB
+        assert "skylord" in USERS_DB
+
+        admin = USERS_DB["admin"]
+        assert admin["role"] == "super_admin"
+        assert admin["carrier_id"] == "*"  # Wildcard for all carriers
+
+    def test_carrier_admin_role(self):
+        """Carrier admin should have limited carrier access"""
+        from auth import USERS_DB
+
+        skylord = USERS_DB["skylord"]
+        assert skylord["role"] == "carrier_admin"
+        assert skylord["carrier_id"] == "skylord"  # Limited to one carrier
+
+    def test_viewer_role(self):
+        """Viewer should have read-only access"""
+        from auth import USERS_DB
+
+        viewer = USERS_DB["skylord_viewer"]
+        assert viewer["role"] == "viewer"
+        assert viewer["carrier_id"] == "skylord"
+
+
+class TestSecurityConfig:
+    """Test security configuration"""
+
+    def test_algorithm_is_hs256(self):
+        """Should use HS256 algorithm"""
+        from auth import ALGORITHM
+
+        assert ALGORITHM == "HS256"
+
+    def test_token_expiration_is_7_days(self):
+        """Should have 7-day token expiration"""
+        from auth import ACCESS_TOKEN_EXPIRE_HOURS
+
+        assert ACCESS_TOKEN_EXPIRE_HOURS == 168  # 7 days in hours
+
+    def test_secret_key_exists(self):
+        """Should have a secret key set"""
+        from auth import SECRET_KEY
+
+        assert SECRET_KEY is not None
+        assert len(SECRET_KEY) > 20  # Should be a reasonably long key

@@ -1,8 +1,8 @@
 """
-API Middleware Module for Fuel Copilot v3.7.0
+API Middleware Module for Fuel Copilot v3.12.21
 
 Production-ready middleware for:
-- Rate limiting
+- Rate limiting (with role-based limits)
 - Request validation
 - Error handling
 - Security headers
@@ -14,7 +14,7 @@ Usage:
 
 import time
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict
 from functools import wraps
 from collections import defaultdict
 import asyncio
@@ -25,6 +25,35 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
+
+
+# ===========================================
+# 🆕 v3.12.21: ROLE-BASED RATE LIMITS
+# ===========================================
+
+# Rate limits by user role
+RATE_LIMITS_BY_ROLE: Dict[str, Dict[str, int]] = {
+    "super_admin": {
+        "requests_per_minute": 300,
+        "requests_per_second": 30,
+        "burst_size": 50,
+    },
+    "admin": {
+        "requests_per_minute": 180,
+        "requests_per_second": 20,
+        "burst_size": 30,
+    },
+    "viewer": {
+        "requests_per_minute": 60,
+        "requests_per_second": 10,
+        "burst_size": 15,
+    },
+    "anonymous": {
+        "requests_per_minute": 30,
+        "requests_per_second": 5,
+        "burst_size": 10,
+    },
+}
 
 
 # ===========================================
@@ -60,6 +89,8 @@ class RateLimiter:
         # Track requests per client
         self._requests: dict = defaultdict(list)
         self._lock = asyncio.Lock()
+        # 🆕 v3.12.21: Track user roles for role-based limits
+        self._user_roles: dict = {}
 
     def _get_client_id(self, request: Request) -> str:
         """Get client identifier from request"""
@@ -79,12 +110,50 @@ class RateLimiter:
 
         return "unknown"
 
-    async def check(self, request: Request) -> None:
+    def _get_user_role(self, request: Request) -> str:
+        """
+        🆕 v3.12.21: Get user role from request for role-based rate limiting.
+        """
+        try:
+            # Check if user info is attached to request state
+            if (
+                hasattr(request, "state")
+                and hasattr(request.state, "user")
+                and request.state.user
+            ):
+                return getattr(request.state.user, "role", "viewer")
+
+            # Check authorization header for JWT
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.startswith("Bearer "):
+                # In production, decode JWT to get role
+                # For now, return "viewer" as default authenticated user
+                return "viewer"
+        except Exception:
+            pass
+
+        return "anonymous"
+
+    def _get_limits_for_role(self, role: str) -> tuple:
+        """Get rate limits for a specific role."""
+        limits = RATE_LIMITS_BY_ROLE.get(role, RATE_LIMITS_BY_ROLE["anonymous"])
+        return (
+            limits["requests_per_minute"],
+            limits["requests_per_second"],
+            limits["burst_size"],
+        )
+
+    async def check(self, request: Request, role: str = None) -> None:
         """
         Check if request is within rate limits.
         Raises HTTPException(429) if rate limited.
+
+        🆕 v3.12.21: Now supports role-based limits.
         """
         client_id = self._get_client_id(request)
+        user_role = role or self._get_user_role(request)
+        rpm, rps, burst = self._get_limits_for_role(user_role)
+
         now = time.time()
 
         async with self._lock:
@@ -95,44 +164,48 @@ class RateLimiter:
 
             requests = self._requests[client_id]
 
-            # Check per-minute limit
-            if len(requests) >= self.rpm:
+            # Check per-minute limit (role-based)
+            if len(requests) >= rpm:
                 retry_after = 60 - (now - requests[0])
                 logger.warning(
-                    f"Rate limit exceeded for {client_id}",
+                    f"Rate limit exceeded for {client_id} (role: {user_role})",
                     extra={
                         "client_id": client_id,
                         "requests_count": len(requests),
-                        "limit": self.rpm,
+                        "limit": rpm,
+                        "role": user_role,
                     },
                 )
                 raise HTTPException(
                     status_code=429,
                     detail={
                         "error": "Rate limit exceeded",
-                        "limit": f"{self.rpm} requests per minute",
+                        "limit": f"{rpm} requests per minute",
                         "retry_after": int(retry_after),
+                        "role": user_role,
                     },
                     headers={"Retry-After": str(int(retry_after))},
                 )
 
-            # Check per-second limit (burst protection)
+            # Check per-second limit (burst protection, role-based)
             recent_requests = [ts for ts in requests if now - ts < 1]
-            if len(recent_requests) >= self.rps:
+            if len(recent_requests) >= rps:
                 logger.warning(
-                    f"Burst limit exceeded for {client_id}",
+                    f"Burst limit exceeded for {client_id} (role: {user_role})",
                     extra={
                         "client_id": client_id,
                         "recent_requests": len(recent_requests),
-                        "limit": self.rps,
+                        "limit": rps,
+                        "role": user_role,
                     },
                 )
                 raise HTTPException(
                     status_code=429,
                     detail={
                         "error": "Too many requests",
-                        "limit": f"{self.rps} requests per second",
+                        "limit": f"{rps} requests per second",
                         "retry_after": 1,
+                        "role": user_role,
                     },
                     headers={"Retry-After": "1"},
                 )
@@ -140,17 +213,19 @@ class RateLimiter:
             # Record this request
             self._requests[client_id].append(now)
 
-    def get_remaining(self, request: Request) -> dict:
-        """Get remaining rate limit info for client"""
+    def get_remaining(self, request: Request, role: str = None) -> dict:
+        """Get remaining rate limit info for client (role-aware)"""
         client_id = self._get_client_id(request)
+        user_role = role or self._get_user_role(request)
+        rpm, _, _ = self._get_limits_for_role(user_role)
         now = time.time()
-
         requests = [ts for ts in self._requests.get(client_id, []) if now - ts < 60]
 
         return {
-            "limit": self.rpm,
-            "remaining": max(0, self.rpm - len(requests)),
+            "limit": rpm,
+            "remaining": max(0, rpm - len(requests)),
             "reset": int(now) + 60,
+            "role": user_role,
         }
 
 

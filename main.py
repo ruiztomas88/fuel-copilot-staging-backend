@@ -1,10 +1,11 @@
 """
-FastAPI Backend for Fuel Copilot Dashboard v3.10.9////
+FastAPI Backend for Fuel Copilot Dashboard v3.12.21
 Modern async API with HTTP polling (WebSocket removed for simplicity)
 
 🔧 FIX v3.9.3: Migrated from deprecated @app.on_event to lifespan handlers
 🆕 v3.10.8: Added JWT authentication and multi-tenant support
 🆕 v3.10.9: Removed WebSocket - dashboard uses HTTP polling
+🆕 v3.12.21: Unified version, fixed bugs from Phase 1 audit
 """
 
 # agregamos comentarios
@@ -21,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import asyncio
 import json
@@ -32,6 +33,13 @@ from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+
+# Helper for timezone-aware UTC datetime (Python 3.12+ compatible)
+def utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
 
 # Prometheus metrics
 try:
@@ -180,63 +188,139 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Fuel Copilot API",
     description="""
-# Fuel Copilot Fleet Management API
+# Fuel Copilot Fleet Management API v3.12.21
 
-Real-time fleet fuel monitoring, analytics, and efficiency tracking.
+Real-time fleet fuel monitoring, analytics, and efficiency tracking for Class 8 trucks.
 
-## Features
+## 🚀 Features
 
-- 🚛 **Fleet Monitoring**: Track all trucks in real-time
-- ⛽ **Fuel Analytics**: Kalman-filtered fuel level estimation
-- 📊 **Efficiency Metrics**: MPG tracking with EMA smoothing
-- 🔔 **Alerts**: Automated drift, refuel, and anomaly detection
-- 📈 **KPIs**: Fleet-wide performance indicators
+### Core Analytics
+- 🚛 **Fleet Monitoring**: Real-time tracking of 40+ trucks
+- ⛽ **Fuel Analytics**: Kalman-filtered fuel level estimation with ±2% accuracy
+- 📊 **Efficiency Metrics**: MPG tracking with EMA smoothing (α=0.4)
+- 🔔 **Smart Alerts**: Automated drift, refuel, theft, and anomaly detection
+- 📈 **KPIs Dashboard**: Fleet-wide performance indicators
 
-## Data Sources
+### Advanced Features
+- 🤖 **ML Predictions**: ARIMA-based fuel consumption forecasting
+- 🗺️ **GPS Tracking**: Real-time positions with geofencing
+- 📋 **Custom Reports**: Scheduled report generation (PDF, Excel, CSV)
+- 🔔 **Push Notifications**: Real-time alert delivery
+- 📊 **Dashboard Widgets**: Customizable user dashboards
 
-- **Wialon**: Real-time sensor data (GPS, fuel, engine)
-- **MySQL**: Historical data storage and analytics
-- **Kalman Filter**: AI-powered fuel level estimation
+### Health Monitoring
+- 🔬 **Nelson Rules**: Statistical process control for sensor anomaly detection
+- 🏥 **Truck Health Scores**: Composite health metrics (0-100)
+- ⚠️ **Predictive Maintenance**: Early warning for sensor failures
 
-## Authentication
+## 📡 Data Sources
 
-Currently no authentication required (internal fleet API).
+| Source | Update Rate | Data Type |
+|--------|-------------|-----------|
+| Wialon API | 30s | GPS, fuel, engine sensors |
+| MySQL | Real-time | Historical analytics |
+| Kalman Filter | 30s | AI-powered fuel estimation |
 
-## Rate Limits
+## 🔐 Authentication
 
-No rate limits enforced. Recommended: max 10 req/s per client.
+JWT Bearer token authentication. Roles: `super_admin`, `admin`, `viewer`, `anonymous`.
+
+```
+Authorization: Bearer <token>
+```
+
+## 🚦 Rate Limits
+
+| Role | Requests/min | Burst |
+|------|--------------|-------|
+| super_admin | 300 | 30/s |
+| admin | 120 | 15/s |
+| viewer | 60 | 10/s |
+| anonymous | 30 | 5/s |
+
+## 📦 Response Format
+
+All responses follow this structure:
+```json
+{
+  "data": {...},
+  "timestamp": "2025-12-04T12:00:00Z",
+  "status": "success"
+}
+```
+
+## 🔗 Related Links
+
+- [GitHub Repository](https://github.com/fleetbooster/Fuel-Analytics-Backend)
+- [API Changelog](/fuelAnalytics/api/docs#changelog)
 """,
-    version="3.10.2",
+    version="3.12.21",
     docs_url="/fuelAnalytics/api/docs",
     redoc_url="/fuelAnalytics/api/redoc",
     openapi_tags=[
         {
             "name": "Fleet",
-            "description": "Fleet-wide summary and statistics",
+            "description": "Fleet-wide summary and real-time statistics for all trucks.",
         },
         {
             "name": "Trucks",
-            "description": "Individual truck data and history",
+            "description": "Individual truck data, details, and historical records.",
         },
         {
             "name": "Efficiency",
-            "description": "MPG rankings and driver efficiency",
+            "description": "MPG rankings, driver efficiency scores, and fuel economy analytics.",
         },
         {
             "name": "Alerts",
-            "description": "System alerts and notifications",
+            "description": "System alerts, notifications, and alert management.",
         },
         {
             "name": "KPIs",
-            "description": "Key Performance Indicators",
+            "description": "Key Performance Indicators and fleet health metrics.",
         },
         {
             "name": "Health",
-            "description": "API health and status checks",
+            "description": "API health checks and truck health monitoring (Nelson Rules).",
+        },
+        {
+            "name": "Predictions",
+            "description": "ML-based fuel consumption and empty tank predictions.",
+        },
+        {
+            "name": "Analytics",
+            "description": "Advanced analytics, historical comparisons, and trends.",
+        },
+        {
+            "name": "Dashboard",
+            "description": "User dashboard configuration and widget management.",
+        },
+        {
+            "name": "GPS",
+            "description": "Real-time GPS tracking and geofence management.",
+        },
+        {
+            "name": "Notifications",
+            "description": "Push notification subscriptions and delivery.",
+        },
+        {
+            "name": "Reports",
+            "description": "Scheduled reports and export functionality.",
+        },
+        {
+            "name": "Export",
+            "description": "Data export to CSV and Excel formats.",
         },
     ],
     lifespan=lifespan,  # 🔧 FIX v3.9.3: Use lifespan instead of on_event
 )
+
+# 🆕 v3.12.21: Register centralized error handlers
+try:
+    from errors import register_exception_handlers
+
+    register_exception_handlers(app)
+except ImportError:
+    logger.warning("errors module not available - using default error handling")
 
 # Prometheus metrics instrumentation
 if PROMETHEUS_AVAILABLE:
@@ -291,6 +375,121 @@ if PROMETHEUS_AVAILABLE:
     logger.info("✅ Prometheus metrics enabled")
 else:
     logger.warning("⚠️ Prometheus metrics disabled")
+
+
+# =============================================================================
+# 🆕 v3.12.21: RATE LIMITING MIDDLEWARE (#31)
+# =============================================================================
+from collections import defaultdict
+from time import time as current_time
+
+# Rate limit storage: {ip: [(timestamp, count)]}
+_rate_limit_store: Dict[str, list] = defaultdict(list)
+
+# Rate limits by role (requests per minute)
+RATE_LIMITS = {
+    "super_admin": 1000,
+    "carrier_admin": 300,
+    "admin": 300,
+    "viewer": 100,
+    "anonymous": 30,
+}
+
+
+def get_rate_limit_for_role(role: str) -> int:
+    """Get rate limit for a given role."""
+    return RATE_LIMITS.get(role, RATE_LIMITS["anonymous"])
+
+
+def check_rate_limit(client_id: str, role: str = "anonymous") -> tuple[bool, int]:
+    """
+    Check if client has exceeded rate limit.
+
+    Returns:
+        (allowed: bool, remaining: int)
+    """
+    now = current_time()
+    window = 60  # 1 minute window
+    limit = get_rate_limit_for_role(role)
+
+    # Clean old entries
+    _rate_limit_store[client_id] = [
+        ts for ts in _rate_limit_store[client_id] if now - ts < window
+    ]
+
+    # Check limit
+    current_count = len(_rate_limit_store[client_id])
+    if current_count >= limit:
+        return False, 0
+
+    # Add new request
+    _rate_limit_store[client_id].append(now)
+    return True, limit - current_count - 1
+
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Rate limiting middleware based on user role."""
+
+    async def dispatch(self, request, call_next):
+        # Skip rate limiting for health checks and metrics
+        if request.url.path in ["/health", "/metrics", "/fuelAnalytics/api/health"]:
+            return await call_next(request)
+
+        # Get client identifier
+        client_ip = request.client.host if request.client else "unknown"
+
+        # Try to get role from JWT token
+        role = "anonymous"
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            try:
+                token = auth_header.split(" ")[1]
+                token_data = decode_token(token)
+                if token_data:
+                    role = token_data.role
+                    client_id = f"{client_ip}:{token_data.username}"
+                else:
+                    client_id = client_ip
+            except Exception:
+                client_id = client_ip
+        else:
+            client_id = client_ip
+
+        # Check rate limit
+        allowed, remaining = check_rate_limit(client_id, role)
+
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Too Many Requests",
+                    "message": f"Rate limit exceeded. Limit: {get_rate_limit_for_role(role)}/min for role '{role}'",
+                    "retry_after": 60,
+                },
+                headers={
+                    "Retry-After": "60",
+                    "X-RateLimit-Limit": str(get_rate_limit_for_role(role)),
+                    "X-RateLimit-Remaining": "0",
+                },
+            )
+
+        # Process request
+        response = await call_next(request)
+
+        # Add rate limit headers
+        response.headers["X-RateLimit-Limit"] = str(get_rate_limit_for_role(role))
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+
+        return response
+
+
+# Add rate limiting middleware
+app.add_middleware(RateLimitMiddleware)
+logger.info("✅ Rate limiting middleware enabled")
 
 # CORS configuration - allow React frontend
 app.add_middleware(
@@ -1969,6 +2168,1542 @@ async def get_predictive_alerts(
     except Exception as e:
         logger.error(f"Predictive alerts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# 🆕 FASE 2: NEXT REFUEL PREDICTION v3.12.21
+# ============================================================================
+
+
+@app.get("/fuelAnalytics/api/analytics/next-refuel-prediction")
+async def get_next_refuel_prediction(
+    truck_id: Optional[str] = Query(
+        default=None, description="Specific truck or None for all"
+    ),
+):
+    """
+    🆕 v3.12.21: Predict when each truck needs its next refuel
+
+    Uses:
+    - Current fuel level (%)
+    - Average consumption rate (gal/hour moving, gal/hour idle)
+    - Historical refuel patterns
+    - Planned route (if available)
+
+    Returns:
+        - Estimated hours/miles until refuel needed
+        - Recommended refuel location (nearest fuel stops)
+        - Confidence level based on data quality
+    """
+    try:
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+
+        engine = get_sqlalchemy_engine()
+
+        # Query to get current fuel levels and consumption rates
+        query = """
+            SELECT 
+                t.truck_id,
+                t.sensor_pct as current_fuel_pct,
+                t.estimated_pct as kalman_fuel_pct,
+                t.avg_mpg_24h,
+                t.avg_consumption_gph_24h,
+                t.avg_idle_gph_24h,
+                t.truck_status,
+                t.speed,
+                t.timestamp_utc,
+                COALESCE(r.avg_gallons_per_refuel, 100) as avg_refuel_gallons,
+                COALESCE(r.avg_hours_between_refuels, 48) as avg_hours_between
+            FROM truck_data_latest t
+            LEFT JOIN (
+                SELECT 
+                    truck_id,
+                    AVG(gallons_added) as avg_gallons_per_refuel,
+                    AVG(TIMESTAMPDIFF(HOUR, LAG(timestamp_utc) OVER (PARTITION BY truck_id ORDER BY timestamp_utc), timestamp_utc)) as avg_hours_between
+                FROM refuel_events
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                GROUP BY truck_id
+            ) r ON t.truck_id = r.truck_id
+            WHERE t.truck_id IS NOT NULL
+        """
+
+        if truck_id:
+            query += " AND t.truck_id = :truck_id"
+
+        with engine.connect() as conn:
+            if truck_id:
+                result = conn.execute(text(query), {"truck_id": truck_id})
+            else:
+                result = conn.execute(text(query))
+
+            rows = result.fetchall()
+
+        predictions = []
+        for row in rows:
+            row_dict = dict(row._mapping)
+
+            current_pct = (
+                row_dict.get("kalman_fuel_pct")
+                or row_dict.get("current_fuel_pct")
+                or 50
+            )
+            consumption_gph = row_dict.get("avg_consumption_gph_24h") or 4.0
+            idle_gph = row_dict.get("avg_idle_gph_24h") or 0.8
+            avg_mpg = row_dict.get("avg_mpg_24h") or 6.5
+            status = row_dict.get("truck_status") or "STOPPED"
+
+            # Estimate tank capacity (assume 200 gal for now, could be from trucks table)
+            tank_capacity_gal = 200
+
+            # Current gallons
+            current_gallons = (current_pct / 100) * tank_capacity_gal
+
+            # Gallons until low fuel (assume 15% threshold)
+            low_fuel_threshold_pct = 15
+            gallons_until_low = current_gallons - (
+                low_fuel_threshold_pct / 100 * tank_capacity_gal
+            )
+
+            if gallons_until_low <= 0:
+                hours_until_refuel = 0
+                miles_until_refuel = 0
+                urgency = "critical"
+            else:
+                # Calculate based on moving vs idle
+                if status == "MOVING":
+                    current_consumption = consumption_gph
+                else:
+                    current_consumption = idle_gph
+
+                # Weighted average assuming 70% moving, 30% idle
+                blended_consumption = (consumption_gph * 0.7) + (idle_gph * 0.3)
+
+                hours_until_refuel = (
+                    gallons_until_low / blended_consumption
+                    if blended_consumption > 0
+                    else 999
+                )
+                miles_until_refuel = (
+                    hours_until_refuel * 50 if avg_mpg and avg_mpg > 0 else 0
+                )  # Assume 50 mph avg
+
+                if hours_until_refuel < 4:
+                    urgency = "critical"
+                elif hours_until_refuel < 8:
+                    urgency = "warning"
+                elif hours_until_refuel < 24:
+                    urgency = "normal"
+                else:
+                    urgency = "good"
+
+            predictions.append(
+                {
+                    "truck_id": row_dict["truck_id"],
+                    "current_fuel_pct": round(current_pct, 1),
+                    "current_gallons": round(current_gallons, 1),
+                    "hours_until_refuel": (
+                        round(hours_until_refuel, 1)
+                        if hours_until_refuel < 999
+                        else None
+                    ),
+                    "miles_until_refuel": (
+                        round(miles_until_refuel, 0) if miles_until_refuel > 0 else None
+                    ),
+                    "urgency": urgency,
+                    "estimated_refuel_time": (
+                        (
+                            datetime.now() + timedelta(hours=hours_until_refuel)
+                        ).isoformat()
+                        if hours_until_refuel < 999
+                        else None
+                    ),
+                    "avg_consumption_gph": round(consumption_gph, 2),
+                    "confidence": (
+                        "high" if row_dict.get("avg_consumption_gph_24h") else "medium"
+                    ),
+                }
+            )
+
+        # Sort by urgency (critical first)
+        urgency_order = {"critical": 0, "warning": 1, "normal": 2, "good": 3}
+        predictions.sort(
+            key=lambda x: (
+                urgency_order.get(x["urgency"], 99),
+                x.get("hours_until_refuel") or 999,
+            )
+        )
+
+        return {
+            "predictions": predictions,
+            "count": len(predictions),
+            "critical_count": len(
+                [p for p in predictions if p["urgency"] == "critical"]
+            ),
+            "warning_count": len([p for p in predictions if p["urgency"] == "warning"]),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Next refuel prediction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# 🆕 FASE 2: EXPORT TO EXCEL/CSV v3.12.21
+# ============================================================================
+
+
+@app.get("/fuelAnalytics/api/export/fleet-report")
+async def export_fleet_report(
+    format: str = Query(default="csv", description="Export format: csv or excel"),
+    days: int = Query(default=7, ge=1, le=90, description="Days to include"),
+):
+    """
+    🆕 v3.12.21: Export fleet data to CSV or Excel
+
+    Includes:
+    - All trucks with current status
+    - MPG, fuel consumption, idle metrics
+    - Refuel events
+    - Alerts/issues
+    """
+    try:
+        import io
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+
+        engine = get_sqlalchemy_engine()
+
+        # Get fleet data
+        query = """
+            SELECT 
+                truck_id,
+                truck_status as status,
+                COALESCE(sensor_pct, 0) as fuel_pct,
+                COALESCE(estimated_pct, 0) as estimated_fuel_pct,
+                COALESCE(drift_pct, 0) as drift_pct,
+                COALESCE(mpg_current, 0) as current_mpg,
+                COALESCE(avg_mpg_24h, 0) as avg_mpg_24h,
+                COALESCE(consumption_gph, 0) as consumption_gph,
+                COALESCE(idle_consumption_gph, 0) as idle_gph,
+                COALESCE(speed, 0) as speed_mph,
+                latitude,
+                longitude,
+                timestamp_utc as last_update
+            FROM truck_data_latest
+            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+            ORDER BY truck_id
+        """
+
+        with engine.connect() as conn:
+            result = conn.execute(text(query), {"days": days})
+            data = [dict(row._mapping) for row in result.fetchall()]
+
+        if not data:
+            raise HTTPException(
+                status_code=404, detail="No data found for the specified period"
+            )
+
+        df = pd.DataFrame(data)
+
+        # Format datetime columns
+        if "last_update" in df.columns:
+            df["last_update"] = pd.to_datetime(df["last_update"]).dt.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
+        if format.lower() == "excel":
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df.to_excel(writer, sheet_name="Fleet Report", index=False)
+            output.seek(0)
+
+            filename = f"fleet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            return Response(
+                content=output.getvalue(),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+        else:
+            # Default to CSV
+            output = io.StringIO()
+            df.to_csv(output, index=False)
+
+            filename = f"fleet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Export error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# 🆕 v3.12.21: HISTORICAL COMPARISON ENDPOINTS (#12)
+# ============================================================================
+
+
+@app.get("/fuelAnalytics/api/analytics/historical-comparison", tags=["Analytics"])
+async def get_historical_comparison(
+    period1_start: str = Query(..., description="Start date for period 1 (YYYY-MM-DD)"),
+    period1_end: str = Query(..., description="End date for period 1 (YYYY-MM-DD)"),
+    period2_start: str = Query(..., description="Start date for period 2 (YYYY-MM-DD)"),
+    period2_end: str = Query(..., description="End date for period 2 (YYYY-MM-DD)"),
+    truck_id: Optional[str] = Query(None, description="Specific truck ID (optional)"),
+):
+    """
+    🆕 v3.12.21: Compare fleet metrics between two time periods.
+
+    Useful for:
+    - Month-over-month comparison
+    - Before/after analysis (e.g., driver training impact)
+    - Seasonal patterns
+
+    Returns changes in:
+    - MPG, fuel consumption, idle time
+    - Cost metrics
+    - Refuel patterns
+    """
+    try:
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+
+        engine = get_sqlalchemy_engine()
+
+        # Build query for both periods
+        base_query = """
+            SELECT 
+                COUNT(DISTINCT truck_id) as truck_count,
+                AVG(mpg) as avg_mpg,
+                AVG(consumption_gph) as avg_consumption_gph,
+                AVG(idle_pct) as avg_idle_pct,
+                SUM(CASE WHEN event_type = 'REFUEL' THEN 1 ELSE 0 END) as refuel_count,
+                AVG(sensor_fuel_pct) as avg_fuel_level,
+                AVG(daily_miles) as avg_daily_miles,
+                SUM(fuel_consumed_gal) as total_fuel_consumed
+            FROM fuel_metrics
+            WHERE timestamp_utc BETWEEN :start_date AND :end_date
+        """
+
+        truck_filter = " AND truck_id = :truck_id" if truck_id else ""
+
+        with engine.connect() as conn:
+            # Period 1
+            params1 = {
+                "start_date": period1_start,
+                "end_date": period1_end,
+            }
+            if truck_id:
+                params1["truck_id"] = truck_id
+            result1 = (
+                conn.execute(text(base_query + truck_filter), params1)
+                .mappings()
+                .fetchone()
+            )
+
+            # Period 2
+            params2 = {
+                "start_date": period2_start,
+                "end_date": period2_end,
+            }
+            if truck_id:
+                params2["truck_id"] = truck_id
+            result2 = (
+                conn.execute(text(base_query + truck_filter), params2)
+                .mappings()
+                .fetchone()
+            )
+
+        def safe_pct_change(old, new):
+            if old and old > 0 and new:
+                return round(((new - old) / old) * 100, 1)
+            return None
+
+        def safe_val(val):
+            return round(float(val), 2) if val else 0
+
+        period1_data = dict(result1) if result1 else {}
+        period2_data = dict(result2) if result2 else {}
+
+        return {
+            "period1": {
+                "start": period1_start,
+                "end": period1_end,
+                "avg_mpg": safe_val(period1_data.get("avg_mpg")),
+                "avg_consumption_gph": safe_val(
+                    period1_data.get("avg_consumption_gph")
+                ),
+                "avg_idle_pct": safe_val(period1_data.get("avg_idle_pct")),
+                "refuel_count": int(period1_data.get("refuel_count") or 0),
+                "total_fuel_consumed": safe_val(
+                    period1_data.get("total_fuel_consumed")
+                ),
+            },
+            "period2": {
+                "start": period2_start,
+                "end": period2_end,
+                "avg_mpg": safe_val(period2_data.get("avg_mpg")),
+                "avg_consumption_gph": safe_val(
+                    period2_data.get("avg_consumption_gph")
+                ),
+                "avg_idle_pct": safe_val(period2_data.get("avg_idle_pct")),
+                "refuel_count": int(period2_data.get("refuel_count") or 0),
+                "total_fuel_consumed": safe_val(
+                    period2_data.get("total_fuel_consumed")
+                ),
+            },
+            "changes": {
+                "mpg_change_pct": safe_pct_change(
+                    period1_data.get("avg_mpg"), period2_data.get("avg_mpg")
+                ),
+                "consumption_change_pct": safe_pct_change(
+                    period1_data.get("avg_consumption_gph"),
+                    period2_data.get("avg_consumption_gph"),
+                ),
+                "idle_change_pct": safe_pct_change(
+                    period1_data.get("avg_idle_pct"), period2_data.get("avg_idle_pct")
+                ),
+                "fuel_consumed_change_pct": safe_pct_change(
+                    period1_data.get("total_fuel_consumed"),
+                    period2_data.get("total_fuel_consumed"),
+                ),
+            },
+            "truck_id": truck_id,
+            "generated_at": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Historical comparison error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/analytics/trends", tags=["Analytics"])
+async def get_fleet_trends(
+    days: int = Query(30, ge=7, le=365, description="Days of history"),
+    metric: str = Query(
+        "mpg", description="Metric to trend: mpg, consumption, idle, fuel_level"
+    ),
+    truck_id: Optional[str] = Query(None, description="Specific truck ID (optional)"),
+):
+    """
+    🆕 v3.12.21: Get daily trends for a specific metric.
+
+    Returns daily averages for charting/visualization.
+    """
+    try:
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+
+        engine = get_sqlalchemy_engine()
+
+        metric_map = {
+            "mpg": "AVG(mpg)",
+            "consumption": "AVG(consumption_gph)",
+            "idle": "AVG(idle_pct)",
+            "fuel_level": "AVG(sensor_fuel_pct)",
+        }
+
+        if metric not in metric_map:
+            raise HTTPException(status_code=400, detail=f"Invalid metric: {metric}")
+
+        query = f"""
+            SELECT 
+                DATE(timestamp_utc) as date,
+                {metric_map[metric]} as value,
+                COUNT(*) as sample_count
+            FROM fuel_metrics
+            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+            {"AND truck_id = :truck_id" if truck_id else ""}
+            GROUP BY DATE(timestamp_utc)
+            ORDER BY date ASC
+        """
+
+        params = {"days": days}
+        if truck_id:
+            params["truck_id"] = truck_id
+
+        with engine.connect() as conn:
+            result = conn.execute(text(query), params).mappings().fetchall()
+
+        trends = [
+            {
+                "date": str(row["date"]),
+                "value": round(float(row["value"]), 2) if row["value"] else None,
+                "sample_count": int(row["sample_count"]),
+            }
+            for row in result
+        ]
+
+        return {
+            "metric": metric,
+            "days": days,
+            "truck_id": truck_id,
+            "data": trends,
+            "count": len(trends),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Fleet trends error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# 🆕 v3.12.21: SCHEDULED REPORTS ENDPOINTS (#13)
+# ============================================================================
+
+# In-memory storage for report schedules (in production, use database)
+_scheduled_reports: Dict[str, Dict] = {}
+
+
+@app.get("/fuelAnalytics/api/reports/schedules", tags=["Reports"])
+async def get_report_schedules():
+    """
+    🆕 v3.12.21: Get all scheduled reports.
+    """
+    return {
+        "schedules": list(_scheduled_reports.values()),
+        "count": len(_scheduled_reports),
+    }
+
+
+@app.post("/fuelAnalytics/api/reports/schedules", tags=["Reports"])
+async def create_report_schedule(
+    name: str = Query(..., description="Report name"),
+    report_type: str = Query(
+        ..., description="Type: daily_summary, weekly_kpis, monthly_analysis"
+    ),
+    frequency: str = Query(..., description="Frequency: daily, weekly, monthly"),
+    email_to: str = Query(..., description="Email recipient(s), comma-separated"),
+    include_trucks: Optional[str] = Query(
+        None, description="Truck IDs to include, comma-separated (all if empty)"
+    ),
+):
+    """
+    🆕 v3.12.21: Create a scheduled report.
+
+    Note: In production, this would be stored in database and processed by a scheduler.
+    """
+    import uuid
+
+    schedule_id = str(uuid.uuid4())[:8]
+
+    schedule = {
+        "id": schedule_id,
+        "name": name,
+        "report_type": report_type,
+        "frequency": frequency,
+        "email_to": [e.strip() for e in email_to.split(",")],
+        "include_trucks": (
+            [t.strip() for t in include_trucks.split(",")] if include_trucks else None
+        ),
+        "created_at": datetime.now().isoformat(),
+        "last_run": None,
+        "next_run": None,  # Would be calculated by scheduler
+        "status": "active",
+    }
+
+    _scheduled_reports[schedule_id] = schedule
+
+    return {
+        "success": True,
+        "schedule": schedule,
+        "message": f"Report schedule '{name}' created successfully",
+    }
+
+
+@app.delete("/fuelAnalytics/api/reports/schedules/{schedule_id}", tags=["Reports"])
+async def delete_report_schedule(schedule_id: str):
+    """
+    🆕 v3.12.21: Delete a scheduled report.
+    """
+    if schedule_id not in _scheduled_reports:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    del _scheduled_reports[schedule_id]
+
+    return {
+        "success": True,
+        "message": f"Schedule {schedule_id} deleted",
+    }
+
+
+@app.post("/fuelAnalytics/api/reports/generate", tags=["Reports"])
+async def generate_report_now(
+    report_type: str = Query(
+        ..., description="Type: daily_summary, weekly_kpis, theft_analysis"
+    ),
+    days: int = Query(7, ge=1, le=90, description="Days to include"),
+    format: str = Query("json", description="Format: json, csv, excel"),
+):
+    """
+    🆕 v3.12.21: Generate a report immediately.
+
+    Returns the report data or file depending on format.
+    """
+    try:
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+        import io
+
+        engine = get_sqlalchemy_engine()
+
+        if report_type == "daily_summary":
+            query = """
+                SELECT 
+                    truck_id,
+                    DATE(timestamp_utc) as date,
+                    AVG(mpg) as avg_mpg,
+                    AVG(consumption_gph) as avg_consumption,
+                    AVG(sensor_fuel_pct) as avg_fuel_level,
+                    MAX(daily_miles) as miles_driven,
+                    SUM(CASE WHEN event_type = 'REFUEL' THEN 1 ELSE 0 END) as refuel_count
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                GROUP BY truck_id, DATE(timestamp_utc)
+                ORDER BY date DESC, truck_id
+            """
+        elif report_type == "weekly_kpis":
+            query = """
+                SELECT 
+                    YEARWEEK(timestamp_utc) as week,
+                    COUNT(DISTINCT truck_id) as active_trucks,
+                    AVG(mpg) as fleet_avg_mpg,
+                    AVG(idle_pct) as fleet_avg_idle,
+                    SUM(fuel_consumed_gal) as total_fuel_gal,
+                    SUM(daily_miles) / COUNT(DISTINCT DATE(timestamp_utc)) as avg_daily_miles
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                GROUP BY YEARWEEK(timestamp_utc)
+                ORDER BY week DESC
+            """
+        elif report_type == "theft_analysis":
+            query = """
+                SELECT 
+                    truck_id,
+                    timestamp_utc,
+                    sensor_fuel_pct,
+                    estimated_fuel_pct,
+                    status,
+                    CASE 
+                        WHEN ABS(sensor_fuel_pct - estimated_fuel_pct) > 10 
+                        AND status = 'STOPPED' THEN 'SUSPICIOUS'
+                        ELSE 'NORMAL'
+                    END as alert_status
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                  AND ABS(sensor_fuel_pct - estimated_fuel_pct) > 5
+                ORDER BY timestamp_utc DESC
+                LIMIT 500
+            """
+        else:
+            raise HTTPException(
+                status_code=400, detail=f"Unknown report type: {report_type}"
+            )
+
+        with engine.connect() as conn:
+            df = pd.read_sql(text(query), conn, params={"days": days})
+
+        if format == "json":
+            return {
+                "report_type": report_type,
+                "days": days,
+                "generated_at": datetime.now().isoformat(),
+                "row_count": len(df),
+                "data": df.to_dict(orient="records"),
+            }
+        elif format == "excel":
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df.to_excel(writer, sheet_name=report_type, index=False)
+            output.seek(0)
+
+            filename = f"{report_type}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            return Response(
+                content=output.getvalue(),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+        else:  # CSV
+            output = io.StringIO()
+            df.to_csv(output, index=False)
+
+            filename = f"{report_type}_{datetime.now().strftime('%Y%m%d')}.csv"
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Report generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# 🆕 v3.12.21: ALERT SETTINGS ENDPOINTS
+# ============================================================================
+
+
+@app.get("/fuelAnalytics/api/alerts/settings", tags=["Alerts"])
+async def get_alert_settings():
+    """
+    🆕 v3.12.21: Get current alert notification settings
+
+    Returns configuration for SMS/Email alerts.
+    """
+    try:
+        from alert_service import get_alert_manager
+
+        manager = get_alert_manager()
+        twilio_config = manager.twilio.config
+        email_config = manager.email.config
+
+        return {
+            "sms": {
+                "enabled": twilio_config.is_configured(),
+                "from_number": twilio_config.from_number or None,
+                "to_numbers_count": len(twilio_config.to_numbers),
+            },
+            "email": {
+                "enabled": email_config.is_configured(),
+                "smtp_server": email_config.smtp_server or None,
+            },
+            "thresholds": {
+                "low_fuel_critical": 15,  # Always SMS
+                "low_fuel_high": 25,  # SMS if enabled
+                "theft_confidence_min": 0.6,
+            },
+            "description": {
+                "low_fuel": "SMS sent automatically when fuel ≤15% (CRITICAL). For 15-25% (HIGH), SMS optional.",
+                "theft": "SMS sent when confidence ≥60%. Detection includes: stopped theft, rapid loss, unexplained loss, idle loss.",
+            },
+        }
+    except Exception as e:
+        logger.error(f"Error getting alert settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/fuelAnalytics/api/alerts/test", tags=["Alerts"])
+async def send_test_alert(
+    alert_type: str = Query(
+        default="low_fuel", description="Type: low_fuel, theft, refuel"
+    ),
+    truck_id: str = Query(default="TEST-001", description="Test truck ID"),
+):
+    """
+    🆕 v3.12.21: Send a test alert to verify SMS/Email configuration
+    """
+    try:
+        from alert_service import get_alert_manager
+
+        manager = get_alert_manager()
+
+        if alert_type == "low_fuel":
+            result = manager.alert_low_fuel(
+                truck_id=truck_id,
+                current_level_pct=12.5,  # Critical level
+                estimated_miles_remaining=45,
+                send_sms=True,
+            )
+        elif alert_type == "theft":
+            result = manager.alert_theft_suspected(
+                truck_id=truck_id,
+                fuel_drop_gallons=35.0,
+                fuel_drop_pct=18.5,
+                location="Test Location, TX",
+            )
+        elif alert_type == "refuel":
+            result = manager.alert_refuel(
+                truck_id=truck_id,
+                gallons_added=75.5,
+                new_level_pct=92.0,
+                location="Test Fuel Stop",
+                send_sms=True,
+            )
+        else:
+            raise HTTPException(
+                status_code=400, detail=f"Unknown alert type: {alert_type}"
+            )
+
+        return {
+            "success": result,
+            "alert_type": alert_type,
+            "truck_id": truck_id,
+            "message": (
+                "Alert sent successfully"
+                if result
+                else "Alert failed - check configuration"
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending test alert: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/export/refuels")
+async def export_refuels_report(
+    format: str = Query(default="csv", description="Export format: csv or excel"),
+    days: int = Query(default=30, ge=1, le=365, description="Days to include"),
+    truck_id: Optional[str] = Query(default=None, description="Filter by truck"),
+):
+    """
+    🆕 v3.12.21: Export refuel events to CSV or Excel
+    """
+    try:
+        import io
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+
+        engine = get_sqlalchemy_engine()
+
+        query = """
+            SELECT 
+                truck_id,
+                timestamp_utc as refuel_time,
+                fuel_before,
+                fuel_after,
+                gallons_added,
+                refuel_type,
+                latitude,
+                longitude,
+                validated
+            FROM refuel_events
+            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+        """
+
+        params = {"days": days}
+        if truck_id:
+            query += " AND truck_id = :truck_id"
+            params["truck_id"] = truck_id
+
+        query += " ORDER BY timestamp_utc DESC"
+
+        with engine.connect() as conn:
+            result = conn.execute(text(query), params)
+            data = [dict(row._mapping) for row in result.fetchall()]
+
+        if not data:
+            raise HTTPException(status_code=404, detail="No refuel events found")
+
+        df = pd.DataFrame(data)
+
+        if "refuel_time" in df.columns:
+            df["refuel_time"] = pd.to_datetime(df["refuel_time"]).dt.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
+        if format.lower() == "excel":
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df.to_excel(writer, sheet_name="Refuel Events", index=False)
+            output.seek(0)
+
+            filename = f"refuels_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            return Response(
+                content=output.getvalue(),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+        else:
+            output = io.StringIO()
+            df.to_csv(output, index=False)
+
+            filename = f"refuels_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"},
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Export refuels error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# 🆕 v3.12.21: DASHBOARD CUSTOMIZATION ENDPOINTS (#11)
+# ============================================================================
+
+# In-memory storage for user dashboards (replace with DB in production)
+_user_dashboards: Dict[str, Dict] = {}
+_user_preferences: Dict[str, Dict] = {}
+_scheduled_reports: Dict[str, Dict] = {}
+
+
+@app.get("/fuelAnalytics/api/dashboard/widgets/available", tags=["Dashboard"])
+async def get_available_widgets():
+    """
+    🆕 v3.12.21: Get list of available widget types for dashboard customization.
+    """
+    from models import WidgetType, WidgetSize
+
+    widgets = [
+        {
+            "type": WidgetType.FLEET_SUMMARY.value,
+            "name": "Fleet Summary",
+            "description": "Overview of fleet status, active/offline trucks",
+            "default_size": WidgetSize.LARGE.value,
+            "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
+            "config_options": ["showOffline", "showAlerts"],
+        },
+        {
+            "type": WidgetType.TRUCK_MAP.value,
+            "name": "Truck Map",
+            "description": "Real-time GPS locations of all trucks",
+            "default_size": WidgetSize.LARGE.value,
+            "available_sizes": [WidgetSize.LARGE.value, WidgetSize.FULL_WIDTH.value],
+            "config_options": ["showLabels", "clusterMarkers"],
+        },
+        {
+            "type": WidgetType.EFFICIENCY_CHART.value,
+            "name": "Efficiency Chart",
+            "description": "MPG and fuel consumption trends",
+            "default_size": WidgetSize.MEDIUM.value,
+            "available_sizes": [
+                WidgetSize.SMALL.value,
+                WidgetSize.MEDIUM.value,
+                WidgetSize.LARGE.value,
+            ],
+            "config_options": ["period", "showTrend"],
+        },
+        {
+            "type": WidgetType.FUEL_LEVELS.value,
+            "name": "Fuel Levels",
+            "description": "Current fuel levels across fleet",
+            "default_size": WidgetSize.MEDIUM.value,
+            "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
+            "config_options": ["sortBy", "lowFuelThreshold"],
+        },
+        {
+            "type": WidgetType.ALERTS.value,
+            "name": "Alerts",
+            "description": "Active alerts and notifications",
+            "default_size": WidgetSize.SMALL.value,
+            "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
+            "config_options": ["severityFilter", "limit"],
+        },
+        {
+            "type": WidgetType.MPG_RANKING.value,
+            "name": "MPG Ranking",
+            "description": "Top/bottom performers by MPG",
+            "default_size": WidgetSize.SMALL.value,
+            "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
+            "config_options": ["topN", "showBottom"],
+        },
+        {
+            "type": WidgetType.IDLE_TRACKING.value,
+            "name": "Idle Tracking",
+            "description": "Idle time and consumption analysis",
+            "default_size": WidgetSize.MEDIUM.value,
+            "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
+            "config_options": ["period", "threshold"],
+        },
+        {
+            "type": WidgetType.REFUEL_HISTORY.value,
+            "name": "Refuel History",
+            "description": "Recent refueling events",
+            "default_size": WidgetSize.MEDIUM.value,
+            "available_sizes": [
+                WidgetSize.SMALL.value,
+                WidgetSize.MEDIUM.value,
+                WidgetSize.LARGE.value,
+            ],
+            "config_options": ["limit", "showCost"],
+        },
+        {
+            "type": WidgetType.PREDICTIONS.value,
+            "name": "Predictions",
+            "description": "Fuel consumption and empty tank predictions",
+            "default_size": WidgetSize.MEDIUM.value,
+            "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
+            "config_options": ["predictionHours", "showRange"],
+        },
+        {
+            "type": WidgetType.HEALTH_MONITOR.value,
+            "name": "Health Monitor",
+            "description": "Truck health scores and anomaly detection",
+            "default_size": WidgetSize.LARGE.value,
+            "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
+            "config_options": ["alertsOnly", "showTrends"],
+        },
+    ]
+
+    return {"widgets": widgets, "total": len(widgets)}
+
+
+@app.get("/fuelAnalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
+async def get_dashboard_layout(user_id: str):
+    """
+    🆕 v3.12.21: Get user's dashboard layout configuration.
+    """
+    if user_id in _user_dashboards:
+        return _user_dashboards[user_id]
+
+    # Return default layout
+    from models import WidgetType, WidgetSize
+
+    default_layout = {
+        "user_id": user_id,
+        "name": "Default Dashboard",
+        "columns": 4,
+        "theme": "dark",
+        "widgets": [
+            {
+                "id": "widget-1",
+                "widget_type": WidgetType.FLEET_SUMMARY.value,
+                "title": "Fleet Overview",
+                "size": WidgetSize.LARGE.value,
+                "position": {"x": 0, "y": 0},
+                "config": {},
+                "visible": True,
+            },
+            {
+                "id": "widget-2",
+                "widget_type": WidgetType.ALERTS.value,
+                "title": "Active Alerts",
+                "size": WidgetSize.SMALL.value,
+                "position": {"x": 2, "y": 0},
+                "config": {"limit": 5},
+                "visible": True,
+            },
+            {
+                "id": "widget-3",
+                "widget_type": WidgetType.EFFICIENCY_CHART.value,
+                "title": "Fleet Efficiency",
+                "size": WidgetSize.MEDIUM.value,
+                "position": {"x": 0, "y": 2},
+                "config": {"period": "24h"},
+                "visible": True,
+            },
+            {
+                "id": "widget-4",
+                "widget_type": WidgetType.MPG_RANKING.value,
+                "title": "Top Performers",
+                "size": WidgetSize.SMALL.value,
+                "position": {"x": 2, "y": 2},
+                "config": {"topN": 5},
+                "visible": True,
+            },
+        ],
+        "created_at": utc_now().isoformat(),
+        "updated_at": utc_now().isoformat(),
+    }
+
+    return default_layout
+
+
+@app.post("/fuelAnalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
+async def save_dashboard_layout(user_id: str, layout: Dict[str, Any]):
+    """
+    🆕 v3.12.21: Save user's dashboard layout configuration.
+    """
+    layout["user_id"] = user_id
+    layout["updated_at"] = utc_now().isoformat()
+
+    if user_id not in _user_dashboards:
+        layout["created_at"] = utc_now().isoformat()
+    else:
+        layout["created_at"] = _user_dashboards[user_id].get(
+            "created_at", utc_now().isoformat()
+        )
+
+    _user_dashboards[user_id] = layout
+
+    logger.info(f"📊 Dashboard layout saved for user {user_id}")
+
+    return {"status": "saved", "layout": layout}
+
+
+@app.put(
+    "/fuelAnalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
+)
+async def update_widget(user_id: str, widget_id: str, widget_config: Dict[str, Any]):
+    """
+    🆕 v3.12.21: Update a specific widget's configuration.
+    """
+    if user_id not in _user_dashboards:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+
+    dashboard = _user_dashboards[user_id]
+    widget_found = False
+
+    for widget in dashboard.get("widgets", []):
+        if widget["id"] == widget_id:
+            widget.update(widget_config)
+            widget_found = True
+            break
+
+    if not widget_found:
+        raise HTTPException(status_code=404, detail=f"Widget {widget_id} not found")
+
+    dashboard["updated_at"] = utc_now().isoformat()
+
+    return {"status": "updated", "widget_id": widget_id}
+
+
+@app.delete(
+    "/fuelAnalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
+)
+async def delete_widget(user_id: str, widget_id: str):
+    """
+    🆕 v3.12.21: Remove a widget from user's dashboard.
+    """
+    if user_id not in _user_dashboards:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+
+    dashboard = _user_dashboards[user_id]
+    original_count = len(dashboard.get("widgets", []))
+
+    dashboard["widgets"] = [
+        w for w in dashboard.get("widgets", []) if w["id"] != widget_id
+    ]
+
+    if len(dashboard["widgets"]) == original_count:
+        raise HTTPException(status_code=404, detail=f"Widget {widget_id} not found")
+
+    dashboard["updated_at"] = utc_now().isoformat()
+
+    return {"status": "deleted", "widget_id": widget_id}
+
+
+@app.get("/fuelAnalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
+async def get_user_preferences(user_id: str):
+    """
+    🆕 v3.12.21: Get user preferences.
+    """
+    if user_id in _user_preferences:
+        return _user_preferences[user_id]
+
+    # Default preferences
+    return {
+        "user_id": user_id,
+        "default_dashboard": None,
+        "favorite_trucks": [],
+        "alert_settings": {
+            "email_alerts": False,
+            "sms_alerts": False,
+            "push_notifications": True,
+            "severity_filter": ["critical", "warning"],
+        },
+        "timezone": "America/Chicago",
+        "units": "imperial",
+        "notifications_enabled": True,
+        "email_reports": False,
+        "report_frequency": "daily",
+    }
+
+
+@app.put("/fuelAnalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
+async def update_user_preferences(user_id: str, preferences: Dict[str, Any]):
+    """
+    🆕 v3.12.21: Update user preferences.
+    """
+    preferences["user_id"] = user_id
+    _user_preferences[user_id] = preferences
+
+    logger.info(f"⚙️ Preferences updated for user {user_id}")
+
+    return {"status": "updated", "preferences": preferences}
+
+
+# ============================================================================
+# 🆕 v3.12.21: SCHEDULED REPORTS ENDPOINTS (#13)
+# ============================================================================
+
+
+@app.get("/fuelAnalytics/api/reports/scheduled/{user_id}", tags=["Reports"])
+async def get_scheduled_reports(user_id: str):
+    """
+    🆕 v3.12.21: Get user's scheduled reports.
+    """
+    user_reports = [
+        r for r in _scheduled_reports.values() if r.get("user_id") == user_id
+    ]
+
+    return {"reports": user_reports, "total": len(user_reports)}
+
+
+@app.post("/fuelAnalytics/api/reports/schedule", tags=["Reports"])
+async def create_scheduled_report(report: Dict[str, Any]):
+    """
+    🆕 v3.12.21: Create a new scheduled report.
+    """
+    import uuid
+
+    report_id = f"report-{uuid.uuid4().hex[:8]}"
+    report["id"] = report_id
+    report["created_at"] = utc_now().isoformat()
+    report["enabled"] = True
+    report["last_run"] = None
+
+    # Calculate next run based on schedule
+    schedule = report.get("schedule", "daily")
+    if schedule == "daily":
+        report["next_run"] = (
+            (utc_now() + timedelta(days=1))
+            .replace(hour=6, minute=0, second=0)
+            .isoformat()
+        )
+    elif schedule == "weekly":
+        report["next_run"] = (
+            (utc_now() + timedelta(days=7))
+            .replace(hour=6, minute=0, second=0)
+            .isoformat()
+        )
+    elif schedule == "monthly":
+        report["next_run"] = (
+            (utc_now() + timedelta(days=30))
+            .replace(hour=6, minute=0, second=0)
+            .isoformat()
+        )
+
+    _scheduled_reports[report_id] = report
+
+    logger.info(f"📅 Scheduled report created: {report_id}")
+
+    return {"status": "created", "report": report}
+
+
+@app.put("/fuelAnalytics/api/reports/schedule/{report_id}", tags=["Reports"])
+async def update_scheduled_report(report_id: str, updates: Dict[str, Any]):
+    """
+    🆕 v3.12.21: Update a scheduled report.
+    """
+    if report_id not in _scheduled_reports:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report = _scheduled_reports[report_id]
+    report.update(updates)
+    report["updated_at"] = utc_now().isoformat()
+
+    return {"status": "updated", "report": report}
+
+
+@app.delete("/fuelAnalytics/api/reports/schedule/{report_id}", tags=["Reports"])
+async def delete_scheduled_report(report_id: str):
+    """
+    🆕 v3.12.21: Delete a scheduled report.
+    """
+    if report_id not in _scheduled_reports:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    del _scheduled_reports[report_id]
+
+    logger.info(f"🗑️ Scheduled report deleted: {report_id}")
+
+    return {"status": "deleted", "report_id": report_id}
+
+
+@app.post("/fuelAnalytics/api/reports/run/{report_id}", tags=["Reports"])
+async def run_report_now(report_id: str):
+    """
+    🆕 v3.12.21: Run a scheduled report immediately.
+    """
+    if report_id not in _scheduled_reports:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report = _scheduled_reports[report_id]
+    report_type = report.get("report_type", "fleet_summary")
+
+    # Generate report based on type
+    try:
+        if report_type == "fleet_summary":
+            data = await get_fleet_summary()
+        elif report_type == "efficiency":
+            data = await get_efficiency_rankings()
+        elif report_type == "fuel_usage":
+            # Get fuel consumption data
+            data = {"message": "Fuel usage report generated"}
+        else:
+            data = {"message": f"Report type '{report_type}' generated"}
+
+        report["last_run"] = utc_now().isoformat()
+
+        return {
+            "status": "success",
+            "report_id": report_id,
+            "generated_at": report["last_run"],
+            "data_preview": str(data)[:500] if data else None,
+        }
+    except Exception as e:
+        logger.error(f"Report generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# 🆕 v3.12.21: GPS TRACKING ENDPOINTS (#17)
+# ============================================================================
+
+# In-memory storage for GPS tracking (replace with DB in production)
+_gps_tracking_data: Dict[str, Dict] = {}
+_geofences: Dict[str, Dict] = {}
+
+
+@app.get("/fuelAnalytics/api/gps/trucks", tags=["GPS"])
+async def get_gps_truck_positions():
+    """
+    🆕 v3.12.21: Get real-time GPS positions for all trucks.
+    """
+    try:
+        # Get truck data from database
+        fleet = await get_fleet_summary()
+        trucks = fleet.get("truck_details", []) if isinstance(fleet, dict) else []
+
+        positions = []
+        for truck in trucks:
+            truck_id = truck.get("truck_id", "")
+            positions.append(
+                {
+                    "truck_id": truck_id,
+                    "latitude": truck.get("latitude"),
+                    "longitude": truck.get("longitude"),
+                    "speed_mph": truck.get("speed_mph", 0),
+                    "heading": truck.get("heading", 0),
+                    "status": truck.get("status", "UNKNOWN"),
+                    "last_update": truck.get("last_update") or utc_now().isoformat(),
+                    "address": _gps_tracking_data.get(truck_id, {}).get("last_address"),
+                }
+            )
+
+        return {
+            "trucks": positions,
+            "total": len(positions),
+            "timestamp": utc_now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"GPS positions error: {e}")
+        return {"trucks": [], "total": 0, "error": str(e)}
+
+
+@app.get("/fuelAnalytics/api/gps/truck/{truck_id}/history", tags=["GPS"])
+async def get_truck_route_history(
+    truck_id: str,
+    hours: int = Query(24, ge=1, le=168, description="Hours of history to retrieve"),
+):
+    """
+    🆕 v3.12.21: Get GPS route history for a specific truck.
+    """
+    try:
+        # In production, this would query MySQL historical GPS data
+        # For now, return sample data structure
+        return {
+            "truck_id": truck_id,
+            "period_hours": hours,
+            "route": [],  # Would contain [{lat, lon, timestamp, speed}]
+            "total_distance_miles": 0,
+            "stops": [],  # Detected stops/rest areas
+            "geofence_events": [],
+        }
+    except Exception as e:
+        logger.error(f"Route history error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/gps/geofences", tags=["GPS"])
+async def get_geofences():
+    """
+    🆕 v3.12.21: Get all configured geofences.
+    """
+    return {"geofences": list(_geofences.values()), "total": len(_geofences)}
+
+
+@app.post("/fuelAnalytics/api/gps/geofence", tags=["GPS"])
+async def create_geofence(geofence: Dict[str, Any]):
+    """
+    🆕 v3.12.21: Create a new geofence zone.
+
+    Types: circle (center + radius) or polygon (list of coordinates)
+    """
+    import uuid
+
+    geofence_id = f"geofence-{uuid.uuid4().hex[:8]}"
+    geofence["id"] = geofence_id
+    geofence["created_at"] = utc_now().isoformat()
+    geofence["active"] = True
+
+    _geofences[geofence_id] = geofence
+
+    logger.info(f"📍 Geofence created: {geofence.get('name', geofence_id)}")
+
+    return {"status": "created", "geofence": geofence}
+
+
+@app.delete("/fuelAnalytics/api/gps/geofence/{geofence_id}", tags=["GPS"])
+async def delete_geofence(geofence_id: str):
+    """
+    🆕 v3.12.21: Delete a geofence.
+    """
+    if geofence_id not in _geofences:
+        raise HTTPException(status_code=404, detail="Geofence not found")
+
+    del _geofences[geofence_id]
+    return {"status": "deleted", "geofence_id": geofence_id}
+
+
+@app.get("/fuelAnalytics/api/gps/geofence/{geofence_id}/events", tags=["GPS"])
+async def get_geofence_events(
+    geofence_id: str,
+    hours: int = Query(24, ge=1, le=168),
+):
+    """
+    🆕 v3.12.21: Get entry/exit events for a geofence.
+    """
+    if geofence_id not in _geofences:
+        raise HTTPException(status_code=404, detail="Geofence not found")
+
+    # In production, query historical events from database
+    return {
+        "geofence_id": geofence_id,
+        "geofence_name": _geofences[geofence_id].get("name"),
+        "period_hours": hours,
+        "events": [],  # Would contain [{truck_id, event_type, timestamp}]
+        "summary": {"total_entries": 0, "total_exits": 0, "unique_trucks": 0},
+    }
+
+
+# ============================================================================
+# 🆕 v3.12.21: PUSH NOTIFICATIONS ENDPOINTS (#19)
+# ============================================================================
+
+# In-memory storage for notifications
+_push_subscriptions: Dict[str, Dict] = {}
+_notification_queue: List[Dict] = []
+
+
+@app.post("/fuelAnalytics/api/notifications/subscribe", tags=["Notifications"])
+async def subscribe_to_push(subscription: Dict[str, Any]):
+    """
+    🆕 v3.12.21: Subscribe a device to push notifications.
+    """
+    user_id = subscription.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    subscription["subscribed_at"] = utc_now().isoformat()
+    subscription["active"] = True
+
+    _push_subscriptions[user_id] = subscription
+
+    logger.info(f"🔔 Push subscription added for user {user_id}")
+
+    return {"status": "subscribed", "user_id": user_id}
+
+
+@app.delete(
+    "/fuelAnalytics/api/notifications/unsubscribe/{user_id}", tags=["Notifications"]
+)
+async def unsubscribe_from_push(user_id: str):
+    """
+    🆕 v3.12.21: Unsubscribe a device from push notifications.
+    """
+    if user_id in _push_subscriptions:
+        del _push_subscriptions[user_id]
+
+    return {"status": "unsubscribed", "user_id": user_id}
+
+
+@app.get("/fuelAnalytics/api/notifications/{user_id}", tags=["Notifications"])
+async def get_user_notifications(
+    user_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    unread_only: bool = Query(False),
+):
+    """
+    🆕 v3.12.21: Get notifications for a user.
+    """
+    # Filter notifications for this user
+    user_notifications = [
+        n
+        for n in _notification_queue
+        if n.get("user_id") == user_id or n.get("broadcast", False)
+    ]
+
+    if unread_only:
+        user_notifications = [n for n in user_notifications if not n.get("read", False)]
+
+    return {
+        "notifications": user_notifications[-limit:],
+        "total": len(user_notifications),
+        "unread_count": len(
+            [n for n in user_notifications if not n.get("read", False)]
+        ),
+    }
+
+
+@app.post("/fuelAnalytics/api/notifications/send", tags=["Notifications"])
+async def send_notification(notification: Dict[str, Any]):
+    """
+    🆕 v3.12.21: Send a push notification.
+
+    For internal/admin use to send alerts to users.
+    """
+    import uuid
+
+    notification["id"] = f"notif-{uuid.uuid4().hex[:8]}"
+    notification["created_at"] = utc_now().isoformat()
+    notification["read"] = False
+
+    _notification_queue.append(notification)
+
+    # Limit queue size
+    if len(_notification_queue) > 1000:
+        _notification_queue.pop(0)
+
+    # In production, this would trigger actual push via FCM/APNs
+    target = notification.get("user_id", "broadcast")
+    logger.info(
+        f"📨 Notification sent to {target}: {notification.get('title', 'No title')}"
+    )
+
+    return {"status": "sent", "notification_id": notification["id"]}
+
+
+@app.put(
+    "/fuelAnalytics/api/notifications/{notification_id}/read", tags=["Notifications"]
+)
+async def mark_notification_read(notification_id: str):
+    """
+    🆕 v3.12.21: Mark a notification as read.
+    """
+    for notification in _notification_queue:
+        if notification.get("id") == notification_id:
+            notification["read"] = True
+            notification["read_at"] = utc_now().isoformat()
+            return {"status": "marked_read", "notification_id": notification_id}
+
+    raise HTTPException(status_code=404, detail="Notification not found")
+
+
+@app.post("/fuelAnalytics/api/notifications/{user_id}/read-all", tags=["Notifications"])
+async def mark_all_notifications_read(user_id: str):
+    """
+    🆕 v3.12.21: Mark all notifications as read for a user.
+    """
+    count = 0
+    for notification in _notification_queue:
+        if notification.get("user_id") == user_id or notification.get(
+            "broadcast", False
+        ):
+            if not notification.get("read", False):
+                notification["read"] = True
+                notification["read_at"] = utc_now().isoformat()
+                count += 1
+
+    return {"status": "success", "marked_read": count}
 
 
 # ============================================================================

@@ -33,10 +33,10 @@ class TestMPGConfig:
     """Test MPGConfig validation"""
 
     def test_default_config(self):
-        """Test default configuration values - v3.10.7 updated"""
+        """Test default configuration values - v3.12.18 updated"""
         config = MPGConfig()
-        assert config.min_miles == 10.0  # v3.10.7: Increased for reliable MPG
-        assert config.min_fuel_gal == 1.5  # v3.10.7: Increased for sufficient sample
+        assert config.min_miles == 5.0  # v3.12.18: Reduced from 10.0 for faster updates
+        assert config.min_fuel_gal == 0.75  # v3.12.18: Reduced for faster updates
         assert config.min_mpg == 3.5  # Physical min for Class 8
         assert config.max_mpg == 9.0  # Physical max for Class 8
         assert config.ema_alpha == 0.4  # v3.10.7: Reduced for smoother readings

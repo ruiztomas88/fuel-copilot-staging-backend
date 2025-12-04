@@ -17,7 +17,7 @@ FIXES ALL DASHBOARD ISSUES:
 ✅ Emergency reset for extreme drift
 
 Author: Fuel Copilot Team
-Version: 3.0.0
+Version: 3.12.21
 Date: December 2025
 """
 
@@ -30,7 +30,6 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Any, List
 import logging
-from typing import Dict, Optional, Any
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -92,7 +91,7 @@ KALMAN_CONFIG = {
 def load_tank_capacities() -> Dict[str, float]:
     """Load tank capacities from tanks.yaml"""
     yaml_path = Path(__file__).parent / "tanks.yaml"
-    capacities = {"default": 200}
+    capacities: Dict[str, float] = {"default": 200.0}
 
     if yaml_path.exists():
         try:
@@ -100,7 +99,7 @@ def load_tank_capacities() -> Dict[str, float]:
                 config = yaml.safe_load(f)
             trucks = config.get("trucks", {})
             for truck_id, truck_config in trucks.items():
-                capacities[truck_id] = truck_config.get("capacity_gallons", 200)
+                capacities[truck_id] = float(truck_config.get("capacity_gallons", 200))
             logger.info(
                 f"✅ Loaded capacities for {len(trucks)} trucks from tanks.yaml"
             )
@@ -453,8 +452,11 @@ def detect_refuel(
             f"(+{increase_gal:.1f} gal) over {time_gap_hours*60:.0f} min"
         )
 
+        # 🔧 v3.12.21: Include prev_pct and new_pct for logging/notifications
         return {
             "type": "REFUEL",
+            "prev_pct": last_sensor_pct,
+            "new_pct": sensor_pct,
             "increase_pct": fuel_increase_pct,
             "increase_gal": increase_gal,
             "time_gap_hours": time_gap_hours,
@@ -469,33 +471,97 @@ def detect_fuel_theft(
     last_sensor_pct: Optional[float],
     truck_status: str,
     time_gap_hours: float,
+    tank_capacity_gal: float = 200.0,
 ) -> Optional[Dict]:
     """
-    Fuel theft detection
+    🆕 v3.12.21: Enhanced Fuel theft detection with multiple heuristics.
 
-    Criteria:
-    - Truck was stopped
-    - Fuel drop > 10%
-    - Not explainable by consumption
+    Detection criteria (ANY match triggers alert):
+    1. STOPPED theft: Large drop (>10%) while truck was stopped
+    2. RAPID theft: Very large drop (>20%) in short time (<1 hour)
+    3. PATTERN theft: Multiple moderate drops (>5%) when consumption doesn't explain it
+
+    Args:
+        sensor_pct: Current sensor reading (%)
+        estimated_pct: Expected level based on consumption model
+        last_sensor_pct: Previous sensor reading (%)
+        truck_status: MOVING, STOPPED, or IDLE
+        time_gap_hours: Time since last reading
+        tank_capacity_gal: Tank capacity for gallon calculations
+
+    Returns:
+        Dict with theft details or None if no theft detected
     """
     if last_sensor_pct is None or sensor_pct is None:
         return None
 
-    if truck_status != "STOPPED":
+    fuel_drop_pct = last_sensor_pct - sensor_pct
+    fuel_drop_gal = fuel_drop_pct * tank_capacity_gal / 100
+
+    # No significant drop
+    if fuel_drop_pct <= 3:
         return None
 
-    fuel_drop_pct = last_sensor_pct - sensor_pct
+    theft_confidence = 0.0
+    theft_type = None
+    reasons = []
 
-    # Significant unexplained drop
-    if fuel_drop_pct > 10:
+    # 1. STOPPED theft: Drop while truck was stationary
+    if truck_status == "STOPPED":
+        if fuel_drop_pct > 10:
+            theft_confidence = 0.9
+            theft_type = "STOPPED_THEFT"
+            reasons.append(f"Large drop ({fuel_drop_pct:.1f}%) while stopped")
+        elif fuel_drop_pct > 5:
+            theft_confidence = 0.6
+            theft_type = "STOPPED_SUSPICIOUS"
+            reasons.append(f"Moderate drop ({fuel_drop_pct:.1f}%) while stopped")
+
+    # 2. RAPID theft: Very large drop in short time
+    if fuel_drop_pct > 20 and time_gap_hours < 1.0:
+        # This is suspicious regardless of status
+        if theft_confidence < 0.85:
+            theft_confidence = 0.85
+            theft_type = "RAPID_LOSS"
+            reasons.append(
+                f"Rapid loss ({fuel_drop_pct:.1f}%) in {time_gap_hours*60:.0f} min"
+            )
+
+    # 3. UNEXPLAINED: Drop much larger than expected consumption
+    if estimated_pct is not None:
+        expected_drop = last_sensor_pct - estimated_pct
+        unexplained_drop = (
+            fuel_drop_pct - expected_drop if expected_drop > 0 else fuel_drop_pct
+        )
+
+        if unexplained_drop > 8:  # >8% more than expected
+            if theft_confidence < 0.7:
+                theft_confidence = 0.7
+                theft_type = "UNEXPLAINED_LOSS"
+            reasons.append(f"Unexplained loss of {unexplained_drop:.1f}%")
+
+    # 4. IDLE theft: Drop while engine running but not moving (siphoning)
+    if truck_status == "IDLE" and fuel_drop_pct > 8:
+        if theft_confidence < 0.65:
+            theft_confidence = 0.65
+            theft_type = "IDLE_LOSS"
+            reasons.append(f"Significant drop ({fuel_drop_pct:.1f}%) while idling")
+
+    # Only report if confidence is high enough
+    if theft_confidence >= 0.6:
         logger.warning(
-            f"🚨 POSSIBLE FUEL THEFT: -{fuel_drop_pct:.1f}% "
-            f"while stopped for {time_gap_hours*60:.0f} min"
+            f"🚨 POSSIBLE FUEL THEFT ({theft_type}): -{fuel_drop_pct:.1f}% "
+            f"({fuel_drop_gal:.1f} gal) while {truck_status} for {time_gap_hours*60:.0f} min. "
+            f"Confidence: {theft_confidence:.0%}"
         )
         return {
-            "type": "THEFT",
+            "type": theft_type,
             "drop_pct": fuel_drop_pct,
+            "drop_gal": fuel_drop_gal,
             "time_gap_hours": time_gap_hours,
+            "confidence": theft_confidence,
+            "reasons": reasons,
+            "truck_status": truck_status,
         }
 
     return None
@@ -931,6 +997,7 @@ def process_truck(
         last_sensor_pct=estimator.last_fuel_lvl_pct,
         truck_status=truck_status,
         time_gap_hours=time_gap_hours,
+        tank_capacity_gal=tank_capacity_gal,
     )
 
     # Update estimator timestamp

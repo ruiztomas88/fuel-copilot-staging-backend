@@ -23,9 +23,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Configuration
-SECRET_KEY = os.getenv(
-    "JWT_SECRET_KEY", "fuel-copilot-super-secret-key-change-in-production-2025"
-)
+# 🔧 v3.12.21: Generate secure random key if not provided
+# IMPORTANT: Set JWT_SECRET_KEY in .env for production!
+_default_secret = secrets.token_urlsafe(32)
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    logger.warning(
+        "⚠️ JWT_SECRET_KEY not set! Using random key (sessions won't persist across restarts)"
+    )
+    SECRET_KEY = _default_secret
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = (
     168  # 7 days (was 24h - users complained about session expiring)

@@ -266,17 +266,29 @@ class DatabaseManager:
                     )
                     # Enrich with missing fields required by FleetSummary model
                     mysql_summary["data_source"] = "MySQL"
-                    mysql_summary["critical_count"] = (
-                        0  # TODO: implement health calculation
+
+                    # 🔧 FIX v3.12.21: Calculate health counts based on truck status
+                    truck_details = self._get_truck_details_from_mysql()
+                    critical_count = sum(
+                        1
+                        for t in truck_details
+                        if t.get("fuel_pct", 100) < 15 or t.get("status") == "OFFLINE"
                     )
-                    mysql_summary["warning_count"] = 0
-                    mysql_summary["healthy_count"] = mysql_summary["total_trucks"]
+                    warning_count = sum(
+                        1 for t in truck_details if 15 <= t.get("fuel_pct", 100) < 25
+                    )
+                    healthy_count = (
+                        mysql_summary["total_trucks"] - critical_count - warning_count
+                    )
+
+                    mysql_summary["critical_count"] = critical_count
+                    mysql_summary["warning_count"] = warning_count
+                    mysql_summary["healthy_count"] = max(0, healthy_count)
                     mysql_summary["avg_idle_gph"] = mysql_summary.get(
                         "avg_consumption", 0
                     )
 
                     # 🔧 FIX v3.11.2: Populate truck_details for dashboard table
-                    truck_details = self._get_truck_details_from_mysql()
                     mysql_summary["truck_details"] = truck_details
                     mysql_summary["timestamp"] = datetime.now()
                     return mysql_summary

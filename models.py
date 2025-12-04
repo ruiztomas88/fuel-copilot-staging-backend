@@ -437,3 +437,138 @@ class FleetHealthSummary(BaseModel):
             }
         }
     )
+
+
+# ============================================================================
+# Dashboard Customization Models (v3.12.21)
+# ============================================================================
+
+
+class WidgetType(str, Enum):
+    """Available widget types for dashboard"""
+
+    FLEET_SUMMARY = "fleet_summary"
+    TRUCK_MAP = "truck_map"
+    EFFICIENCY_CHART = "efficiency_chart"
+    FUEL_LEVELS = "fuel_levels"
+    ALERTS = "alerts"
+    MPG_RANKING = "mpg_ranking"
+    IDLE_TRACKING = "idle_tracking"
+    REFUEL_HISTORY = "refuel_history"
+    PREDICTIONS = "predictions"
+    HEALTH_MONITOR = "health_monitor"
+
+
+class WidgetSize(str, Enum):
+    """Widget size options"""
+
+    SMALL = "small"  # 1x1 grid
+    MEDIUM = "medium"  # 2x1 grid
+    LARGE = "large"  # 2x2 grid
+    FULL_WIDTH = "full"  # Full row
+
+
+class DashboardWidget(BaseModel):
+    """Individual widget configuration"""
+
+    id: str
+    widget_type: WidgetType
+    title: str
+    size: WidgetSize = WidgetSize.MEDIUM
+    position: Dict[str, int] = Field(default_factory=lambda: {"x": 0, "y": 0})
+    config: Dict[str, Any] = Field(default_factory=dict)
+    visible: bool = True
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "widget-1",
+                "widget_type": "fleet_summary",
+                "title": "Fleet Overview",
+                "size": "large",
+                "position": {"x": 0, "y": 0},
+                "config": {"showOffline": True},
+                "visible": True,
+            }
+        }
+    )
+
+
+class DashboardLayout(BaseModel):
+    """Complete dashboard layout configuration"""
+
+    user_id: str
+    name: str = "Default Dashboard"
+    widgets: List[DashboardWidget] = Field(default_factory=list)
+    columns: int = Field(default=4, ge=1, le=6)
+    theme: str = "dark"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "user_id": "user-123",
+                "name": "My Custom Dashboard",
+                "widgets": [],
+                "columns": 4,
+                "theme": "dark",
+            }
+        }
+    )
+
+
+class UserPreferences(BaseModel):
+    """User preferences for the dashboard"""
+
+    user_id: str
+    default_dashboard: Optional[str] = None
+    favorite_trucks: List[str] = Field(default_factory=list)
+    alert_settings: Dict[str, Any] = Field(default_factory=dict)
+    timezone: str = "America/Chicago"
+    units: str = "imperial"  # or "metric"
+    notifications_enabled: bool = True
+    email_reports: bool = False
+    report_frequency: str = "daily"  # daily, weekly, monthly
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "user_id": "user-123",
+                "default_dashboard": "dashboard-1",
+                "favorite_trucks": ["JC1282", "NQ6975"],
+                "timezone": "America/Chicago",
+                "units": "imperial",
+            }
+        }
+    )
+
+
+class ScheduledReport(BaseModel):
+    """Scheduled report configuration"""
+
+    id: str
+    user_id: str
+    name: str
+    report_type: str  # fleet_summary, efficiency, fuel_usage, etc.
+    schedule: str  # cron expression or simple: daily, weekly, monthly
+    recipients: List[str] = Field(default_factory=list)
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    format: str = "pdf"  # pdf, excel, csv
+    enabled: bool = True
+    last_run: Optional[datetime] = None
+    next_run: Optional[datetime] = None
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "report-1",
+                "user_id": "user-123",
+                "name": "Weekly Efficiency Report",
+                "report_type": "efficiency",
+                "schedule": "weekly",
+                "recipients": ["manager@company.com"],
+                "format": "pdf",
+            }
+        }
+    )
