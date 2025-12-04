@@ -550,9 +550,12 @@ class DatabaseManager:
                             "health_category": "healthy",
                         }
                     )
+                logger.info(f"✅ Retrieved {len(trucks)} truck details from MySQL")
                 return trucks
         except Exception as e:
-            logger.error(f"Error getting truck details: {e}")
+            import traceback
+            logger.error(f"❌ Error getting truck details: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return []
 
     def _process_fleet_data(self, df: pd.DataFrame, source: str = "mysql") -> Dict:
