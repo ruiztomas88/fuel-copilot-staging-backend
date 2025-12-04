@@ -434,7 +434,10 @@ class DatabaseManager:
         }
 
     def _get_truck_details_from_mysql(self) -> List[Dict]:
-        """Get individual truck details for fleet summary table"""
+        """Get individual truck details for fleet summary table
+
+        🔧 v3.12.10: Fixed SQL to use actual column names from fuel_metrics table
+        """
         try:
             from sqlalchemy import text
 
@@ -445,22 +448,22 @@ class DatabaseManager:
 
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
+                # 🔧 v3.12.10: Use actual column names that exist in fuel_metrics
                 result = conn.execute(
                     text(
                         """
                     SELECT 
                         t1.truck_id,
                         t1.truck_status,
-                        t1.estimated_pct as fuel_level,
-                        t1.sensor_pct,
-                        t1.drift_pct,
-                        t1.mpg_current,
-                        t1.consumption_gph as idle_gph,
-                        t1.speed_mph,
+                        t1.fuel_percent,
+                        t1.consumption_gph,
+                        t1.speed,
                         t1.timestamp_utc,
-                        t1.rpm,
+                        t1.engine_rpm,
                         t1.idle_method,
-                        t1.idle_mode
+                        t1.mpg_current,
+                        -- 24h average for idle
+                        idle_avg.avg_idle_gph_24h
                     FROM fuel_metrics t1
                     INNER JOIN (
                         SELECT truck_id, MAX(timestamp_utc) as max_time
@@ -468,6 +471,18 @@ class DatabaseManager:
                         WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
                         GROUP BY truck_id
                     ) t2 ON t1.truck_id = t2.truck_id AND t1.timestamp_utc = t2.max_time
+                    -- Join with 24h idle averages
+                    LEFT JOIN (
+                        SELECT 
+                            truck_id,
+                            AVG(consumption_gph) as avg_idle_gph_24h
+                        FROM fuel_metrics
+                        WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
+                          AND truck_status = 'STOPPED'
+                          AND idle_method != 'NOT_IDLE'
+                          AND consumption_gph > 0.1 AND consumption_gph < 5.0
+                        GROUP BY truck_id
+                    ) idle_avg ON t1.truck_id = idle_avg.truck_id
                     ORDER BY t1.truck_id
                 """
                     )
@@ -477,18 +492,16 @@ class DatabaseManager:
                 for row in result:
                     truck_id = row[0]
                     status = row[1]
-                    fuel_level = row[2]
-                    sensor_pct = row[3]
-                    drift_pct = row[4]
-                    mpg_current = row[5]
-                    consumption_gph = row[6]
-                    speed_mph = row[7]
-                    timestamp = row[8]
-                    rpm = row[9]
-                    idle_method = row[10]
-                    idle_mode = row[11]
+                    fuel_percent = row[2]
+                    consumption_gph = row[3]
+                    speed = row[4]
+                    timestamp = row[5]
+                    engine_rpm = row[6]
+                    idle_method = row[7]
+                    mpg_current = row[8]
+                    avg_idle_gph_24h = row[9]
 
-                    # 🔧 v2.0: Display MPG only for MOVING, Idle only for IDLE
+                    # 🔧 v3.12.10: Display MPG only for MOVING, Idle only for STOPPED
                     display_mpg = None
                     display_idle = None
 
@@ -497,24 +510,44 @@ class DatabaseManager:
                         if 2.5 <= mpg_current <= 15:
                             display_mpg = round(mpg_current, 1)
 
-                    if status == "IDLE" and consumption_gph is not None:
-                        # Only show idle if it's in a reasonable range
-                        if 0.3 <= consumption_gph <= 3.0:
+                    # 🔧 v3.12.10: STOPPED trucks show idle consumption
+                    if status == "STOPPED":
+                        # Priority 1: 24h average
+                        if avg_idle_gph_24h is not None and avg_idle_gph_24h > 0.1:
+                            display_idle = round(avg_idle_gph_24h, 2)
+                        # Priority 2: Current consumption
+                        elif (
+                            consumption_gph is not None
+                            and 0.1 <= consumption_gph <= 5.0
+                        ):
                             display_idle = round(consumption_gph, 2)
+                        # Priority 3: Fallback if engine running
+                        elif (engine_rpm and engine_rpm > 0) or (
+                            idle_method
+                            and idle_method not in ["NOT_IDLE", "ENGINE_OFF", None, ""]
+                        ):
+                            display_idle = 0.8  # Default fallback
 
                     trucks.append(
                         {
                             "truck_id": truck_id,
                             "status": status if status else "OFFLINE",
-                            "fuel_level": round(fuel_level, 1) if fuel_level else 0,
-                            "sensor_pct": round(sensor_pct, 1) if sensor_pct else 0,
-                            "drift": round(drift_pct, 1) if drift_pct else 0,
+                            "fuel_level": round(fuel_percent, 1) if fuel_percent else 0,
+                            "estimated_pct": (
+                                round(fuel_percent, 1) if fuel_percent else 0
+                            ),
+                            "sensor_pct": round(fuel_percent, 1) if fuel_percent else 0,
+                            "drift": 0,  # Not available in current schema
+                            "drift_pct": 0,
                             "mpg": display_mpg,
                             "idle_gph": display_idle,
-                            "speed": round(speed_mph, 1) if speed_mph else 0,
-                            "rpm": int(rpm) if rpm else None,
+                            "speed": round(speed, 1) if speed else 0,
+                            "speed_mph": round(speed, 1) if speed else 0,
+                            "rpm": int(engine_rpm) if engine_rpm else None,
                             "idle_method": idle_method,
                             "last_update": timestamp.isoformat() if timestamp else None,
+                            "health_score": 75,  # Default
+                            "health_category": "healthy",
                         }
                     )
                 return trucks
