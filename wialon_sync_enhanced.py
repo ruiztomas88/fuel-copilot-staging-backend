@@ -767,18 +767,38 @@ def process_truck(
         )
 
     # Check for refuel before update
+    # 🔧 v3.12.19: Use last_sensor_data instead of estimator.last_fuel_lvl_pct
+    # This correctly compares consecutive sensor readings, not Kalman state
     refuel_event = None
+    last_sensor_pct_for_refuel = None
+    if truck_id in state_manager.last_sensor_data:
+        prev_data = state_manager.last_sensor_data[truck_id]
+        last_sensor_pct_for_refuel = prev_data.get("fuel_lvl")
+
     if sensor_pct is not None:
+        # 🔍 Debug: Log refuel check parameters
+        if last_sensor_pct_for_refuel is not None:
+            fuel_jump = sensor_pct - last_sensor_pct_for_refuel
+            if fuel_jump > 10:  # Log significant jumps
+                logger.info(
+                    f"[REFUEL-CHECK] {truck_id}: prev={last_sensor_pct_for_refuel:.1f}%, "
+                    f"curr={sensor_pct:.1f}%, jump={fuel_jump:.1f}%, gap={time_gap_hours*60:.1f}min, status={truck_status}"
+                )
+        
         refuel_event = detect_refuel(
             sensor_pct=sensor_pct,
             estimated_pct=estimator.level_pct,
-            last_sensor_pct=estimator.last_fuel_lvl_pct,
+            last_sensor_pct=last_sensor_pct_for_refuel,
             time_gap_hours=time_gap_hours,
             truck_status=truck_status,
             tank_capacity_gal=tank_capacity_gal,
         )
 
         if refuel_event:
+            logger.info(
+                f"🚰 [REFUEL-DETECTED] {truck_id}: {refuel_event['prev_pct']:.1f}% → {refuel_event['new_pct']:.1f}% "
+                f"(+{refuel_event['increase_pct']:.1f}%, +{refuel_event.get('increase_gal', 0):.1f} gal)"
+            )
             # Hard reset after refuel
             estimator.apply_refuel_reset(
                 new_fuel_pct=sensor_pct,
