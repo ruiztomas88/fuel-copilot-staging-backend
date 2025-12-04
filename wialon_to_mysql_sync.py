@@ -69,47 +69,82 @@ def get_local_connection():
     return pymysql.connect(**LOCAL_DB_CONFIG)
 
 
-def determine_truck_status(speed, rpm, fuel_rate, data_age_min=0, pwr_ext=None):
+def determine_truck_status(
+    speed,
+    rpm,
+    fuel_rate,
+    data_age_min=0,
+    pwr_ext=None,
+    engine_load=None,
+    coolant_temp=None,
+):
     """
-    Determine truck status - EXACT copy from fuel_copilot_v2_1_fixed.py
+    Enhanced truck status determination v2 - Improved with additional sensors
 
-    Logic:
-    - OFFLINE: data_age > 15 min OR no speed data
-    - MOVING: speed > 2 mph (threshold to filter GPS noise)
-    - STOPPED: engine ON but stationary (rpm > 0 OR fuel_rate > 0.3 L/h)
-    - PARKED: engine OFF but battery voltage > 13.2V (truck recently stopped)
-    - OFFLINE: no engine activity
+    Status Hierarchy:
+    1. OFFLINE: Data too old (>15 min) or no GPS data
+    2. MOVING: Vehicle in motion (speed > 2 mph)
+    3. STOPPED: Engine ON but stationary (idling)
+    4. PARKED: Engine OFF, vehicle connected (shore power or recent data)
+    5. OFFLINE: No activity detected
 
-    Returns: "MOVING", "STOPPED", "PARKED", or "OFFLINE"
+    Engine ON Indicators (any one = engine running):
+    - RPM > 0
+    - Fuel rate > 0.3 L/h
+    - Engine load > 0%
+    - Coolant temp > 120°F (engine warm = running)
     """
-    # Stale data (> 15 minutes) = offline
+    # Check for offline - stale data (no communication in 15+ minutes)
     if data_age_min is not None and data_age_min > 15:
         return "OFFLINE"
 
-    # No speed data at all = offline
+    # No GPS data = cannot determine status
     if speed is None:
         return "OFFLINE"
 
-    # Moving - speed > 2 mph (filters GPS noise)
+    # Moving - speed > 2 mph (filters GPS noise/drift)
     if speed > 2:
         return "MOVING"
 
-    # Stationary - check if engine is running
+    # Stationary - check multiple engine indicators
     rpm_val = rpm or 0
     fuel_rate_val = fuel_rate or 0
     pwr_ext_val = pwr_ext or 0
+    engine_load_val = engine_load or 0
+    coolant_temp_val = coolant_temp or 0  # °F
 
-    # Engine ON indicators
+    # Engine ON indicators (any one = engine running = STOPPED/idling)
     if rpm_val > 0:
-        return "STOPPED"  # RPM > 0 means engine running
+        return "STOPPED"  # RPM > 0 = engine definitely running
+
     if fuel_rate_val > 0.3:
-        return "STOPPED"  # Fuel consumption means engine running
+        return "STOPPED"  # Fuel consumption > 0.3 L/h = engine running
 
-    # Battery voltage > 13.2V indicates truck was recently running (PARKED)
+    if engine_load_val > 0:
+        return "STOPPED"  # Engine load > 0% = engine running
+
+    # Coolant temp check - if engine is warm, it's likely running
+    if coolant_temp_val > 120:  # 120°F = engine running temp
+        return "STOPPED"  # Engine warm enough to be running
+
+    # Engine OFF checks
+    # Shore power connected (13.2V+ indicates external power)
     if pwr_ext_val > 13.2:
-        return "PARKED"
+        return "PARKED"  # Plugged in, engine off
 
-    # No engine activity = offline
+    # Battery voltage in normal range (12-13.2V) = recently used, parked
+    if pwr_ext_val > 11.5:
+        return "PARKED"  # Battery shows truck is connected and alive
+
+    # Coolant temp between ambient and running = recently stopped
+    if coolant_temp_val > 60 and coolant_temp_val <= 120:
+        return "PARKED"  # Engine cooling down = recently parked
+
+    # Data is fresh (<15 min) but no engine activity = parked
+    if data_age_min is not None and data_age_min < 5:
+        return "PARKED"  # Very recent data, just no activity
+
+    # Fallback - older data with no activity
     return "OFFLINE"
 
 
@@ -142,6 +177,7 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
             hdop = sensor_data.get("hdop")
             coolant_temp = sensor_data.get("coolant_temp")
             pwr_ext = sensor_data.get("pwr_ext")  # Battery voltage (V)
+            engine_load = sensor_data.get("engine_load")  # Engine load %
 
             # Get tank capacity for this truck
             tank_capacity = TANK_CAPACITIES.get(truck_id, TANK_CAPACITIES["default"])
@@ -154,9 +190,9 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
                     measure_dt = measure_dt.replace(tzinfo=timezone.utc)
                 data_age_min = (now_utc - measure_dt).total_seconds() / 60.0
 
-            # 🔧 v2.1: Improved truck status determination with data_age and pwr_ext
+            # 🔧 v2.2: Enhanced truck status with engine_load and coolant_temp
             truck_status = determine_truck_status(
-                speed, rpm, fuel_rate, data_age_min, pwr_ext
+                speed, rpm, fuel_rate, data_age_min, pwr_ext, engine_load, coolant_temp
             )
 
             # Calculate fuel in liters/gallons if we have percentage
@@ -311,7 +347,7 @@ def sync_cycle(reader: WialonReader, local_conn):
 
     total_inserted = 0
     trucks_processed = 0
-    status_counts = {"MOVING": 0, "IDLE": 0, "STOPPED": 0, "OFFLINE": 0, "NO_DATA": 0}
+    status_counts = {"MOVING": 0, "STOPPED": 0, "PARKED": 0, "OFFLINE": 0, "NO_DATA": 0}
 
     for truck_id, unit_id in TRUCK_UNIT_MAPPING.items():
         try:
@@ -329,9 +365,13 @@ def sync_cycle(reader: WialonReader, local_conn):
                 rpm = sensor_data.get("rpm")
                 fuel_rate = sensor_data.get("fuel_rate")
                 pwr_ext = sensor_data.get("pwr_ext")
+                engine_load = sensor_data.get("engine_load")
+                coolant_temp = sensor_data.get("coolant_temp")
 
-                # Get the status that was determined (with pwr_ext for PARKED)
-                truck_status = determine_truck_status(speed, rpm, fuel_rate, 0, pwr_ext)
+                # Get the status that was determined (enhanced with all sensors)
+                truck_status = determine_truck_status(
+                    speed, rpm, fuel_rate, 0, pwr_ext, engine_load, coolant_temp
+                )
                 status_counts[truck_status] = status_counts.get(truck_status, 0) + 1
 
                 # Status emoji

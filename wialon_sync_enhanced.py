@@ -274,43 +274,77 @@ def determine_truck_status(
     fuel_rate: Optional[float],
     data_age_min: float,
     pwr_ext: Optional[float] = None,
+    engine_load: Optional[float] = None,
+    coolant_temp: Optional[float] = None,
 ) -> str:
     """
-    Enhanced truck status determination - EXACT copy from fuel_copilot_v2_1_fixed.py
+    Enhanced truck status determination v2 - Improved with additional sensors
 
-    Logic:
-    - OFFLINE: data_age > 15 min OR no speed data
-    - MOVING: speed > 2 mph (threshold to filter GPS noise)
-    - STOPPED: engine ON but stationary (rpm > 0 OR fuel_rate > 0.3 L/h)
-    - PARKED: external power > 13.2V (plugged in, engine off)
-    - OFFLINE: no engine activity
+    Status Hierarchy:
+    1. OFFLINE: Data too old (>15 min) or no GPS data
+    2. MOVING: Vehicle in motion (speed > 2 mph)
+    3. STOPPED: Engine ON but stationary (idling)
+    4. PARKED: Engine OFF, vehicle connected (shore power or recent data)
+    5. OFFLINE: No activity detected
+
+    Engine ON Indicators (any one = engine running):
+    - RPM > 0
+    - Fuel rate > 0.3 L/h
+    - Engine load > 0%
+    - Coolant temp > 50°F (engine warm, recently running or running)
     """
-    # Check for offline - stale data
+    # Check for offline - stale data (no communication in 15+ minutes)
     if data_age_min > 15:
         return "OFFLINE"
+
+    # No GPS data = cannot determine status
     if speed is None:
         return "OFFLINE"
 
-    # Moving - speed > 2 mph (filters GPS noise)
+    # Moving - speed > 2 mph (filters GPS noise/drift)
     if speed > 2:
         return "MOVING"
 
-    # Stationary - check engine status
+    # Stationary - check multiple engine indicators
     rpm_val = rpm or 0
     fuel_rate_val = fuel_rate or 0
     pwr_ext_val = pwr_ext or 0
+    engine_load_val = engine_load or 0
+    coolant_temp_val = coolant_temp or 0  # °F
 
-    # Engine ON indicators
+    # Engine ON indicators (any one = engine running = STOPPED/idling)
     if rpm_val > 0:
-        return "STOPPED"  # RPM > 0 means engine running
+        return "STOPPED"  # RPM > 0 = engine definitely running
+
     if fuel_rate_val > 0.3:
-        return "STOPPED"  # Fuel consumption means engine running
+        return "STOPPED"  # Fuel consumption > 0.3 L/h = engine running
 
-    # Engine OFF but plugged in
+    if engine_load_val > 0:
+        return "STOPPED"  # Engine load > 0% = engine running
+
+    # Coolant temp check - if engine is warm, it's likely running or just turned off
+    # 50°F is ambient, anything higher indicates engine activity
+    if coolant_temp_val > 120:  # 120°F = engine running temp
+        return "STOPPED"  # Engine warm enough to be running
+
+    # Engine OFF checks
+    # Shore power connected (13.2V+ indicates external power)
     if pwr_ext_val > 13.2:
-        return "PARKED"  # Shore power connected
+        return "PARKED"  # Plugged in, engine off
 
-    # No engine activity = offline
+    # Battery voltage in normal range (12-13.2V) = recently used, parked
+    if pwr_ext_val > 11.5:
+        return "PARKED"  # Battery shows truck is connected and alive
+
+    # Coolant temp between ambient and running = recently stopped
+    if coolant_temp_val > 60 and coolant_temp_val <= 120:
+        return "PARKED"  # Engine cooling down = recently parked
+
+    # Data is fresh (<15 min) but no engine activity = parked
+    if data_age_min < 5:
+        return "PARKED"  # Very recent data, just no activity
+
+    # Fallback - older data with no activity
     return "OFFLINE"
 
 
@@ -508,13 +542,16 @@ def process_truck(
     coolant_temp = sensor_data.get("coolant_temp")
     total_fuel_used = sensor_data.get("total_fuel_used")  # Gallons (ECU counter)
     pwr_ext = sensor_data.get("pwr_ext")  # Battery voltage (V)
+    engine_load = sensor_data.get("engine_load")  # Engine load %
 
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
     data_age_min = (now_utc - timestamp).total_seconds() / 60.0
 
-    # Determine truck status (includes pwr_ext for PARKED detection)
-    truck_status = determine_truck_status(speed, rpm, fuel_rate, data_age_min, pwr_ext)
+    # Determine truck status (enhanced with multiple sensors)
+    truck_status = determine_truck_status(
+        speed, rpm, fuel_rate, data_age_min, pwr_ext, engine_load, coolant_temp
+    )
 
     # Calculate time delta from last update
     dt_hours = 0.0
