@@ -418,8 +418,11 @@ def detect_refuel(
 
     Criteria:
     - Time gap between 5 min and 2 hours (typical refuel window)
-    - Fuel increase > 5% (not just noise)
+    - Fuel increase > 15% (matches fuel_copilot_v2_1_fixed.py threshold)
     - Truck was stopped during gap
+
+    🔧 v3.12.16: Increased from 5% to 15% to reduce false positives from sensor noise
+    Sensor noise can cause 10% swings; real refuels are typically 30-60% jumps
     """
     if last_sensor_pct is None or sensor_pct is None:
         return None
@@ -431,15 +434,17 @@ def detect_refuel(
     # Calculate increase
     fuel_increase_pct = sensor_pct - last_sensor_pct
 
-    # Minimum thresholds
-    min_increase_pct = 5.0
+    # Minimum thresholds - MATCHED TO fuel_copilot_v2_1_fixed.py
+    # 🔧 v3.12.16: 15% threshold reduces false positives from sensor noise
+    min_increase_pct = 15.0  # Was 5.0, too low for noisy sensors
     min_increase_gal = 10.0
 
     increase_gal = (fuel_increase_pct / 100) * tank_capacity_gal
 
     if fuel_increase_pct >= min_increase_pct and increase_gal >= min_increase_gal:
-        # Anti-noise filter: reject if estimated is already high
-        if estimated_pct > 90 and fuel_increase_pct < 15:
+        # Extra safety: reject small jumps when tank is already nearly full
+        # (likely sensor noise, not actual refuel)
+        if estimated_pct > 90 and fuel_increase_pct < 20:
             return None
 
         logger.info(
@@ -516,7 +521,7 @@ def save_refuel_event(
 ) -> bool:
     """
     Save refuel event to refuel_events table.
-    
+
     Returns True if successfully inserted, False otherwise.
     """
     try:
@@ -527,19 +532,22 @@ def save_refuel_event(
                  gallons_added, refuel_type, latitude, longitude, confidence, validated)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            cursor.execute(query, (
-                timestamp_utc,
-                truck_id,
-                "skylord",
-                fuel_before,
-                fuel_after,
-                gallons_added,
-                refuel_type,
-                latitude,
-                longitude,
-                0.9,  # High confidence for detected refuels
-                0,    # Not validated yet
-            ))
+            cursor.execute(
+                query,
+                (
+                    timestamp_utc,
+                    truck_id,
+                    "skylord",
+                    fuel_before,
+                    fuel_after,
+                    gallons_added,
+                    refuel_type,
+                    latitude,
+                    longitude,
+                    0.9,  # High confidence for detected refuels
+                    0,  # Not validated yet
+                ),
+            )
             connection.commit()
             logger.info(f"💾 Refuel saved to DB: {truck_id} +{gallons_added:.1f} gal")
             return True
@@ -557,24 +565,26 @@ def send_refuel_notification(
 ) -> bool:
     """
     Send SMS and Email notification for refuel event.
-    
+
     Uses environment variables for configuration:
     - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, TWILIO_TO_NUMBERS
     - SMTP_SERVER, SMTP_PORT, SMTP_USER, SMTP_PASS, ALERT_TO/ALERT_EMAIL_TO
-    
+
     Enforces 30 minute cooldown per truck to avoid spam.
     """
     global _refuel_notification_cooldown
-    
+
     # Check cooldown (30 minutes)
     now = datetime.now(timezone.utc)
     last_notification = _refuel_notification_cooldown.get(truck_id)
     if last_notification:
         minutes_since = (now - last_notification).total_seconds() / 60
         if minutes_since < 30:
-            logger.info(f"⏳ Notification cooldown active for {truck_id} ({minutes_since:.1f} min ago)")
+            logger.info(
+                f"⏳ Notification cooldown active for {truck_id} ({minutes_since:.1f} min ago)"
+            )
             return False
-    
+
     message = (
         f"⛽ REFUEL DETECTED\n"
         f"Truck: {truck_id}\n"
@@ -582,28 +592,27 @@ def send_refuel_notification(
         f"Before: {fuel_before:.1f}% → After: {fuel_after:.1f}%\n"
         f"Time: {timestamp_utc.strftime('%Y-%m-%d %H:%M UTC')}"
     )
-    
+
     success = False
-    
+
     # Try SMS via Twilio
     try:
         account_sid = os.getenv("TWILIO_ACCOUNT_SID")
         auth_token = os.getenv("TWILIO_AUTH_TOKEN")
         from_number = os.getenv("TWILIO_FROM_NUMBER")
         to_numbers = os.getenv("TWILIO_TO_NUMBERS", "")
-        
+
         if account_sid and auth_token and from_number and to_numbers:
             from twilio.rest import Client
+
             client = Client(account_sid, auth_token)
-            
+
             for to_number in to_numbers.split(","):
                 to_number = to_number.strip()
                 if to_number:
                     try:
                         client.messages.create(
-                            body=message,
-                            from_=from_number,
-                            to=to_number
+                            body=message, from_=from_number, to=to_number
                         )
                         logger.info(f"📱 SMS sent to {to_number} for {truck_id} refuel")
                         success = True
@@ -615,42 +624,42 @@ def send_refuel_notification(
         logger.warning("📱 Twilio library not installed - SMS disabled")
     except Exception as e:
         logger.error(f"❌ SMS notification error: {e}")
-    
+
     # Try Email via SMTP
     try:
         import smtplib
         from email.message import EmailMessage
-        
+
         smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
         smtp_port = int(os.getenv("SMTP_PORT", "587"))
         smtp_user = os.getenv("SMTP_USER")
         smtp_pass = os.getenv("SMTP_PASS")
         # Support both variable names
         alert_to = os.getenv("ALERT_TO") or os.getenv("ALERT_EMAIL_TO")
-        
+
         if smtp_user and smtp_pass and alert_to:
             msg = EmailMessage()
             msg["From"] = smtp_user
             msg["To"] = alert_to
             msg["Subject"] = f"⛽ Refuel Detected: {truck_id} +{gallons_added:.1f} gal"
             msg.set_content(message)
-            
+
             with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
                 server.starttls()
                 server.login(smtp_user, smtp_pass)
                 server.send_message(msg)
-            
+
             logger.info(f"📧 Email sent to {alert_to} for {truck_id} refuel")
             success = True
         else:
             logger.debug("📧 Email not configured (missing SMTP env vars)")
     except Exception as e:
         logger.error(f"❌ Email notification error: {e}")
-    
+
     # Update cooldown if any notification succeeded
     if success:
         _refuel_notification_cooldown[truck_id] = now
-    
+
     return success
 
 
@@ -1098,15 +1107,17 @@ def sync_cycle(
                 status_counts[status] = status_counts.get(status, 0) + 1
 
                 # Handle refuel detection - save to DB and send notifications
-                if metrics.get("refuel_detected") == "YES" and metrics.get("refuel_event"):
+                if metrics.get("refuel_detected") == "YES" and metrics.get(
+                    "refuel_event"
+                ):
                     refuel_count += 1
                     refuel_evt = metrics["refuel_event"]
-                    
+
                     # Calculate fuel percentages
                     fuel_before = metrics.get("fuel_before_pct") or 0
                     fuel_after = metrics.get("sensor_pct") or 0
                     gallons_added = refuel_evt.get("increase_gal", 0)
-                    
+
                     # Save to refuel_events table
                     save_refuel_event(
                         connection=local_conn,
@@ -1119,7 +1130,7 @@ def sync_cycle(
                         longitude=metrics.get("longitude"),
                         refuel_type="GAP_DETECTED",
                     )
-                    
+
                     # Send SMS and Email notifications
                     send_refuel_notification(
                         truck_id=truck_id,
