@@ -100,6 +100,24 @@ class AltitudeConfig:
     PENALTY_PER_1000FT: float = 3.0
 
 
+@dataclass(frozen=True)
+class TimezoneConfig:
+    """Timezone configuration for consistent time handling"""
+
+    # System timezone (database stores in this timezone)
+    SYSTEM_TZ: str = "America/New_York"
+
+    # Display timezone for reports
+    DISPLAY_TZ: str = "America/New_York"
+
+    # UTC offset for manual calculations (hours)
+    UTC_OFFSET_HOURS: int = -5  # EST (changes with DST)
+
+    # Data freshness thresholds (minutes)
+    STALE_DATA_MINUTES: int = 15
+    OFFLINE_THRESHOLD_MINUTES: int = 60
+
+
 # Global instances
 FUEL = FuelConfig()
 IDLE = IdleConfig()
@@ -107,6 +125,7 @@ REFUEL = RefuelConfig()
 DATABASE = DatabaseConfig()
 KALMAN = KalmanConfig()
 ALTITUDE = AltitudeConfig()
+TIMEZONE = TimezoneConfig()
 
 
 # Convenience functions for backward compatibility
@@ -128,12 +147,14 @@ __all__ = [
     "DATABASE",
     "KALMAN",
     "ALTITUDE",
+    "TIMEZONE",
     "FuelConfig",
     "IdleConfig",
     "RefuelConfig",
     "DatabaseConfig",
     "KalmanConfig",
     "AltitudeConfig",
+    "TimezoneConfig",
     "get_fuel_price",
     "get_baseline_mpg",
 ]

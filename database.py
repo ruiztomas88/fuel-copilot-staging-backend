@@ -5,11 +5,12 @@ Hybrid MySQL + CSV with automatic fallback
 
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 from typing import List, Dict, Optional
 import json
 import logging
+from timezone_utils import utc_now, ensure_utc, calculate_age_minutes, is_stale
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +211,156 @@ class DatabaseManager:
             except Exception as e:
                 logger.warning(f"MySQL fleet summary failed, using CSV: {e}")
 
+        # 🔧 FIX v3.12.0: Return CSV fallback if MySQL fails or returns no data
+        return self._get_fleet_summary_from_csv()
+
+    def _get_fleet_summary_from_csv(self) -> Dict:
+        """CSV fallback for fleet summary - called when MySQL is unavailable"""
+        logger.info("⚠️ Using CSV fallback for fleet summary")
+        trucks = self.get_all_trucks()
+
+        total_trucks = len(trucks)
+        active_trucks = 0
+        total_mpg = 0
+        total_idle_gph = 0
+        mpg_count = 0
+        idle_count = 0
+        offline_trucks = 0
+        critical_count = 0
+        warning_count = 0
+        healthy_count = 0
+        truck_details = []
+
+        for truck_id in trucks:
+            record = self.get_truck_latest_record(truck_id)
+            if not record:
+                offline_trucks += 1
+                continue
+
+            health_score = self._calculate_health_score(record)
+            if health_score < 50:
+                critical_count += 1
+            elif health_score < 75:
+                warning_count += 1
+            else:
+                healthy_count += 1
+
+            try:
+                ts_val = record.get("timestamp_utc") or record.get("timestamp")
+                if not ts_val:
+                    offline_trucks += 1
+                    continue
+
+                timestamp = pd.to_datetime(ts_val)
+                # 🔧 v3.12.0: Use timezone-aware age calculation
+                utc_timestamp = ensure_utc(
+                    timestamp.to_pydatetime()
+                    if hasattr(timestamp, "to_pydatetime")
+                    else timestamp
+                )
+                age_minutes = (
+                    calculate_age_minutes(utc_timestamp)
+                    if utc_timestamp
+                    else float("inf")
+                )
+
+                if age_minutes <= 60:
+                    truck_status = record.get("truck_status", "OFFLINE")
+                    if truck_status not in ["MOVING", "STOPPED", "OFFLINE"]:
+                        truck_status = "OFFLINE"
+
+                    if truck_status != "OFFLINE":
+                        active_trucks += 1
+                    else:
+                        offline_trucks += 1
+
+                    consumption_gph = record.get("consumption_gph")
+
+                    if (
+                        truck_status == "MOVING"
+                        and "mpg_current" in record
+                        and pd.notna(record["mpg_current"])
+                        and record["mpg_current"] > 0
+                    ):
+                        total_mpg += record["mpg_current"]
+                        mpg_count += 1
+
+                    if (
+                        truck_status == "STOPPED"
+                        and pd.notna(consumption_gph)
+                        and consumption_gph > 0.01
+                    ):
+                        total_idle_gph += consumption_gph
+                        idle_count += 1
+
+                    mpg_val = (
+                        record.get("mpg_current") if truck_status == "MOVING" else None
+                    )
+                    idle_val = (
+                        consumption_gph
+                        if truck_status == "STOPPED"
+                        and pd.notna(consumption_gph)
+                        and consumption_gph > 0.01
+                        else None
+                    )
+
+                    health_category = (
+                        "critical"
+                        if health_score < 50
+                        else "warning" if health_score < 75 else "healthy"
+                    )
+
+                    truck_details.append(
+                        {
+                            "truck_id": truck_id,
+                            "mpg": (
+                                None if pd.isna(mpg_val) else round(float(mpg_val), 2)
+                            ),
+                            "idle_gph": (
+                                None if pd.isna(idle_val) else round(float(idle_val), 2)
+                            ),
+                            "status": truck_status,
+                            "estimated_pct": (
+                                None
+                                if pd.isna(record.get("estimated_pct"))
+                                else round(float(record["estimated_pct"]), 1)
+                            ),
+                            "drift_pct": (
+                                None
+                                if pd.isna(record.get("drift_pct"))
+                                else round(float(record["drift_pct"]), 1)
+                            ),
+                            "speed_mph": (
+                                None
+                                if pd.isna(record.get("speed_mph"))
+                                else round(float(record["speed_mph"]), 1)
+                            ),
+                            "health_score": health_score,
+                            "health_category": health_category,
+                        }
+                    )
+                else:
+                    offline_trucks += 1
+            except Exception as e:
+                logger.error(f"Error processing {truck_id}: {e}")
+                continue
+
+        return {
+            "total_trucks": total_trucks,
+            "active_trucks": active_trucks,
+            "offline_trucks": offline_trucks,
+            "critical_count": critical_count,
+            "warning_count": warning_count,
+            "healthy_count": healthy_count,
+            "avg_mpg": round(total_mpg / mpg_count, 2) if mpg_count > 0 else 0,
+            "avg_idle_gph": (
+                round(total_idle_gph / idle_count, 2) if idle_count > 0 else 0
+            ),
+            "truck_details": truck_details,
+            "timestamp": datetime.now().isoformat(),
+            "data_source": "CSV",
+        }
+
     def _get_truck_details_from_mysql(self) -> List[Dict]:
         """Get individual truck details for fleet summary table"""
         try:
@@ -298,218 +449,6 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting truck details: {e}")
             return []
-
-        # Fallback to CSV
-        logger.info("⚠️ Using CSV fallback for fleet summary")
-        trucks = self.get_all_trucks()
-
-        total_trucks = len(trucks)
-        active_trucks = 0
-        total_mpg = 0
-        total_idle_gph = 0
-        mpg_count = 0
-        idle_count = 0
-        offline_trucks = 0
-        critical_count = 0  # health_score < 50
-        warning_count = 0  # 50 <= health_score < 75
-        healthy_count = 0  # health_score >= 75
-
-        truck_details = []
-
-        for truck_id in trucks:
-            record = self.get_truck_latest_record(truck_id)
-            if not record:
-                # No data available - count as offline
-                offline_trucks += 1
-                continue
-
-            # Calculate health score
-            health_score = self._calculate_health_score(record)
-
-            # Count by health status
-            if health_score < 50:
-                critical_count += 1
-            elif health_score < 75:
-                warning_count += 1
-            else:
-                healthy_count += 1
-
-            # Check if truck is online (data less than 60 minutes old)
-            try:
-                ts_val = record.get("timestamp_utc") or record.get("timestamp")
-                if not ts_val:
-                    # No timestamp - count as offline
-                    offline_trucks += 1
-                    continue
-                timestamp = pd.to_datetime(ts_val)
-                age_minutes = (datetime.now() - timestamp).total_seconds() / 60
-
-                # Data is recent (< 60 minutes)
-                if age_minutes <= 60:
-                    # 🔧 FIX: Use truck_status from CSV (already calculated by fuel_copilot)
-                    # The CSV has the authoritative status from Kalman processing
-                    truck_status = record.get("truck_status", "OFFLINE")
-
-                    # Validate status value
-                    if truck_status not in ["MOVING", "STOPPED", "OFFLINE"]:
-                        truck_status = "OFFLINE"
-
-                    # ✅ FIX: Count active trucks AFTER determining status (motor encendido)
-                    if truck_status != "OFFLINE":
-                        active_trucks += 1
-                    else:
-                        offline_trucks += 1
-
-                    # Get consumption_gph from record for idle calculations
-                    consumption_gph = record.get("consumption_gph")
-
-                    # ✅ FIX: Accumulate MPG (only for MOVING trucks with valid MPG)
-                    if (
-                        truck_status == "MOVING"
-                        and "mpg_current" in record
-                        and pd.notna(record["mpg_current"])
-                        and record["mpg_current"] > 0
-                    ):
-                        total_mpg += record["mpg_current"]
-                        mpg_count += 1
-
-                    # ✅ FIX: Accumulate idle (only for STOPPED trucks with consumption_gph > 0.01)
-                    # Don't accumulate for OFFLINE (motor apagado) or MOVING
-                    if (
-                        truck_status == "STOPPED"
-                        and pd.notna(consumption_gph)
-                        and consumption_gph > 0.01
-                    ):
-                        total_idle_gph += consumption_gph
-                        idle_count += 1
-
-                    # Get values and convert NaN to None
-                    # MPG only for MOVING trucks
-                    mpg_val = (
-                        record.get("mpg_current") if truck_status == "MOVING" else None
-                    )
-                    # Idle GPH for STOPPED trucks (motor encendido) with consumption > 0.01
-                    consumption_gph_val = record.get("consumption_gph")
-                    if (
-                        truck_status == "STOPPED"  # Only STOPPED (not OFFLINE)
-                        and pd.notna(consumption_gph_val)
-                        and consumption_gph_val > 0.01
-                    ):
-                        idle_val = consumption_gph_val
-                    else:
-                        idle_val = None
-                    fuel_val = record.get("fuel_L")
-                    estimated_pct = record.get("estimated_pct")
-                    estimated_liters = record.get("estimated_liters")
-                    sensor_pct = record.get("sensor_pct")
-                    sensor_liters = record.get("sensor_liters")
-                    drift_pct = record.get("drift_pct")
-                    speed_mph = record.get("speed_mph")
-
-                    # Event fields for Actions column
-                    refuel_gallons = record.get("refuel_gallons")
-                    anchor_detected = record.get("anchor_detected")
-                    anchor_type = record.get("anchor_type")
-                    idle_method = record.get("idle_method")
-
-                    # Calculate health score and category for this truck
-                    health_score = self._calculate_health_score(record)
-                    if health_score < 50:
-                        health_category = "critical"
-                    elif health_score < 75:
-                        health_category = "warning"
-                    else:
-                        health_category = "healthy"
-
-                    truck_details.append(
-                        {
-                            "truck_id": truck_id,
-                            "mpg": (
-                                None if pd.isna(mpg_val) else round(float(mpg_val), 2)
-                            ),
-                            "idle_gph": (
-                                None if pd.isna(idle_val) else round(float(idle_val), 2)
-                            ),
-                            "fuel_L": (
-                                None if pd.isna(fuel_val) else round(float(fuel_val), 1)
-                            ),
-                            "status": (
-                                truck_status
-                                if truck_status in ["MOVING", "STOPPED"]
-                                else "OFFLINE"
-                            ),
-                            "estimated_pct": (
-                                None
-                                if pd.isna(estimated_pct)
-                                else round(float(estimated_pct), 1)
-                            ),
-                            "estimated_gallons": (
-                                None
-                                if pd.isna(estimated_liters)
-                                else round(float(estimated_liters) * 0.264172, 1)
-                            ),
-                            "sensor_pct": (
-                                None
-                                if pd.isna(sensor_pct)
-                                else round(float(sensor_pct), 1)
-                            ),
-                            "sensor_gallons": (
-                                None
-                                if pd.isna(sensor_liters)
-                                else round(float(sensor_liters) * 0.264172, 1)
-                            ),
-                            "drift_pct": (
-                                None
-                                if pd.isna(drift_pct)
-                                else round(float(drift_pct), 1)
-                            ),
-                            "speed_mph": (
-                                None
-                                if pd.isna(speed_mph)
-                                else round(float(speed_mph), 1)
-                            ),
-                            "health_score": health_score,
-                            "health_category": health_category,
-                            # Event fields for Actions
-                            "refuel_gallons": (
-                                None
-                                if pd.isna(refuel_gallons) or refuel_gallons == 0
-                                else round(float(refuel_gallons), 1)
-                            ),
-                            "anchor_detected": (
-                                str(anchor_detected)
-                                if pd.notna(anchor_detected)
-                                else None
-                            ),
-                            "anchor_type": (
-                                str(anchor_type) if pd.notna(anchor_type) else None
-                            ),
-                            "idle_method": (
-                                str(idle_method) if pd.notna(idle_method) else None
-                            ),
-                        }
-                    )
-                else:
-                    offline_trucks += 1
-
-            except Exception as e:
-                print(f"Error processing {truck_id}: {e}")
-                continue
-
-        return {
-            "total_trucks": total_trucks,
-            "active_trucks": active_trucks,
-            "offline_trucks": offline_trucks,
-            "critical_count": critical_count,
-            "warning_count": warning_count,
-            "healthy_count": healthy_count,
-            "avg_mpg": round(total_mpg / mpg_count, 2) if mpg_count > 0 else 0,
-            "avg_idle_gph": (
-                round(total_idle_gph / idle_count, 2) if idle_count > 0 else 0
-            ),
-            "truck_details": truck_details,
-            "timestamp": datetime.now().isoformat(),
-        }
 
     def _process_fleet_data(self, df: pd.DataFrame, source: str = "mysql") -> Dict:
         """Process fleet data from DataFrame (works for both MySQL and CSV)"""

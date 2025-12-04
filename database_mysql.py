@@ -370,9 +370,9 @@ def get_refuel_history(
                     else 0
                 )
 
-                # 🔧 v3.10.14: CRITICAL - A real refuel should result in fuel > 55%
-                # If fuel_after is low, this is likely sensor oscillation, not real refuel
-                if fuel_level_after_pct < 55:
+                # 🔧 v3.12.0: Lowered threshold from 55% to 40% to capture partial refuels
+                # A real refuel should result in fuel > 40% (allows emergency/partial fills)
+                if fuel_level_after_pct < 40:
                     continue
 
                 # Cap at reasonable max
@@ -2231,10 +2231,9 @@ def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
                 # Get fuel levels from the best record
                 fuel_after_pct = float(best_row[3] or 0)
 
-                # 🔧 v3.10.14: CRITICAL - A real refuel should result in fuel > 55%
-                # If fuel_after is low (< 55%), this is likely a sensor oscillation, not real refuel
-                # Real refuels typically bring tank to 60-100%
-                if fuel_after_pct < 55:
+                # 🔧 v3.12.0: Lowered threshold from 55% to 40% to capture partial refuels
+                # A real refuel should result in fuel > 40% (allows emergency/partial fills)
+                if fuel_after_pct < 40:
                     continue
 
                 # Cap at reasonable max
@@ -2838,6 +2837,783 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error in fuel theft analysis: {e}")
         return _empty_theft_analysis(days_back, FUEL_PRICE)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 ROUTE EFFICIENCY & COST ATTRIBUTION FUNCTIONS (v3.12.0)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def get_route_efficiency_analysis(
+    truck_id: Optional[str] = None, days_back: int = 7
+) -> Dict:
+    """
+    Analyze route efficiency comparing actual vs expected fuel consumption.
+
+    This helps identify:
+    - Routes with poor fuel economy
+    - Driver behavior issues on specific routes
+    - Vehicle performance problems
+
+    Args:
+        truck_id: Optional specific truck to analyze
+        days_back: Days of history to analyze
+
+    Returns:
+        Dict with route efficiency metrics and recommendations
+    """
+    engine = get_sqlalchemy_engine()
+    FUEL_PRICE = 3.50
+    BASELINE_MPG = 6.5
+
+    try:
+        with engine.connect() as conn:
+            # Get trip segments (periods of movement between stops)
+            truck_filter = f"AND truck_id = '{truck_id}'" if truck_id else ""
+
+            query = text(
+                f"""
+                WITH trip_data AS (
+                    SELECT 
+                        truck_id,
+                        DATE(timestamp_utc) as trip_date,
+                        MIN(timestamp_utc) as start_time,
+                        MAX(timestamp_utc) as end_time,
+                        SUM(CASE WHEN truck_status = 'MOVING' THEN 1 ELSE 0 END) as moving_records,
+                        AVG(CASE WHEN truck_status = 'MOVING' AND mpg_current > 0 THEN mpg_current END) as avg_mpg,
+                        AVG(CASE WHEN truck_status = 'MOVING' THEN speed_mph END) as avg_speed,
+                        MAX(odometer_mi) - MIN(odometer_mi) as miles_traveled,
+                        AVG(altitude_ft) as avg_altitude,
+                        SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.5 THEN 1 ELSE 0 END) as idle_periods,
+                        AVG(CASE WHEN truck_status = 'STOPPED' THEN consumption_gph END) as avg_idle_gph
+                    FROM fuel_metrics
+                    WHERE timestamp_utc > NOW() - INTERVAL :days DAY
+                    {truck_filter}
+                    GROUP BY truck_id, DATE(timestamp_utc)
+                    HAVING SUM(CASE WHEN truck_status = 'MOVING' THEN 1 ELSE 0 END) > 10
+                )
+                SELECT * FROM trip_data
+                ORDER BY truck_id, trip_date DESC
+            """
+            )
+
+            result = conn.execute(query, {"days": days_back})
+            rows = result.fetchall()
+
+            if not rows:
+                return {
+                    "period_days": days_back,
+                    "truck_id": truck_id,
+                    "total_trips": 0,
+                    "efficiency_analysis": [],
+                    "recommendations": [],
+                    "summary": {
+                        "avg_mpg": 0,
+                        "total_miles": 0,
+                        "total_fuel_gallons": 0,
+                        "efficiency_score": 0,
+                    },
+                }
+
+            trips = []
+            total_miles = 0
+            total_fuel = 0
+            mpg_values = []
+
+            for row in rows:
+                tid = row[0]
+                trip_date = row[1]
+                avg_mpg = float(row[5] or 0)
+                avg_speed = float(row[6] or 0)
+                miles = float(row[7] or 0)
+                avg_altitude = float(row[8] or 0)
+                idle_periods = int(row[9] or 0)
+                avg_idle = float(row[10] or 0)
+
+                if miles <= 0:
+                    continue
+
+                # Calculate expected vs actual fuel
+                expected_fuel = miles / BASELINE_MPG
+                actual_fuel = miles / avg_mpg if avg_mpg > 0 else expected_fuel * 1.5
+                fuel_variance = actual_fuel - expected_fuel
+                variance_pct = (
+                    (fuel_variance / expected_fuel * 100) if expected_fuel > 0 else 0
+                )
+
+                # Efficiency score (100 = baseline, >100 = better, <100 = worse)
+                efficiency_score = (BASELINE_MPG / avg_mpg * 100) if avg_mpg > 0 else 50
+
+                # Cost analysis
+                actual_cost = actual_fuel * FUEL_PRICE
+                expected_cost = expected_fuel * FUEL_PRICE
+                cost_variance = actual_cost - expected_cost
+
+                # Altitude impact estimate (3% penalty per 1000ft above 3000ft)
+                altitude_penalty = max(0, (avg_altitude - 3000) / 1000 * 0.03)
+
+                trips.append(
+                    {
+                        "truck_id": tid,
+                        "date": str(trip_date),
+                        "miles": round(miles, 1),
+                        "avg_mpg": round(avg_mpg, 2) if avg_mpg > 0 else None,
+                        "avg_speed_mph": round(avg_speed, 1),
+                        "avg_altitude_ft": round(avg_altitude, 0),
+                        "idle_periods": idle_periods,
+                        "avg_idle_gph": round(avg_idle, 2) if avg_idle > 0 else None,
+                        "expected_fuel_gal": round(expected_fuel, 1),
+                        "actual_fuel_gal": round(actual_fuel, 1),
+                        "fuel_variance_gal": round(fuel_variance, 1),
+                        "variance_pct": round(variance_pct, 1),
+                        "efficiency_score": round(efficiency_score, 0),
+                        "actual_cost": round(actual_cost, 2),
+                        "expected_cost": round(expected_cost, 2),
+                        "cost_variance": round(cost_variance, 2),
+                        "altitude_impact_pct": round(altitude_penalty * 100, 1),
+                    }
+                )
+
+                total_miles += miles
+                total_fuel += actual_fuel
+                if avg_mpg > 0:
+                    mpg_values.append(avg_mpg)
+
+            # Generate recommendations
+            recommendations = []
+
+            # Check for consistently low MPG
+            avg_fleet_mpg = sum(mpg_values) / len(mpg_values) if mpg_values else 0
+            if avg_fleet_mpg < BASELINE_MPG * 0.85:
+                recommendations.append(
+                    {
+                        "priority": "HIGH",
+                        "type": "LOW_MPG",
+                        "finding": f"Average MPG ({avg_fleet_mpg:.1f}) is {((BASELINE_MPG - avg_fleet_mpg) / BASELINE_MPG * 100):.0f}% below baseline",
+                        "action": "Schedule maintenance check for engine, tires, and fuel system",
+                        "estimated_monthly_savings": round(
+                            (BASELINE_MPG - avg_fleet_mpg) * 100 * FUEL_PRICE, 0
+                        ),
+                    }
+                )
+
+            # Check for high idle
+            high_idle_trips = [t for t in trips if (t.get("idle_periods") or 0) > 5]
+            if len(high_idle_trips) > len(trips) * 0.3:
+                recommendations.append(
+                    {
+                        "priority": "MEDIUM",
+                        "type": "EXCESSIVE_IDLE",
+                        "finding": f"{len(high_idle_trips)} trips with excessive idle periods",
+                        "action": "Coach drivers on reducing idle time; consider APU installation",
+                        "estimated_monthly_savings": round(
+                            len(high_idle_trips) * 2 * FUEL_PRICE, 0
+                        ),
+                    }
+                )
+
+            # Check for speed efficiency
+            fast_trips = [t for t in trips if (t.get("avg_speed_mph") or 0) > 70]
+            if fast_trips:
+                recommendations.append(
+                    {
+                        "priority": "MEDIUM",
+                        "type": "HIGH_SPEED",
+                        "finding": f"{len(fast_trips)} trips with avg speed >70 mph",
+                        "action": "Optimal cruising speed is 55-65 mph for best fuel economy",
+                        "estimated_monthly_savings": round(
+                            len(fast_trips) * 5 * FUEL_PRICE, 0
+                        ),
+                    }
+                )
+
+            return {
+                "period_days": days_back,
+                "truck_id": truck_id,
+                "total_trips": len(trips),
+                "efficiency_analysis": trips[:50],  # Limit to recent 50
+                "recommendations": recommendations,
+                "summary": {
+                    "avg_mpg": round(avg_fleet_mpg, 2),
+                    "total_miles": round(total_miles, 0),
+                    "total_fuel_gallons": round(total_fuel, 0),
+                    "total_cost": round(total_fuel * FUEL_PRICE, 2),
+                    "efficiency_score": round(
+                        (
+                            (BASELINE_MPG / avg_fleet_mpg * 100)
+                            if avg_fleet_mpg > 0
+                            else 50
+                        ),
+                        0,
+                    ),
+                    "baseline_mpg": BASELINE_MPG,
+                },
+            }
+
+    except Exception as e:
+        logger.error(f"Error in route efficiency analysis: {e}")
+        return {
+            "period_days": days_back,
+            "truck_id": truck_id,
+            "total_trips": 0,
+            "efficiency_analysis": [],
+            "recommendations": [],
+            "summary": {
+                "avg_mpg": 0,
+                "total_miles": 0,
+                "total_fuel_gallons": 0,
+                "efficiency_score": 0,
+            },
+            "error": str(e),
+        }
+
+
+def get_cost_attribution_report(days_back: int = 30) -> Dict:
+    """
+    Generate detailed cost attribution report for fleet fuel expenses.
+
+    Breaks down costs by:
+    - Per-truck consumption
+    - Driving vs idling
+    - Efficiency losses
+    - Waste categories
+
+    Args:
+        days_back: Days of history to analyze
+
+    Returns:
+        Dict with comprehensive cost breakdown and savings opportunities
+    """
+    engine = get_sqlalchemy_engine()
+    FUEL_PRICE = 3.50
+    BASELINE_MPG = 6.5
+    BASELINE_IDLE_GPH = 0.8
+
+    try:
+        with engine.connect() as conn:
+            # Get per-truck statistics
+            query = text(
+                """
+                SELECT 
+                    truck_id,
+                    COUNT(*) as total_readings,
+                    SUM(CASE WHEN truck_status = 'MOVING' THEN 1 ELSE 0 END) as moving_readings,
+                    SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN 1 ELSE 0 END) as idle_readings,
+                    AVG(CASE WHEN truck_status = 'MOVING' AND mpg_current > 2 THEN mpg_current END) as avg_mpg,
+                    AVG(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN consumption_gph END) as avg_idle_gph,
+                    MAX(odometer_mi) - MIN(odometer_mi) as total_miles,
+                    SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN consumption_gph / 60.0 END) as total_idle_gallons_approx
+                FROM fuel_metrics
+                WHERE timestamp_utc > NOW() - INTERVAL :days DAY
+                GROUP BY truck_id
+                HAVING COUNT(*) > 100
+                ORDER BY total_miles DESC
+            """
+            )
+
+            result = conn.execute(query, {"days": days_back})
+            rows = result.fetchall()
+
+            truck_costs = []
+            fleet_totals = {
+                "total_miles": 0,
+                "total_driving_fuel": 0,
+                "total_idle_fuel": 0,
+                "total_cost": 0,
+                "efficiency_loss_gal": 0,
+                "idle_waste_gal": 0,
+            }
+
+            for row in rows:
+                tid = row[0]
+                avg_mpg = float(row[4] or BASELINE_MPG)
+                avg_idle = float(row[5] or BASELINE_IDLE_GPH)
+                miles = float(row[6] or 0)
+                idle_gal_approx = float(row[7] or 0)
+
+                if miles <= 0:
+                    continue
+
+                # Calculate driving fuel
+                driving_fuel = miles / avg_mpg if avg_mpg > 0 else miles / BASELINE_MPG
+                expected_driving_fuel = miles / BASELINE_MPG
+                driving_efficiency_loss = driving_fuel - expected_driving_fuel
+
+                # Calculate idle fuel (estimate from readings)
+                idle_fuel = idle_gal_approx
+                expected_idle_fuel = (
+                    idle_fuel * (BASELINE_IDLE_GPH / avg_idle)
+                    if avg_idle > 0
+                    else idle_fuel
+                )
+                idle_waste = (
+                    idle_fuel - expected_idle_fuel if expected_idle_fuel > 0 else 0
+                )
+
+                # Total costs
+                total_fuel = driving_fuel + idle_fuel
+                total_cost = total_fuel * FUEL_PRICE
+
+                # Waste breakdown
+                efficiency_loss_cost = max(0, driving_efficiency_loss) * FUEL_PRICE
+                idle_waste_cost = max(0, idle_waste) * FUEL_PRICE
+
+                truck_costs.append(
+                    {
+                        "truck_id": tid,
+                        "total_miles": round(miles, 0),
+                        "avg_mpg": round(avg_mpg, 2),
+                        "avg_idle_gph": round(avg_idle, 2),
+                        "driving_fuel_gal": round(driving_fuel, 1),
+                        "idle_fuel_gal": round(idle_fuel, 1),
+                        "total_fuel_gal": round(total_fuel, 1),
+                        "total_cost": round(total_cost, 2),
+                        "efficiency_score": round(
+                            (BASELINE_MPG / avg_mpg * 100) if avg_mpg > 0 else 50, 0
+                        ),
+                        "cost_breakdown": {
+                            "driving_cost": round(driving_fuel * FUEL_PRICE, 2),
+                            "idle_cost": round(idle_fuel * FUEL_PRICE, 2),
+                            "efficiency_loss": round(efficiency_loss_cost, 2),
+                            "idle_waste": round(idle_waste_cost, 2),
+                        },
+                    }
+                )
+
+                # Accumulate fleet totals
+                fleet_totals["total_miles"] += miles
+                fleet_totals["total_driving_fuel"] += driving_fuel
+                fleet_totals["total_idle_fuel"] += idle_fuel
+                fleet_totals["total_cost"] += total_cost
+                fleet_totals["efficiency_loss_gal"] += max(0, driving_efficiency_loss)
+                fleet_totals["idle_waste_gal"] += max(0, idle_waste)
+
+            # Calculate savings opportunities
+            savings_opportunities = []
+
+            # MPG improvement opportunity
+            if fleet_totals["efficiency_loss_gal"] > 0:
+                savings_opportunities.append(
+                    {
+                        "category": "Efficiency Improvement",
+                        "description": "Bring all trucks to baseline MPG through maintenance and training",
+                        "potential_savings_gal": round(
+                            fleet_totals["efficiency_loss_gal"], 0
+                        ),
+                        "potential_savings_usd": round(
+                            fleet_totals["efficiency_loss_gal"] * FUEL_PRICE, 2
+                        ),
+                        "difficulty": "MEDIUM",
+                        "timeline": "1-3 months",
+                    }
+                )
+
+            # Idle reduction opportunity
+            if fleet_totals["idle_waste_gal"] > 0:
+                savings_opportunities.append(
+                    {
+                        "category": "Idle Reduction",
+                        "description": "Reduce idle time through driver coaching and APU installation",
+                        "potential_savings_gal": round(
+                            fleet_totals["idle_waste_gal"], 0
+                        ),
+                        "potential_savings_usd": round(
+                            fleet_totals["idle_waste_gal"] * FUEL_PRICE, 2
+                        ),
+                        "difficulty": "EASY",
+                        "timeline": "Immediate",
+                    }
+                )
+
+            return {
+                "period_days": days_back,
+                "fuel_price_per_gal": FUEL_PRICE,
+                "baseline_mpg": BASELINE_MPG,
+                "baseline_idle_gph": BASELINE_IDLE_GPH,
+                "fleet_summary": {
+                    "total_trucks": len(truck_costs),
+                    "total_miles": round(fleet_totals["total_miles"], 0),
+                    "total_fuel_gal": round(
+                        fleet_totals["total_driving_fuel"]
+                        + fleet_totals["total_idle_fuel"],
+                        0,
+                    ),
+                    "total_cost": round(fleet_totals["total_cost"], 2),
+                    "cost_per_mile": (
+                        round(
+                            fleet_totals["total_cost"] / fleet_totals["total_miles"], 3
+                        )
+                        if fleet_totals["total_miles"] > 0
+                        else 0
+                    ),
+                    "driving_fuel_pct": (
+                        round(
+                            fleet_totals["total_driving_fuel"]
+                            / (
+                                fleet_totals["total_driving_fuel"]
+                                + fleet_totals["total_idle_fuel"]
+                            )
+                            * 100,
+                            1,
+                        )
+                        if (
+                            fleet_totals["total_driving_fuel"]
+                            + fleet_totals["total_idle_fuel"]
+                        )
+                        > 0
+                        else 100
+                    ),
+                    "waste_breakdown": {
+                        "efficiency_loss_gal": round(
+                            fleet_totals["efficiency_loss_gal"], 0
+                        ),
+                        "efficiency_loss_usd": round(
+                            fleet_totals["efficiency_loss_gal"] * FUEL_PRICE, 2
+                        ),
+                        "idle_waste_gal": round(fleet_totals["idle_waste_gal"], 0),
+                        "idle_waste_usd": round(
+                            fleet_totals["idle_waste_gal"] * FUEL_PRICE, 2
+                        ),
+                        "total_waste_usd": round(
+                            (
+                                fleet_totals["efficiency_loss_gal"]
+                                + fleet_totals["idle_waste_gal"]
+                            )
+                            * FUEL_PRICE,
+                            2,
+                        ),
+                    },
+                },
+                "truck_breakdown": truck_costs[:50],  # Top 50 trucks
+                "savings_opportunities": savings_opportunities,
+            }
+
+    except Exception as e:
+        logger.error(f"Error in cost attribution report: {e}")
+        return {
+            "period_days": days_back,
+            "error": str(e),
+            "fleet_summary": {},
+            "truck_breakdown": [],
+            "savings_opportunities": [],
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 GEOFENCING FUNCTIONS (v3.12.0)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# Predefined geofence zones (can be expanded via config file or database)
+GEOFENCE_ZONES = {
+    "HOME_BASE": {
+        "name": "Home Base",
+        "type": "CIRCLE",
+        "lat": 40.7128,  # Example: NYC
+        "lon": -74.0060,
+        "radius_miles": 5.0,
+        "alert_on_exit": True,
+        "alert_on_enter": False,
+    },
+    "FUEL_STATION_1": {
+        "name": "Main Fuel Station",
+        "type": "CIRCLE",
+        "lat": 40.7589,
+        "lon": -73.9851,
+        "radius_miles": 0.5,
+        "alert_on_exit": False,
+        "alert_on_enter": True,
+    },
+}
+
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Calculate distance between two GPS coordinates in miles.
+    Uses Haversine formula for great-circle distance.
+    """
+    from math import radians, sin, cos, sqrt, atan2
+
+    R = 3959  # Earth's radius in miles
+
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    return R * c
+
+
+def check_geofence_status(
+    truck_id: str, latitude: float, longitude: float, zones: Optional[Dict] = None
+) -> List[Dict]:
+    """
+    Check if a truck is inside any geofence zones.
+
+    Args:
+        truck_id: Truck identifier
+        latitude: Current GPS latitude
+        longitude: Current GPS longitude
+        zones: Optional custom zones dict (uses GEOFENCE_ZONES if not provided)
+
+    Returns:
+        List of zones the truck is currently inside
+    """
+    if zones is None:
+        zones = GEOFENCE_ZONES
+
+    inside_zones = []
+
+    for zone_id, zone in zones.items():
+        if zone["type"] == "CIRCLE":
+            distance = haversine_distance(latitude, longitude, zone["lat"], zone["lon"])
+
+            if distance <= zone["radius_miles"]:
+                inside_zones.append(
+                    {
+                        "zone_id": zone_id,
+                        "zone_name": zone["name"],
+                        "distance_miles": round(distance, 2),
+                        "radius_miles": zone["radius_miles"],
+                    }
+                )
+
+    return inside_zones
+
+
+def get_geofence_events(
+    truck_id: Optional[str] = None, hours_back: int = 24, zones: Optional[Dict] = None
+) -> Dict:
+    """
+    Analyze geofence entry/exit events for trucks.
+
+    This function tracks when trucks enter or exit defined zones
+    by analyzing GPS history.
+
+    Args:
+        truck_id: Optional specific truck to analyze
+        hours_back: Hours of history to analyze
+        zones: Optional custom zones dict
+
+    Returns:
+        Dict with geofence events and statistics
+    """
+    engine = get_sqlalchemy_engine()
+
+    if zones is None:
+        zones = GEOFENCE_ZONES
+
+    try:
+        with engine.connect() as conn:
+            # Get GPS history
+            truck_filter = f"AND truck_id = '{truck_id}'" if truck_id else ""
+
+            query = text(
+                f"""
+                SELECT 
+                    truck_id,
+                    timestamp_utc,
+                    latitude,
+                    longitude,
+                    truck_status,
+                    speed_mph
+                FROM fuel_metrics
+                WHERE timestamp_utc > NOW() - INTERVAL :hours HOUR
+                AND latitude IS NOT NULL
+                AND longitude IS NOT NULL
+                {truck_filter}
+                ORDER BY truck_id, timestamp_utc
+            """
+            )
+
+            result = conn.execute(query, {"hours": hours_back})
+            rows = result.fetchall()
+
+            if not rows:
+                return {
+                    "period_hours": hours_back,
+                    "truck_id": truck_id,
+                    "total_events": 0,
+                    "events": [],
+                    "zone_summary": {},
+                }
+
+            # Track zone transitions
+            events = []
+            zone_summary = {
+                zone_id: {"entries": 0, "exits": 0, "time_inside_min": 0}
+                for zone_id in zones
+            }
+            truck_zone_state: Dict[str, Dict[str, bool]] = (
+                {}
+            )  # truck_id -> {zone_id: inside}
+            truck_zone_entry_time: Dict[str, Dict[str, datetime]] = (
+                {}
+            )  # For time tracking
+
+            for row in rows:
+                tid = row[0]
+                timestamp = row[1]
+                lat = float(row[2])
+                lon = float(row[3])
+                status = row[4]
+                speed = float(row[5] or 0)
+
+                # Initialize truck state if needed
+                if tid not in truck_zone_state:
+                    truck_zone_state[tid] = {}
+                    truck_zone_entry_time[tid] = {}
+
+                # Check each zone
+                for zone_id, zone in zones.items():
+                    if zone["type"] == "CIRCLE":
+                        distance = haversine_distance(
+                            lat, lon, zone["lat"], zone["lon"]
+                        )
+                        is_inside = distance <= zone["radius_miles"]
+                        was_inside = truck_zone_state[tid].get(zone_id, False)
+
+                        # Detect transitions
+                        if is_inside and not was_inside:
+                            # ENTRY event
+                            if zone.get("alert_on_enter", False):
+                                events.append(
+                                    {
+                                        "truck_id": tid,
+                                        "zone_id": zone_id,
+                                        "zone_name": zone["name"],
+                                        "event_type": "ENTRY",
+                                        "timestamp": (
+                                            timestamp.isoformat() if timestamp else None
+                                        ),
+                                        "latitude": lat,
+                                        "longitude": lon,
+                                        "distance_miles": round(distance, 2),
+                                        "speed_mph": speed,
+                                    }
+                                )
+                            zone_summary[zone_id]["entries"] += 1
+                            truck_zone_entry_time[tid][zone_id] = timestamp
+
+                        elif not is_inside and was_inside:
+                            # EXIT event
+                            if zone.get("alert_on_exit", False):
+                                events.append(
+                                    {
+                                        "truck_id": tid,
+                                        "zone_id": zone_id,
+                                        "zone_name": zone["name"],
+                                        "event_type": "EXIT",
+                                        "timestamp": (
+                                            timestamp.isoformat() if timestamp else None
+                                        ),
+                                        "latitude": lat,
+                                        "longitude": lon,
+                                        "distance_miles": round(distance, 2),
+                                        "speed_mph": speed,
+                                    }
+                                )
+                            zone_summary[zone_id]["exits"] += 1
+
+                            # Calculate time inside
+                            if (
+                                tid in truck_zone_entry_time
+                                and zone_id in truck_zone_entry_time[tid]
+                            ):
+                                entry_time = truck_zone_entry_time[tid][zone_id]
+                                if entry_time and timestamp:
+                                    time_inside = (
+                                        timestamp - entry_time
+                                    ).total_seconds() / 60
+                                    zone_summary[zone_id][
+                                        "time_inside_min"
+                                    ] += time_inside
+
+                        truck_zone_state[tid][zone_id] = is_inside
+
+            # Round time values
+            for zone_id in zone_summary:
+                zone_summary[zone_id]["time_inside_min"] = round(
+                    zone_summary[zone_id]["time_inside_min"], 0
+                )
+
+            return {
+                "period_hours": hours_back,
+                "truck_id": truck_id,
+                "total_events": len(events),
+                "events": events[-100:],  # Last 100 events
+                "zone_summary": zone_summary,
+                "zones_monitored": list(zones.keys()),
+            }
+
+    except Exception as e:
+        logger.error(f"Error in geofence analysis: {e}")
+        return {
+            "period_hours": hours_back,
+            "truck_id": truck_id,
+            "total_events": 0,
+            "events": [],
+            "zone_summary": {},
+            "error": str(e),
+        }
+
+
+def get_truck_location_history(truck_id: str, hours_back: int = 24) -> List[Dict]:
+    """
+    Get GPS location history for a truck (for map visualization).
+
+    Args:
+        truck_id: Truck identifier
+        hours_back: Hours of history to retrieve
+
+    Returns:
+        List of location points with timestamps
+    """
+    engine = get_sqlalchemy_engine()
+
+    try:
+        with engine.connect() as conn:
+            query = text(
+                """
+                SELECT 
+                    timestamp_utc,
+                    latitude,
+                    longitude,
+                    truck_status,
+                    speed_mph,
+                    estimated_pct as fuel_pct
+                FROM fuel_metrics
+                WHERE truck_id = :truck_id
+                AND timestamp_utc > NOW() - INTERVAL :hours HOUR
+                AND latitude IS NOT NULL
+                AND longitude IS NOT NULL
+                ORDER BY timestamp_utc
+            """
+            )
+
+            result = conn.execute(query, {"truck_id": truck_id, "hours": hours_back})
+            rows = result.fetchall()
+
+            locations = []
+            for row in rows:
+                locations.append(
+                    {
+                        "timestamp": row[0].isoformat() if row[0] else None,
+                        "latitude": float(row[1]),
+                        "longitude": float(row[2]),
+                        "status": row[3],
+                        "speed_mph": float(row[4] or 0),
+                        "fuel_pct": float(row[5] or 0),
+                    }
+                )
+
+            return locations
+
+    except Exception as e:
+        logger.error(f"Error getting location history for {truck_id}: {e}")
+        return []
 
 
 def _empty_theft_analysis(days: int, price: float) -> Dict[str, Any]:

@@ -741,6 +741,13 @@ def process_truck(
 
 def save_to_fuel_metrics(connection, metrics: Dict) -> int:
     """Insert processed metrics into fuel_metrics table"""
+    # Convert PARKED to OFFLINE for database compatibility
+    # The DB schema only supports MOVING/STOPPED/OFFLINE
+    db_status = metrics.get("truck_status", "OFFLINE")
+    if db_status == "PARKED":
+        db_status = "OFFLINE"
+    metrics["truck_status"] = db_status
+
     try:
         with connection.cursor() as cursor:
             query = """

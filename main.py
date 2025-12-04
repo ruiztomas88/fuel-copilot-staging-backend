@@ -163,16 +163,17 @@ async def lifespan(app: FastAPI):
     This is the modern replacement for @app.on_event("startup") and @app.on_event("shutdown").
     See: https://fastapi.tiangolo.com/advanced/events/
     """
-    # Startup
-    print("🚀 Fuel Copilot API v3.9.3 starting...")
-    print(f"📊 Available trucks: {len(db.get_all_trucks())}")
-    print("🔌 MySQL enhanced features: enabled")
-    print("✅ API ready for connections")
+    # Startup - using logger to avoid Unicode encoding issues in PowerShell
+    logger = logging.getLogger(__name__)
+    logger.info("Fuel Copilot API v3.12.0 starting...")
+    logger.info(f"Available trucks: {len(db.get_all_trucks())}")
+    logger.info("MySQL enhanced features: enabled")
+    logger.info("API ready for connections")
 
     yield  # App runs here
 
     # Shutdown
-    print("👋 Shutting down Fuel Copilot API")
+    logger.info("Shutting down Fuel Copilot API")
 
 
 # Initialize FastAPI app with lifespan
@@ -1744,6 +1745,198 @@ async def get_monitored_sensors():
             "Rule 7: 15+ points within 1σ (stuck sensor)",
         ],
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 ROUTE EFFICIENCY & COST ATTRIBUTION ENDPOINTS (v3.12.0)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/fuelAnalytics/api/analytics/route-efficiency")
+async def get_route_efficiency(
+    truck_id: Optional[str] = Query(None, description="Specific truck ID to analyze"),
+    days: int = Query(7, ge=1, le=90, description="Days of history to analyze"),
+):
+    """
+    Analyze route efficiency comparing actual vs expected fuel consumption.
+
+    Identifies:
+    - Routes with poor fuel economy
+    - Driver behavior issues on specific routes
+    - Vehicle performance problems
+
+    Returns efficiency metrics, recommendations, and savings opportunities.
+    """
+    try:
+        from database_mysql import get_route_efficiency_analysis
+
+        result = get_route_efficiency_analysis(truck_id=truck_id, days_back=days)
+        return result
+
+    except Exception as e:
+        logger.error(f"Route efficiency analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/analytics/cost-attribution")
+async def get_cost_attribution(
+    days: int = Query(30, ge=1, le=365, description="Days of history to analyze"),
+):
+    """
+    Generate detailed cost attribution report for fleet fuel expenses.
+
+    Breaks down costs by:
+    - Per-truck consumption
+    - Driving vs idling
+    - Efficiency losses
+    - Waste categories
+
+    Includes savings opportunities and recommendations.
+    """
+    try:
+        from database_mysql import get_cost_attribution_report
+
+        result = get_cost_attribution_report(days_back=days)
+        return result
+
+    except Exception as e:
+        logger.error(f"Cost attribution report error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 GEOFENCING ENDPOINTS (v3.12.0)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/fuelAnalytics/api/geofence/events")
+async def get_geofence_events_endpoint(
+    truck_id: Optional[str] = Query(None, description="Specific truck ID"),
+    hours: int = Query(24, ge=1, le=168, description="Hours of history"),
+):
+    """
+    Get geofence entry/exit events for trucks.
+
+    Tracks when trucks enter or exit defined zones.
+    Useful for monitoring:
+    - Fuel station visits
+    - Unauthorized stops
+    - Route compliance
+    """
+    try:
+        from database_mysql import get_geofence_events
+
+        result = get_geofence_events(truck_id=truck_id, hours_back=hours)
+        return result
+
+    except Exception as e:
+        logger.error(f"Geofence events error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/geofence/location-history/{truck_id}")
+async def get_location_history(
+    truck_id: str,
+    hours: int = Query(24, ge=1, le=168, description="Hours of history"),
+):
+    """
+    Get GPS location history for a truck (for map visualization).
+
+    Returns a list of location points with timestamps,
+    speed, status, and fuel level.
+    """
+    try:
+        from database_mysql import get_truck_location_history
+
+        result = get_truck_location_history(truck_id=truck_id, hours_back=hours)
+        return {"truck_id": truck_id, "hours": hours, "locations": result}
+
+    except Exception as e:
+        logger.error(f"Location history error for {truck_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/geofence/zones")
+async def get_geofence_zones():
+    """
+    Get list of defined geofence zones.
+
+    Returns zone configurations including:
+    - Zone ID and name
+    - Type (CIRCLE, POLYGON)
+    - Coordinates and radius
+    - Alert settings
+    """
+    try:
+        from database_mysql import GEOFENCE_ZONES
+
+        zones = []
+        for zone_id, zone in GEOFENCE_ZONES.items():
+            zones.append(
+                {
+                    "zone_id": zone_id,
+                    "name": zone["name"],
+                    "type": zone["type"],
+                    "latitude": zone.get("lat"),
+                    "longitude": zone.get("lon"),
+                    "radius_miles": zone.get("radius_miles"),
+                    "alert_on_enter": zone.get("alert_on_enter", False),
+                    "alert_on_exit": zone.get("alert_on_exit", False),
+                }
+            )
+
+        return {"zones": zones, "total": len(zones)}
+
+    except Exception as e:
+        logger.error(f"Get geofence zones error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 PREDICTIVE ALERTS ENDPOINT (v3.12.0)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/fuelAnalytics/api/alerts/predictive")
+async def get_predictive_alerts(
+    hours: int = Query(24, ge=1, le=168, description="Hours of alert history"),
+):
+    """
+    Get predictive alerts including:
+    - MPG decline trends (maintenance indicator)
+    - Fuel theft patterns
+    - Driver behavior issues
+    - Fleet health summary
+
+    These alerts use historical data to predict issues
+    before they become critical problems.
+    """
+    try:
+        from alert_system import AlertSystem
+
+        # Get current truck data for analysis
+        summary = db.get_fleet_summary()
+        truck_data = summary.get("truck_details", [])
+
+        # Initialize alert system and check for alerts
+        alert_system = AlertSystem()
+        alerts = alert_system.check_fleet_alerts(truck_data)
+
+        # Get fleet health summary
+        health_summary = alert_system.get_fleet_health_summary(truck_data)
+
+        # Convert alerts to dict format
+        alerts_list = [alert.to_dict() for alert in alerts]
+
+        return {
+            "alerts": alerts_list,
+            "fleet_health": health_summary,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Predictive alerts error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
