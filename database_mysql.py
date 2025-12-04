@@ -3136,7 +3136,9 @@ def get_cost_attribution_report(days_back: int = 30) -> Dict:
                 # At 70mph average, 10hrs/day driving = 700 miles/day max
                 max_reasonable_miles = days_back * 800  # 800 miles/day is very generous
                 if miles > max_reasonable_miles:
-                    logger.warning(f"[{tid}] Unrealistic miles: {miles:.0f} (max {max_reasonable_miles}), skipping")
+                    logger.warning(
+                        f"[{tid}] Unrealistic miles: {miles:.0f} (max {max_reasonable_miles}), skipping"
+                    )
                     continue
 
                 if miles <= 0:
