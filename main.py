@@ -823,13 +823,19 @@ async def get_truck_history(
                 status_code=404, detail=f"No history found for {truck_id}"
             )
 
-        # Convert to HistoricalRecord models with NaN sanitization
+        # Convert to HistoricalRecord models with NaN sanitization and MPG validation
         history = []
         for rec in records:
+            # Get and validate MPG - must be physically possible (2.5-15 for Class 8 trucks)
+            mpg_raw = sanitize_nan(rec.get("mpg_current"))
+            mpg_valid = (
+                mpg_raw if mpg_raw is not None and 2.5 <= mpg_raw <= 15 else None
+            )
+
             history.append(
                 {
                     "timestamp": rec.get("timestamp"),
-                    "mpg": sanitize_nan(rec.get("mpg_current")),
+                    "mpg": mpg_valid,
                     "idle_gph": sanitize_nan(rec.get("idle_consumption_gph")),
                     "fuel_percent": sanitize_nan(rec.get("fuel_percent")),
                     "speed_mph": sanitize_nan(rec.get("speed_mph")),
