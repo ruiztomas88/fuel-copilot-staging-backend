@@ -567,36 +567,29 @@ class DatabaseManager:
                         else:
                             mpg_val = record.get("mpg_current")
 
-                    # 🆕 Idle GPH: Use avg_idle_gph_24h (more stable than instant value)
+                    # 🆕 Idle GPH: Use consumption_gph when STOPPED
                     avg_idle_gph_24h = record.get("avg_idle_gph_24h")
                     idle_readings_24h = record.get("idle_readings_24h", 0)
-                    direct_idle_gph = record.get(
-                        "idle_gph"
-                    )  # Direct idle_gph from sync
                     idle_val = None
                     if truck_status == "STOPPED":
-                        # Priority 1: Direct idle_gph from sync (calculated per-truck)
-                        if pd.notna(direct_idle_gph) and direct_idle_gph > 0.01:
-                            idle_val = direct_idle_gph
-                        # Priority 2: 24h average if we have enough readings
-                        elif (
+                        # Priority 1: 24h average if we have enough readings
+                        if (
                             pd.notna(avg_idle_gph_24h)
                             and idle_readings_24h
                             and idle_readings_24h >= 3
                         ):
                             idle_val = avg_idle_gph_24h
-                        # Priority 3: Current instant consumption value
+                        # Priority 2: Current instant consumption value
                         elif pd.notna(consumption_gph) and consumption_gph > 0.1:
                             idle_val = consumption_gph
-                        # Priority 4: 🆕 FALLBACK - truck is STOPPED with engine on, use default
-                        # If RPM > 0 or idle_method indicates idling, use conservative estimate
+                        # Priority 3: FALLBACK - truck is STOPPED with engine on, use default
                         else:
                             rpm_val = record.get("rpm")
-                            idle_method = record.get("idle_method", "")
+                            idle_method_val = record.get("idle_method", "")
                             # Check if engine is running (RPM > 0 or idle_method indicates active)
                             if (rpm_val and rpm_val > 0) or (
-                                idle_method
-                                and idle_method
+                                idle_method_val
+                                and idle_method_val
                                 not in ["NOT_IDLE", "ENGINE_OFF", None, ""]
                             ):
                                 idle_val = 0.8  # Conservative fallback: 0.8 GPH
