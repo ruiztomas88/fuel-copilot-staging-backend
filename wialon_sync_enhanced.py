@@ -278,12 +278,15 @@ def determine_truck_status(
     coolant_temp: Optional[float] = None,
 ) -> str:
     """
-    Enhanced truck status determination v2 - Improved with additional sensors
+    Enhanced truck status determination v3 - Fixed STOPPED detection
+
+    🔧 FIX v3.12.1: Check engine indicators BEFORE speed check
+    Previously, speed=None would return OFFLINE even if RPM > 0 (engine running)
 
     Status Hierarchy:
-    1. OFFLINE: Data too old (>15 min) or no GPS data
-    2. MOVING: Vehicle in motion (speed > 2 mph)
-    3. STOPPED: Engine ON but stationary (idling)
+    1. OFFLINE: Data too old (>15 min)
+    2. STOPPED: Engine ON but stationary (RPM > 0, speed = 0 or None) - IDLING
+    3. MOVING: Vehicle in motion (speed > 2 mph)
     4. PARKED: Engine OFF, vehicle connected (shore power or recent data)
     5. OFFLINE: No activity detected
 
@@ -291,41 +294,40 @@ def determine_truck_status(
     - RPM > 0
     - Fuel rate > 0.3 L/h
     - Engine load > 0%
-    - Coolant temp > 50°F (engine warm, recently running or running)
+    - Coolant temp > 120°F (engine at operating temp)
     """
     # Check for offline - stale data (no communication in 15+ minutes)
     if data_age_min > 15:
         return "OFFLINE"
 
-    # No GPS data = cannot determine status
-    if speed is None:
-        return "OFFLINE"
-
-    # Moving - speed > 2 mph (filters GPS noise/drift)
-    if speed > 2:
-        return "MOVING"
-
-    # Stationary - check multiple engine indicators
+    # 🔧 FIX v3.12.1: Check engine indicators FIRST (before speed check)
+    # This ensures trucks with RPM > 0 but speed=None are marked STOPPED, not OFFLINE
     rpm_val = rpm or 0
     fuel_rate_val = fuel_rate or 0
-    pwr_ext_val = pwr_ext or 0
     engine_load_val = engine_load or 0
     coolant_temp_val = coolant_temp or 0  # °F
+    pwr_ext_val = pwr_ext or 0
+    speed_val = speed or 0
 
-    # Engine ON indicators (any one = engine running = STOPPED/idling)
-    if rpm_val > 0:
-        return "STOPPED"  # RPM > 0 = engine definitely running
+    # Engine ON indicators (any one = engine running)
+    engine_running = (
+        rpm_val > 0
+        or fuel_rate_val > 0.3
+        or engine_load_val > 0
+        or coolant_temp_val > 120  # Engine at operating temperature
+    )
 
-    if fuel_rate_val > 0.3:
-        return "STOPPED"  # Fuel consumption > 0.3 L/h = engine running
+    # If engine is running and speed is low/none = STOPPED (idling)
+    if engine_running and speed_val < 2:
+        return "STOPPED"
 
-    if engine_load_val > 0:
-        return "STOPPED"  # Engine load > 0% = engine running
+    # Moving - speed > 2 mph (filters GPS noise/drift)
+    if speed_val > 2:
+        return "MOVING"
 
-    # Coolant temp check - if engine is warm, it's likely running or just turned off
-    # 50°F is ambient, anything higher indicates engine activity
-    if coolant_temp_val > 120:  # 120°F = engine running temp
-        return "STOPPED"  # Engine warm enough to be running
+    # No GPS data and no engine indicators = truly offline
+    if speed is None and not engine_running:
+        return "OFFLINE"
 
     # Engine OFF checks
     # Shore power connected (13.2V+ indicates external power)
@@ -575,7 +577,9 @@ def process_truck(
     consumption_lph = calculate_consumption(
         speed, rpm, fuel_rate, total_fuel_used, estimator, dt_hours, truck_status
     )
-    consumption_gph = consumption_lph / 3.78541 if consumption_lph else None
+    # 🔧 FIX v3.12.1: Use 'is not None' instead of truthy check
+    # 0.0 is a valid consumption value, shouldn't become None
+    consumption_gph = consumption_lph / 3.78541 if consumption_lph is not None else None
 
     # Kalman predict phase (only if reasonable time delta)
     if dt_hours > 0 and dt_hours < 1.0:
