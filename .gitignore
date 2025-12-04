@@ -11,6 +11,21 @@ venv/
 ENV/
 *.csv
 data/csv_reports/*.json
+
+# Runtime state files
+data/estimator_states/
+data/mpg_states.json
+data/health_stats/
+data/truck_cache/
+
+# Backup files
+*.backup
+
+# Local utility scripts
+verify_status.py
+check_trucks.py
+check_recent_data.py
+
 # Environment
 .env
 .env.local
