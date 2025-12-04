@@ -2144,10 +2144,54 @@ async def get_predictive_alerts(
     """
     try:
         from alert_system import AlertSystem
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
 
-        # Get current truck data for analysis
-        summary = db.get_fleet_summary()
-        truck_data = summary.get("truck_details", [])
+        # Get current truck data from fuel_metrics
+        engine = get_sqlalchemy_engine()
+        query = text(
+            """
+            SELECT 
+                fm.truck_id,
+                fm.truck_status as status,
+                fm.sensor_pct as fuel_pct,
+                fm.estimated_pct,
+                fm.mpg_current as mpg,
+                fm.consumption_gph,
+                fm.drift_pct,
+                fm.drift_warning,
+                fm.timestamp_utc
+            FROM fuel_metrics fm
+            INNER JOIN (
+                SELECT truck_id, MAX(timestamp_utc) as max_ts
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+                GROUP BY truck_id
+            ) latest ON fm.truck_id = latest.truck_id AND fm.timestamp_utc = latest.max_ts
+        """
+        )
+
+        with engine.connect() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        truck_data = []
+        for row in rows:
+            truck_data.append(
+                {
+                    "truck_id": row[0],
+                    "truck_status": row[1],
+                    "status": row[1],
+                    "fuel_pct": row[2],
+                    "estimated_pct": row[3],
+                    "mpg": row[4],
+                    "mpg_current": row[4],
+                    "consumption_gph": row[5],
+                    "drift_pct": row[6],
+                    "drift_warning": row[7],
+                    "timestamp": row[8].isoformat() if row[8] else None,
+                }
+            )
 
         # Initialize alert system and check for alerts
         alert_system = AlertSystem()
