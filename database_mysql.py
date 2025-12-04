@@ -3132,6 +3132,13 @@ def get_cost_attribution_report(days_back: int = 30) -> Dict:
                 miles = float(row[6] or 0)
                 idle_gal_approx = float(row[7] or 0)
 
+                # 🔧 Sanity check: max reasonable miles in period
+                # At 70mph average, 10hrs/day driving = 700 miles/day max
+                max_reasonable_miles = days_back * 800  # 800 miles/day is very generous
+                if miles > max_reasonable_miles:
+                    logger.warning(f"[{tid}] Unrealistic miles: {miles:.0f} (max {max_reasonable_miles}), skipping")
+                    continue
+
                 if miles <= 0:
                     continue
 

@@ -687,7 +687,8 @@ async def get_truck_detail(truck_id: str):
             # If it does, return a minimal "offline" record instead of 404
             import yaml
 
-            tanks_path = Path(__file__).parent.parent.parent / "tanks.yaml"
+            # 🔧 FIX v3.12.4: Correct path - tanks.yaml is in same directory as main.py
+            tanks_path = Path(__file__).parent / "tanks.yaml"
             if tanks_path.exists():
                 with open(tanks_path, "r") as f:
                     tanks_config = yaml.safe_load(f)

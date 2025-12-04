@@ -572,7 +572,7 @@ class DatabaseManager:
                     idle_readings_24h = record.get("idle_readings_24h", 0)
                     direct_idle_gph = record.get(
                         "idle_gph"
-                    )  # 🆕 Direct idle_gph from sync
+                    )  # Direct idle_gph from sync
                     idle_val = None
                     if truck_status == "STOPPED":
                         # Priority 1: Direct idle_gph from sync (calculated per-truck)
@@ -586,8 +586,20 @@ class DatabaseManager:
                         ):
                             idle_val = avg_idle_gph_24h
                         # Priority 3: Current instant consumption value
-                        elif pd.notna(consumption_gph) and consumption_gph > 0.01:
+                        elif pd.notna(consumption_gph) and consumption_gph > 0.1:
                             idle_val = consumption_gph
+                        # Priority 4: 🆕 FALLBACK - truck is STOPPED with engine on, use default
+                        # If RPM > 0 or idle_method indicates idling, use conservative estimate
+                        else:
+                            rpm_val = record.get("rpm")
+                            idle_method = record.get("idle_method", "")
+                            # Check if engine is running (RPM > 0 or idle_method indicates active)
+                            if (rpm_val and rpm_val > 0) or (
+                                idle_method
+                                and idle_method
+                                not in ["NOT_IDLE", "ENGINE_OFF", None, ""]
+                            ):
+                                idle_val = 0.8  # Conservative fallback: 0.8 GPH
 
                     estimated_pct = record.get("estimated_pct")
                     estimated_liters = record.get("estimated_liters")
