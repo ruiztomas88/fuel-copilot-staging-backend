@@ -126,7 +126,7 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
 
     Returns DataFrame with same structure as CSV data
 
-    🔧 v3.12.13: Fixed to use ACTUAL column names from DESCRIBE fuel_metrics
+    🔧 v3.12.14: Added altitude_ft, coolant_temp_f, consumption_lph for truck details
     Real columns: speed_mph, estimated_pct, estimated_liters, sensor_pct,
     sensor_liters, rpm, drift_pct, idle_mode, refuel_gallons, etc.
     """
@@ -157,6 +157,10 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.drift_pct,
             t1.drift_warning,
             t1.flags,
+            t1.altitude_ft,
+            t1.coolant_temp_f,
+            -- 🆕 v3.12.14: Consumption in LPH (GPH * 3.78541)
+            ROUND(t1.consumption_gph * 3.78541, 2) as consumption_lph,
             -- 🆕 24h averages for stable metrics
             mpg_avg.avg_mpg_24h,
             mpg_avg.mpg_readings_24h,
