@@ -680,8 +680,14 @@ async def get_truck_detail(truck_id: str):
 
     🔧 FIX v3.10.3: Returns basic info if truck exists in config but has no recent data
     """
+    import pandas as pd
+    import numpy as np
+    
     try:
+        logger.info(f"[get_truck_detail] Fetching data for {truck_id}")
         record = db.get_truck_latest_record(truck_id)
+        logger.info(f"[get_truck_detail] Record retrieved: {record is not None}")
+        
         if not record:
             # 🔧 FIX v3.10.3: Check if truck exists in tanks.yaml config
             # If it does, return a minimal "offline" record instead of 404
@@ -689,6 +695,7 @@ async def get_truck_detail(truck_id: str):
 
             # 🔧 FIX v3.12.4: Correct path - tanks.yaml is in same directory as main.py
             tanks_path = Path(__file__).parent / "tanks.yaml"
+            logger.info(f"[get_truck_detail] Checking tanks.yaml at {tanks_path}")
             if tanks_path.exists():
                 with open(tanks_path, "r") as f:
                     tanks_config = yaml.safe_load(f)
@@ -721,9 +728,7 @@ async def get_truck_detail(truck_id: str):
             raise HTTPException(status_code=404, detail=f"Truck {truck_id} not found")
 
         # Convert NaN to None for JSON serialization
-        import pandas as pd
-        import numpy as np
-
+        logger.info(f"[get_truck_detail] Converting record with {len(record)} fields")
         clean_record = {}
         for key, value in record.items():
             try:
@@ -735,18 +740,19 @@ async def get_truck_detail(truck_id: str):
                 elif pd.isna(value):
                     clean_record[key] = None
                 # Convert numpy types to Python native types
-                elif isinstance(value, (np.integer, np.int64, np.int32)):
+                elif hasattr(np, 'integer') and isinstance(value, np.integer):
                     clean_record[key] = int(value)
-                elif isinstance(value, (np.floating, np.float64, np.float32)):
+                elif hasattr(np, 'floating') and isinstance(value, np.floating):
                     clean_record[key] = float(value)
-                elif isinstance(value, np.bool_):
+                elif hasattr(np, 'bool_') and isinstance(value, np.bool_):
                     clean_record[key] = bool(value)
                 elif isinstance(value, pd.Timestamp):
                     clean_record[key] = value.isoformat()
                 else:
                     clean_record[key] = value
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as conv_err:
                 # If we can't process the value, set it to None
+                logger.warning(f"[get_truck_detail] Failed to convert {key}: {conv_err}")
                 clean_record[key] = None
 
         # 🔧 FIX: Add 'status' alias for frontend compatibility
@@ -754,13 +760,15 @@ async def get_truck_detail(truck_id: str):
             clean_record["status"] = clean_record["truck_status"]
 
         clean_record["data_available"] = True
+        logger.info(f"[get_truck_detail] Returning {len(clean_record)} fields for {truck_id}")
 
         return clean_record
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"[get_truck_detail] ERROR for {truck_id}: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Error fetching truck history: {str(e)}"
+            status_code=500, detail=f"Error fetching truck data: {str(e)}"
         )
 
 
