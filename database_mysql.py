@@ -126,11 +126,9 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
 
     Returns DataFrame with same structure as CSV data
 
-    🔧 v3.12.12: Fixed to use actual column names from fuel_metrics table
-    Real columns: truck_id, timestamp_utc, truck_status, latitude, longitude,
-    fuel_level_raw, fuel_level_filtered, fuel_capacity, consumption_gph,
-    consumption_rate, mpg_current, mpg_avg_24h, engine_rpm, engine_hours,
-    odometer, mileage_delta, idle_method, idle_duration_minutes
+    🔧 v3.12.13: Fixed to use ACTUAL column names from DESCRIBE fuel_metrics
+    Real columns: speed_mph, estimated_pct, estimated_liters, sensor_pct,
+    sensor_liters, rpm, drift_pct, idle_mode, refuel_gallons, etc.
     """
     query = text(
         """
@@ -140,34 +138,28 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.truck_status,
             t1.latitude,
             t1.longitude,
-            0 as speed_mph,
-            t1.fuel_level_filtered as estimated_liters,
-            CASE WHEN t1.fuel_capacity > 0 
-                 THEN (t1.fuel_level_filtered / t1.fuel_capacity) * 100 
-                 ELSE 0 END as estimated_pct,
-            CASE WHEN t1.fuel_capacity > 0 
-                 THEN (t1.fuel_level_filtered / t1.fuel_capacity) * 100 
-                 ELSE 0 END as sensor_pct,
-            t1.fuel_level_filtered as sensor_liters,
+            t1.speed_mph,
+            t1.estimated_liters,
+            t1.estimated_pct,
+            t1.sensor_pct,
+            t1.sensor_liters,
             t1.consumption_gph,
             t1.idle_method,
             t1.mpg_current,
-            t1.engine_rpm as rpm,
-            t1.odometer as odometer_mi,
-            NULL as anchor_type,
-            NULL as refuel_detected,
-            NULL as refuel_gallons,
-            NULL as refuel_events_total,
-            -- Calculated fields
-            NULL as data_age_min,
-            NULL as idle_mode,
-            NULL as drift_pct,
-            NULL as drift_warning,
-            NULL as anchor_detected,
-            NULL as flags,
+            t1.rpm,
+            t1.odometer_mi,
+            t1.anchor_type,
+            t1.anchor_detected,
+            t1.refuel_gallons,
+            t1.refuel_events_total,
+            t1.data_age_min,
+            t1.idle_mode,
+            t1.drift_pct,
+            t1.drift_warning,
+            t1.flags,
             -- 🆕 24h averages for stable metrics
-            t1.mpg_avg_24h as avg_mpg_24h,
-            10 as mpg_readings_24h,
+            mpg_avg.avg_mpg_24h,
+            mpg_avg.mpg_readings_24h,
             idle_avg.avg_idle_gph_24h,
             idle_avg.idle_readings_24h
         FROM fuel_metrics t1
@@ -177,6 +169,18 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             WHERE timestamp_utc > NOW() - INTERVAL :hours_back HOUR
             GROUP BY truck_id
         ) t2 ON t1.truck_id = t2.truck_id AND t1.timestamp_utc = t2.max_time
+        -- 🆕 Join with 24h MPG averages (MOVING trucks only)
+        LEFT JOIN (
+            SELECT 
+                truck_id,
+                AVG(mpg_current) as avg_mpg_24h,
+                COUNT(*) as mpg_readings_24h
+            FROM fuel_metrics
+            WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
+              AND truck_status = 'MOVING'
+              AND mpg_current > 3.5 AND mpg_current < 12
+            GROUP BY truck_id
+        ) mpg_avg ON t1.truck_id = mpg_avg.truck_id
         -- 🆕 Join with 24h idle averages (STOPPED trucks with motor on)
         LEFT JOIN (
             SELECT 
