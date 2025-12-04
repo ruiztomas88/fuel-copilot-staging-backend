@@ -69,23 +69,24 @@ def get_local_connection():
     return pymysql.connect(**LOCAL_DB_CONFIG)
 
 
-def determine_truck_status(speed, rpm, fuel_rate, data_age_min=0):
+def determine_truck_status(speed, rpm, fuel_rate, data_age_min=0, pwr_ext=None):
     """
     Determine truck status - EXACT copy from fuel_copilot_v2_1_fixed.py
-    
+
     Logic:
     - OFFLINE: data_age > 15 min OR no speed data
     - MOVING: speed > 2 mph (threshold to filter GPS noise)
     - STOPPED: engine ON but stationary (rpm > 0 OR fuel_rate > 0.3 L/h)
+    - PARKED: engine OFF but battery voltage > 13.2V (truck recently stopped)
     - OFFLINE: no engine activity
 
-    Returns: "MOVING", "STOPPED", or "OFFLINE"
+    Returns: "MOVING", "STOPPED", "PARKED", or "OFFLINE"
     """
     # Stale data (> 15 minutes) = offline
     if data_age_min is not None and data_age_min > 15:
         return "OFFLINE"
-    
-    # No speed data at all = offline  
+
+    # No speed data at all = offline
     if speed is None:
         return "OFFLINE"
 
@@ -96,13 +97,18 @@ def determine_truck_status(speed, rpm, fuel_rate, data_age_min=0):
     # Stationary - check if engine is running
     rpm_val = rpm or 0
     fuel_rate_val = fuel_rate or 0
-    
+    pwr_ext_val = pwr_ext or 0
+
     # Engine ON indicators
     if rpm_val > 0:
         return "STOPPED"  # RPM > 0 means engine running
     if fuel_rate_val > 0.3:
         return "STOPPED"  # Fuel consumption means engine running
-    
+
+    # Battery voltage > 13.2V indicates truck was recently running (PARKED)
+    if pwr_ext_val > 13.2:
+        return "PARKED"
+
     # No engine activity = offline
     return "OFFLINE"
 
@@ -135,6 +141,7 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
             engine_hours = sensor_data.get("engine_hours")
             hdop = sensor_data.get("hdop")
             coolant_temp = sensor_data.get("coolant_temp")
+            pwr_ext = sensor_data.get("pwr_ext")  # Battery voltage (V)
 
             # Get tank capacity for this truck
             tank_capacity = TANK_CAPACITIES.get(truck_id, TANK_CAPACITIES["default"])
@@ -147,8 +154,10 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
                     measure_dt = measure_dt.replace(tzinfo=timezone.utc)
                 data_age_min = (now_utc - measure_dt).total_seconds() / 60.0
 
-            # 🔧 v2.1: Improved truck status determination with data_age
-            truck_status = determine_truck_status(speed, rpm, fuel_rate, data_age_min)
+            # 🔧 v2.1: Improved truck status determination with data_age and pwr_ext
+            truck_status = determine_truck_status(
+                speed, rpm, fuel_rate, data_age_min, pwr_ext
+            )
 
             # Calculate fuel in liters/gallons if we have percentage
             estimated_liters = None
@@ -319,9 +328,10 @@ def sync_cycle(reader: WialonReader, local_conn):
                 fuel = sensor_data.get("fuel_lvl")
                 rpm = sensor_data.get("rpm")
                 fuel_rate = sensor_data.get("fuel_rate")
+                pwr_ext = sensor_data.get("pwr_ext")
 
-                # Get the status that was determined
-                truck_status = determine_truck_status(speed, rpm, fuel_rate)
+                # Get the status that was determined (with pwr_ext for PARKED)
+                truck_status = determine_truck_status(speed, rpm, fuel_rate, 0, pwr_ext)
                 status_counts[truck_status] = status_counts.get(truck_status, 0) + 1
 
                 # Status emoji
@@ -329,6 +339,7 @@ def sync_cycle(reader: WialonReader, local_conn):
                     "MOVING": "🚛",
                     "IDLE": "⏸️",
                     "STOPPED": "🛑",
+                    "PARKED": "🅿️",
                     "OFFLINE": "📴",
                 }.get(truck_status, "❓")
 

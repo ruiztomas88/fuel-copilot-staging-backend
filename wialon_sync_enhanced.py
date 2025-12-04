@@ -305,7 +305,7 @@ def determine_truck_status(
         return "STOPPED"  # RPM > 0 means engine running
     if fuel_rate_val > 0.3:
         return "STOPPED"  # Fuel consumption means engine running
-    
+
     # Engine OFF but plugged in
     if pwr_ext_val > 13.2:
         return "PARKED"  # Shore power connected
@@ -507,13 +507,14 @@ def process_truck(
     hdop = sensor_data.get("hdop")
     coolant_temp = sensor_data.get("coolant_temp")
     total_fuel_used = sensor_data.get("total_fuel_used")  # Gallons (ECU counter)
+    pwr_ext = sensor_data.get("pwr_ext")  # Battery voltage (V)
 
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
     data_age_min = (now_utc - timestamp).total_seconds() / 60.0
 
-    # Determine truck status
-    truck_status = determine_truck_status(speed, rpm, fuel_rate, data_age_min)
+    # Determine truck status (includes pwr_ext for PARKED detection)
+    truck_status = determine_truck_status(speed, rpm, fuel_rate, data_age_min, pwr_ext)
 
     # Calculate time delta from last update
     dt_hours = 0.0
