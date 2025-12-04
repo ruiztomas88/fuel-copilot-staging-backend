@@ -28,6 +28,7 @@ import pymysql
 import yaml
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from typing import Dict, Optional, Tuple, Any, List
 import logging
 from typing import Dict, Optional, Any
 from dotenv import load_dotenv
@@ -507,6 +508,116 @@ def detect_fuel_theft(
 # Cooldown tracker to avoid duplicate notifications
 _refuel_notification_cooldown: Dict[str, datetime] = {}
 
+# 🆕 v3.12.20: Pending refuels buffer for consecutive jump consolidation
+# When refueling, sensor may report: 10% → 40% → 80% → 100% in quick succession
+# This buffer accumulates all jumps and saves/notifies as ONE event
+_pending_refuels: Dict[str, Dict] = {}
+CONSECUTIVE_REFUEL_WINDOW_MINUTES = 10  # Jumps within 10 min = same refuel event
+
+
+def add_pending_refuel(
+    truck_id: str,
+    gallons: float,
+    before_pct: float,
+    after_pct: float,
+    timestamp: datetime,
+) -> Optional[Dict]:
+    """
+    🆕 v3.12.20: Buffer consecutive refuel jumps into single event.
+
+    When a truck refuels, the sensor may report multiple jumps:
+    - Jump 1: 10% → 40% (+30%)
+    - Jump 2: 40% → 80% (+40%)  ← within 10 min = same refuel event
+    - Jump 3: 80% → 100% (+20%) ← within 10 min = same refuel event
+
+    This accumulates all jumps. Returns finalized event when window expires.
+    """
+    global _pending_refuels
+
+    now = datetime.now(timezone.utc)
+
+    if truck_id in _pending_refuels:
+        pending = _pending_refuels[truck_id]
+        time_since_last = (now - pending["last_jump_time"]).total_seconds() / 60
+
+        if time_since_last <= CONSECUTIVE_REFUEL_WINDOW_MINUTES:
+            # Within window - accumulate
+            pending["gallons"] += gallons
+            pending["end_pct"] = after_pct
+            pending["last_jump_time"] = now
+            logger.info(
+                f"[{truck_id}] 📊 Consecutive refuel jump: +{gallons:.1f} gal "
+                f"(total: {pending['gallons']:.1f} gal, {pending['start_pct']:.1f}% → {after_pct:.1f}%)"
+            )
+            return None
+        else:
+            # Window expired - finalize previous, start new
+            finalized = finalize_pending_refuel(truck_id)
+
+            _pending_refuels[truck_id] = {
+                "start_pct": before_pct,
+                "end_pct": after_pct,
+                "gallons": gallons,
+                "start_time": timestamp,
+                "last_jump_time": now,
+            }
+            return finalized
+    else:
+        # Start new pending refuel
+        _pending_refuels[truck_id] = {
+            "start_pct": before_pct,
+            "end_pct": after_pct,
+            "gallons": gallons,
+            "start_time": timestamp,
+            "last_jump_time": now,
+        }
+        return None
+
+
+def finalize_pending_refuel(truck_id: str) -> Optional[Dict]:
+    """
+    🆕 v3.12.20: Finalize a pending refuel - returns data for DB save & notification.
+    """
+    global _pending_refuels
+
+    if truck_id not in _pending_refuels:
+        return None
+
+    pending = _pending_refuels.pop(truck_id)
+
+    return {
+        "truck_id": truck_id,
+        "gallons": pending["gallons"],
+        "start_pct": pending["start_pct"],
+        "end_pct": pending["end_pct"],
+        "timestamp": pending["start_time"],
+    }
+
+
+def flush_stale_pending_refuels(max_age_minutes: int = 15) -> List[Dict]:
+    """
+    🆕 v3.12.20: Finalize any pending refuels older than max_age_minutes.
+    Call periodically to ensure refuels don't stay buffered forever.
+    """
+    global _pending_refuels
+
+    now = datetime.now(timezone.utc)
+    stale_trucks = []
+    finalized = []
+
+    for truck_id, pending in _pending_refuels.items():
+        age_minutes = (now - pending["last_jump_time"]).total_seconds() / 60
+        if age_minutes > max_age_minutes:
+            stale_trucks.append(truck_id)
+
+    for truck_id in stale_trucks:
+        result = finalize_pending_refuel(truck_id)
+        if result:
+            finalized.append(result)
+            logger.info(f"[{truck_id}] ✅ Flushed pending refuel: +{result['gallons']:.1f} gal")
+
+    return finalized
+
 
 def save_refuel_event(
     connection,
@@ -784,7 +895,7 @@ def process_truck(
                     f"[REFUEL-CHECK] {truck_id}: prev={last_sensor_pct_for_refuel:.1f}%, "
                     f"curr={sensor_pct:.1f}%, jump={fuel_jump:.1f}%, gap={time_gap_hours*60:.1f}min, status={truck_status}"
                 )
-        
+
         refuel_event = detect_refuel(
             sensor_pct=sensor_pct,
             estimated_pct=estimator.level_pct,
@@ -1126,7 +1237,8 @@ def sync_cycle(
                 status = metrics["truck_status"]
                 status_counts[status] = status_counts.get(status, 0) + 1
 
-                # Handle refuel detection - save to DB and send notifications
+                # Handle refuel detection - buffer consecutive jumps
+                # 🆕 v3.12.20: Use pending buffer to consolidate multi-jump refuels
                 if metrics.get("refuel_detected") == "YES" and metrics.get(
                     "refuel_event"
                 ):
@@ -1138,27 +1250,35 @@ def sync_cycle(
                     fuel_after = metrics.get("sensor_pct") or 0
                     gallons_added = refuel_evt.get("increase_gal", 0)
 
-                    # Save to refuel_events table
-                    save_refuel_event(
-                        connection=local_conn,
+                    # Add to pending buffer instead of saving immediately
+                    finalized = add_pending_refuel(
                         truck_id=truck_id,
-                        timestamp_utc=metrics["timestamp_utc"],
-                        fuel_before=fuel_before,
-                        fuel_after=fuel_after,
-                        gallons_added=gallons_added,
-                        latitude=metrics.get("latitude"),
-                        longitude=metrics.get("longitude"),
-                        refuel_type="GAP_DETECTED",
+                        gallons=gallons_added,
+                        before_pct=fuel_before,
+                        after_pct=fuel_after,
+                        timestamp=metrics["timestamp_utc"],
                     )
 
-                    # Send SMS and Email notifications
-                    send_refuel_notification(
-                        truck_id=truck_id,
-                        gallons_added=gallons_added,
-                        fuel_before=fuel_before,
-                        fuel_after=fuel_after,
-                        timestamp_utc=metrics["timestamp_utc"],
-                    )
+                    # If a previous refuel was finalized, save and notify
+                    if finalized:
+                        save_refuel_event(
+                            connection=local_conn,
+                            truck_id=finalized["truck_id"],
+                            timestamp_utc=finalized["timestamp"],
+                            fuel_before=finalized["start_pct"],
+                            fuel_after=finalized["end_pct"],
+                            gallons_added=finalized["gallons"],
+                            latitude=metrics.get("latitude"),
+                            longitude=metrics.get("longitude"),
+                            refuel_type="GAP_DETECTED",
+                        )
+                        send_refuel_notification(
+                            truck_id=finalized["truck_id"],
+                            gallons_added=finalized["gallons"],
+                            fuel_before=finalized["start_pct"],
+                            fuel_after=finalized["end_pct"],
+                            timestamp_utc=finalized["timestamp"],
+                        )
 
                 # Log with details
                 status_emoji = {
@@ -1203,6 +1323,29 @@ def sync_cycle(
             import traceback
 
             traceback.print_exc()
+
+    # 🆕 v3.12.20: Flush any stale pending refuels (older than 15 min)
+    stale_refuels = flush_stale_pending_refuels(max_age_minutes=15)
+    for finalized in stale_refuels:
+        try:
+            save_refuel_event(
+                connection=local_conn,
+                truck_id=finalized["truck_id"],
+                timestamp_utc=finalized["timestamp"],
+                fuel_before=finalized["start_pct"],
+                fuel_after=finalized["end_pct"],
+                gallons_added=finalized["gallons"],
+                refuel_type="GAP_DETECTED",
+            )
+            send_refuel_notification(
+                truck_id=finalized["truck_id"],
+                gallons_added=finalized["gallons"],
+                fuel_before=finalized["start_pct"],
+                fuel_after=finalized["end_pct"],
+                timestamp_utc=finalized["timestamp"],
+            )
+        except Exception as e:
+            logger.error(f"Error saving stale refuel for {finalized['truck_id']}: {e}")
 
     # Save states periodically
     state_manager.save_states()
