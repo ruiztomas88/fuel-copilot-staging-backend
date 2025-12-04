@@ -592,6 +592,8 @@ class DatabaseManager:
                     anchor_detected = record.get("anchor_detected")
                     anchor_type = record.get("anchor_type")
                     idle_method = record.get("idle_method")
+                    latitude = record.get("latitude")
+                    longitude = record.get("longitude")
 
                     if health_score < 50:
                         health_category = "critical"
@@ -663,6 +665,12 @@ class DatabaseManager:
                             "idle_method": (
                                 str(idle_method) if pd.notna(idle_method) else None
                             ),
+                            "latitude": (
+                                float(latitude) if pd.notna(latitude) else None
+                            ),
+                            "longitude": (
+                                float(longitude) if pd.notna(longitude) else None
+                            ),
                         }
                     )
                 else:
@@ -675,6 +683,8 @@ class DatabaseManager:
                     sensor_pct = record.get("sensor_pct")
                     sensor_liters = record.get("sensor_liters")
                     drift_pct = record.get("drift_pct")
+                    latitude = record.get("latitude")
+                    longitude = record.get("longitude")
 
                     truck_details.append(
                         {
@@ -723,6 +733,12 @@ class DatabaseManager:
                             "anchor_detected": None,
                             "anchor_type": None,
                             "idle_method": None,
+                            "latitude": (
+                                float(latitude) if pd.notna(latitude) else None
+                            ),
+                            "longitude": (
+                                float(longitude) if pd.notna(longitude) else None
+                            ),
                         }
                     )
 

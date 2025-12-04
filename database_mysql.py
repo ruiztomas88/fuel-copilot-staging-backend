@@ -168,6 +168,8 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.refuel_events_total,
             t1.refuel_gallons,
             t1.flags,
+            t1.latitude,
+            t1.longitude,
             -- 🆕 24h averages for stable metrics
             mpg_avg.avg_mpg_24h,
             mpg_avg.mpg_readings_24h,
