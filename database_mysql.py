@@ -151,6 +151,7 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.consumption_gph,
             t1.idle_method,
             t1.idle_mode,
+            t1.idle_gph,
             t1.mpg_current,
             t1.speed_mph,
             t1.rpm,
@@ -168,8 +169,6 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.refuel_events_total,
             t1.refuel_gallons,
             t1.flags,
-            t1.latitude,
-            t1.longitude,
             -- 🆕 24h averages for stable metrics
             mpg_avg.avg_mpg_24h,
             mpg_avg.mpg_readings_24h,
@@ -3169,10 +3168,19 @@ def get_cost_attribution_report(days_back: int = 30) -> Dict:
                         "driving_fuel_gal": round(driving_fuel, 1),
                         "idle_fuel_gal": round(idle_fuel, 1),
                         "total_fuel_gal": round(total_fuel, 1),
-                        "total_cost": round(total_cost, 2),
+                        "total_fuel_cost": round(total_cost, 2),
                         "efficiency_score": round(
                             (BASELINE_MPG / avg_mpg * 100) if avg_mpg > 0 else 50, 0
                         ),
+                        # 🆕 Flattened structure for frontend compatibility
+                        "driving_cost": round(driving_fuel * FUEL_PRICE, 2),
+                        "idle_cost": round(idle_fuel * FUEL_PRICE, 2),
+                        "waste_cost": round(efficiency_loss_cost + idle_waste_cost, 2),
+                        "efficiency_loss": round(efficiency_loss_cost, 2),
+                        "cost_per_mile": (
+                            round(total_cost / miles, 3) if miles > 0 else 0
+                        ),
+                        # Keep nested breakdown for backward compatibility
                         "cost_breakdown": {
                             "driving_cost": round(driving_fuel * FUEL_PRICE, 2),
                             "idle_cost": round(idle_fuel * FUEL_PRICE, 2),
@@ -3198,15 +3206,10 @@ def get_cost_attribution_report(days_back: int = 30) -> Dict:
                 savings_opportunities.append(
                     {
                         "category": "Efficiency Improvement",
-                        "description": "Bring all trucks to baseline MPG through maintenance and training",
-                        "potential_savings_gal": round(
-                            fleet_totals["efficiency_loss_gal"], 0
+                        "potential_savings": round(
+                            fleet_totals["efficiency_loss_gal"] * FUEL_PRICE, 0
                         ),
-                        "potential_savings_usd": round(
-                            fleet_totals["efficiency_loss_gal"] * FUEL_PRICE, 2
-                        ),
-                        "difficulty": "MEDIUM",
-                        "timeline": "1-3 months",
+                        "recommendation": "Bring all trucks to baseline MPG through maintenance and training",
                     }
                 )
 
@@ -3215,20 +3218,37 @@ def get_cost_attribution_report(days_back: int = 30) -> Dict:
                 savings_opportunities.append(
                     {
                         "category": "Idle Reduction",
-                        "description": "Reduce idle time through driver coaching and APU installation",
-                        "potential_savings_gal": round(
-                            fleet_totals["idle_waste_gal"], 0
+                        "potential_savings": round(
+                            fleet_totals["idle_waste_gal"] * FUEL_PRICE, 0
                         ),
-                        "potential_savings_usd": round(
-                            fleet_totals["idle_waste_gal"] * FUEL_PRICE, 2
-                        ),
-                        "difficulty": "EASY",
-                        "timeline": "Immediate",
+                        "recommendation": "Reduce idle time through driver coaching and APU installation",
                     }
                 )
 
+            # Calculate totals for frontend
+            total_driving_cost = fleet_totals["total_driving_fuel"] * FUEL_PRICE
+            total_idle_cost = fleet_totals["total_idle_fuel"] * FUEL_PRICE
+            total_waste_cost = (
+                fleet_totals["efficiency_loss_gal"] + fleet_totals["idle_waste_gal"]
+            ) * FUEL_PRICE
+
             return {
                 "period_days": days_back,
+                # 🆕 Frontend-expected fields
+                "total_fleet_cost": round(fleet_totals["total_cost"], 2),
+                "total_driving_cost": round(total_driving_cost, 2),
+                "total_idle_cost": round(total_idle_cost, 2),
+                "total_waste_cost": round(total_waste_cost, 2),
+                "by_truck": truck_costs[:50],  # Top 50 trucks
+                "savings_opportunities": savings_opportunities,
+                "insights": [
+                    {
+                        "type": "efficiency",
+                        "finding": f"Fleet averages ${round(fleet_totals['total_cost'] / fleet_totals['total_miles'], 2) if fleet_totals['total_miles'] > 0 else 0:.2f}/mile",
+                        "recommendation": "Focus on trucks with highest cost per mile for improvements",
+                    }
+                ],
+                # Legacy fields for backward compatibility
                 "fuel_price_per_gal": FUEL_PRICE,
                 "baseline_mpg": BASELINE_MPG,
                 "baseline_idle_gph": BASELINE_IDLE_GPH,
@@ -3248,46 +3268,7 @@ def get_cost_attribution_report(days_back: int = 30) -> Dict:
                         if fleet_totals["total_miles"] > 0
                         else 0
                     ),
-                    "driving_fuel_pct": (
-                        round(
-                            fleet_totals["total_driving_fuel"]
-                            / (
-                                fleet_totals["total_driving_fuel"]
-                                + fleet_totals["total_idle_fuel"]
-                            )
-                            * 100,
-                            1,
-                        )
-                        if (
-                            fleet_totals["total_driving_fuel"]
-                            + fleet_totals["total_idle_fuel"]
-                        )
-                        > 0
-                        else 100
-                    ),
-                    "waste_breakdown": {
-                        "efficiency_loss_gal": round(
-                            fleet_totals["efficiency_loss_gal"], 0
-                        ),
-                        "efficiency_loss_usd": round(
-                            fleet_totals["efficiency_loss_gal"] * FUEL_PRICE, 2
-                        ),
-                        "idle_waste_gal": round(fleet_totals["idle_waste_gal"], 0),
-                        "idle_waste_usd": round(
-                            fleet_totals["idle_waste_gal"] * FUEL_PRICE, 2
-                        ),
-                        "total_waste_usd": round(
-                            (
-                                fleet_totals["efficiency_loss_gal"]
-                                + fleet_totals["idle_waste_gal"]
-                            )
-                            * FUEL_PRICE,
-                            2,
-                        ),
-                    },
                 },
-                "truck_breakdown": truck_costs[:50],  # Top 50 trucks
-                "savings_opportunities": savings_opportunities,
             }
 
     except Exception as e:

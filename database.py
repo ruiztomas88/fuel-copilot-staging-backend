@@ -570,17 +570,23 @@ class DatabaseManager:
                     # 🆕 Idle GPH: Use avg_idle_gph_24h (more stable than instant value)
                     avg_idle_gph_24h = record.get("avg_idle_gph_24h")
                     idle_readings_24h = record.get("idle_readings_24h", 0)
+                    direct_idle_gph = record.get(
+                        "idle_gph"
+                    )  # 🆕 Direct idle_gph from sync
                     idle_val = None
                     if truck_status == "STOPPED":
-                        # Prefer 24h average if we have enough readings
-                        if (
+                        # Priority 1: Direct idle_gph from sync (calculated per-truck)
+                        if pd.notna(direct_idle_gph) and direct_idle_gph > 0.01:
+                            idle_val = direct_idle_gph
+                        # Priority 2: 24h average if we have enough readings
+                        elif (
                             pd.notna(avg_idle_gph_24h)
                             and idle_readings_24h
                             and idle_readings_24h >= 3
                         ):
                             idle_val = avg_idle_gph_24h
+                        # Priority 3: Current instant consumption value
                         elif pd.notna(consumption_gph) and consumption_gph > 0.01:
-                            # Fallback to current instant value
                             idle_val = consumption_gph
 
                     estimated_pct = record.get("estimated_pct")
