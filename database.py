@@ -448,20 +448,21 @@ class DatabaseManager:
 
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
-                # 🔧 v3.12.10: Use actual column names that exist in fuel_metrics
+                # 🔧 v3.12.12: Use ONLY actual column names from fuel_metrics
                 result = conn.execute(
                     text(
                         """
                     SELECT 
                         t1.truck_id,
                         t1.truck_status,
-                        t1.fuel_percent,
+                        t1.fuel_level_filtered,
+                        t1.fuel_capacity,
                         t1.consumption_gph,
-                        t1.speed,
                         t1.timestamp_utc,
                         t1.engine_rpm,
                         t1.idle_method,
                         t1.mpg_current,
+                        t1.mpg_avg_24h,
                         -- 24h average for idle
                         idle_avg.avg_idle_gph_24h
                     FROM fuel_metrics t1
@@ -492,25 +493,32 @@ class DatabaseManager:
                 for row in result:
                     truck_id = row[0]
                     status = row[1]
-                    fuel_percent = row[2]
-                    consumption_gph = row[3]
-                    speed = row[4]
+                    fuel_level_filtered = row[2]
+                    fuel_capacity = row[3]
+                    consumption_gph = row[4]
                     timestamp = row[5]
                     engine_rpm = row[6]
                     idle_method = row[7]
                     mpg_current = row[8]
-                    avg_idle_gph_24h = row[9]
+                    mpg_avg_24h = row[9]
+                    avg_idle_gph_24h = row[10]
 
-                    # 🔧 v3.12.10: Display MPG only for MOVING, Idle only for STOPPED
+                    # Calculate fuel_percent from fuel_level_filtered / fuel_capacity
+                    fuel_percent = 0
+                    if fuel_capacity and fuel_capacity > 0 and fuel_level_filtered:
+                        fuel_percent = (fuel_level_filtered / fuel_capacity) * 100
+
+                    # 🔧 v3.12.12: Display MPG only for MOVING, Idle only for STOPPED
                     display_mpg = None
                     display_idle = None
 
-                    if status == "MOVING" and mpg_current is not None:
-                        # Only show MPG if it's in a reasonable range
-                        if 2.5 <= mpg_current <= 15:
-                            display_mpg = round(mpg_current, 1)
+                    if status == "MOVING":
+                        # Use 24h average if available, otherwise current
+                        mpg_val = mpg_avg_24h if mpg_avg_24h else mpg_current
+                        if mpg_val is not None and 2.5 <= mpg_val <= 15:
+                            display_mpg = round(mpg_val, 1)
 
-                    # 🔧 v3.12.10: STOPPED trucks show idle consumption
+                    # 🔧 v3.12.12: STOPPED trucks show idle consumption
                     if status == "STOPPED":
                         # Priority 1: 24h average
                         if avg_idle_gph_24h is not None and avg_idle_gph_24h > 0.1:
@@ -541,8 +549,8 @@ class DatabaseManager:
                             "drift_pct": 0,
                             "mpg": display_mpg,
                             "idle_gph": display_idle,
-                            "speed": round(speed, 1) if speed else 0,
-                            "speed_mph": round(speed, 1) if speed else 0,
+                            "speed": 0,  # Speed not in current schema
+                            "speed_mph": 0,
                             "rpm": int(engine_rpm) if engine_rpm else None,
                             "idle_method": idle_method,
                             "last_update": timestamp.isoformat() if timestamp else None,
@@ -554,6 +562,7 @@ class DatabaseManager:
                 return trucks
         except Exception as e:
             import traceback
+
             logger.error(f"❌ Error getting truck details: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             return []
