@@ -97,8 +97,73 @@ class DatabaseManager:
             print(f"Error loading CSV for {truck_id}: {e}")
             return None
 
+    def _enrich_truck_record(self, record: Dict) -> Dict:
+        """
+        🆕 v3.12.9: Enrich truck record with calculated fields
+
+        Calculates idle_gph for STOPPED trucks using:
+        1. 24h average idle consumption (if available)
+        2. Current consumption_gph (if > 0.1)
+        3. Default 0.8 GPH (if engine is running)
+
+        Also adds health_score and health_category
+        """
+        truck_status = record.get("truck_status", "OFFLINE")
+        consumption_gph = record.get("consumption_gph")
+
+        # Calculate idle_gph for STOPPED trucks
+        idle_gph = None
+        if truck_status == "STOPPED":
+            avg_idle_gph_24h = record.get("avg_idle_gph_24h")
+            idle_readings_24h = record.get("idle_readings_24h", 0)
+
+            # Priority 1: 24h average if we have enough readings
+            if (
+                avg_idle_gph_24h is not None
+                and not pd.isna(avg_idle_gph_24h)
+                and idle_readings_24h
+                and idle_readings_24h >= 3
+            ):
+                idle_gph = float(avg_idle_gph_24h)
+            # Priority 2: Current consumption value
+            elif (
+                consumption_gph is not None
+                and not pd.isna(consumption_gph)
+                and consumption_gph > 0.1
+            ):
+                idle_gph = float(consumption_gph)
+            # Priority 3: Fallback if engine is running
+            else:
+                rpm_val = record.get("rpm")
+                idle_method_val = record.get("idle_method", "")
+                # Check if engine is running
+                if (rpm_val and not pd.isna(rpm_val) and rpm_val > 0) or (
+                    idle_method_val
+                    and idle_method_val not in ["NOT_IDLE", "ENGINE_OFF", None, ""]
+                ):
+                    idle_gph = 0.8  # Conservative fallback
+
+        record["idle_gph"] = round(idle_gph, 2) if idle_gph is not None else None
+
+        # Add health_score and health_category
+        if "health_score" not in record or record.get("health_score") is None:
+            record["health_score"] = 75  # Default healthy
+
+        health_score = record.get("health_score", 75)
+        if health_score < 50:
+            record["health_category"] = "critical"
+        elif health_score < 75:
+            record["health_category"] = "warning"
+        else:
+            record["health_category"] = "healthy"
+
+        return record
+
     def get_truck_latest_record(self, truck_id: str) -> Optional[Dict]:
-        """Get the most recent record for a truck (MySQL first, then CSV fallback)"""
+        """Get the most recent record for a truck (MySQL first, then CSV fallback)
+
+        🆕 v3.12.9: Now calculates idle_gph for STOPPED trucks
+        """
 
         # Try MySQL first
         if self.mysql_available:
@@ -113,6 +178,10 @@ class DatabaseManager:
                             latest["timestamp_utc"], pd.Timestamp
                         ):
                             latest["timestamp"] = latest["timestamp_utc"].isoformat()
+
+                        # 🆕 v3.12.9: Calculate idle_gph for STOPPED trucks
+                        latest = self._enrich_truck_record(latest)
+
                         logger.info(f"✅ MySQL data retrieved for {truck_id}")
                         return latest
             except Exception as e:
@@ -130,6 +199,9 @@ class DatabaseManager:
         # Convert timestamp to ISO format if present
         if "timestamp" in latest and isinstance(latest["timestamp"], pd.Timestamp):
             latest["timestamp"] = latest["timestamp"].isoformat()
+
+        # 🆕 v3.12.9: Enrich with calculated fields
+        latest = self._enrich_truck_record(latest)
 
         return latest
 
