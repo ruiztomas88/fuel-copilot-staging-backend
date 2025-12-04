@@ -245,14 +245,25 @@ class FuelCostTracker:
         try:
             with get_db_connection() as conn:
                 with conn.cursor() as cursor:
+                    # Use odometer_mi with LAG to calculate mileage delta
                     cursor.execute(
                         """
                         SELECT 
                             timestamp_utc,
                             truck_status,
-                            mileage_delta,
+                            odometer_mi,
+                            odometer_mi - LAG(odometer_mi, 1, odometer_mi) OVER (
+                                PARTITION BY truck_id ORDER BY timestamp_utc
+                            ) as mileage_delta,
                             consumption_gph,
-                            idle_duration_minutes,
+                            COALESCE(
+                                CASE WHEN truck_status = 'IDLE' THEN
+                                    TIMESTAMPDIFF(MINUTE, 
+                                        LAG(timestamp_utc) OVER (ORDER BY timestamp_utc), 
+                                        timestamp_utc)
+                                ELSE 0 END,
+                                0
+                            ) as idle_duration_minutes,
                             latitude,
                             longitude
                         FROM fuel_metrics
@@ -524,14 +535,15 @@ class FuelCostTracker:
         try:
             with get_db_connection() as conn:
                 with conn.cursor() as cursor:
+                    # Calculate mileage from odometer differences
                     cursor.execute(
                         """
                         SELECT 
                             driver_id,
-                            SUM(mileage_delta) as total_miles,
+                            MAX(odometer_mi) - MIN(odometer_mi) as total_miles,
                             SUM(consumption_gph * 0.5) as total_gallons,
                             AVG(mpg_current) as avg_mpg,
-                            SUM(idle_duration_minutes) as idle_minutes,
+                            SUM(CASE WHEN truck_status = 'IDLE' THEN 30 ELSE 0 END) as idle_minutes,
                             COUNT(*) as data_points
                         FROM fuel_metrics
                         WHERE truck_id = %s
