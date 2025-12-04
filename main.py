@@ -2201,35 +2201,31 @@ async def get_next_refuel_prediction(
 
         engine = get_sqlalchemy_engine()
 
-        # Query to get current fuel levels and consumption rates
+        # Query using fuel_metrics table (which exists)
+        # Get latest data for each truck
         query = """
             SELECT 
-                t.truck_id,
-                t.sensor_pct as current_fuel_pct,
-                t.estimated_pct as kalman_fuel_pct,
-                t.avg_mpg_24h,
-                t.avg_consumption_gph_24h,
-                t.avg_idle_gph_24h,
-                t.truck_status,
-                t.speed,
-                t.timestamp_utc,
-                COALESCE(r.avg_gallons_per_refuel, 100) as avg_refuel_gallons,
-                COALESCE(r.avg_hours_between_refuels, 48) as avg_hours_between
-            FROM truck_data_latest t
-            LEFT JOIN (
-                SELECT 
-                    truck_id,
-                    AVG(gallons_added) as avg_gallons_per_refuel,
-                    AVG(TIMESTAMPDIFF(HOUR, LAG(timestamp_utc) OVER (PARTITION BY truck_id ORDER BY timestamp_utc), timestamp_utc)) as avg_hours_between
-                FROM refuel_events
-                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                fm.truck_id,
+                fm.sensor_pct as current_fuel_pct,
+                fm.estimated_pct as kalman_fuel_pct,
+                fm.mpg_current as avg_mpg_24h,
+                fm.consumption_gph as avg_consumption_gph_24h,
+                CASE WHEN fm.truck_status = 'IDLE' THEN fm.consumption_gph ELSE 0.8 END as avg_idle_gph_24h,
+                fm.truck_status,
+                fm.speed_mph as speed,
+                fm.timestamp_utc
+            FROM fuel_metrics fm
+            INNER JOIN (
+                SELECT truck_id, MAX(timestamp_utc) as max_ts
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                 GROUP BY truck_id
-            ) r ON t.truck_id = r.truck_id
-            WHERE t.truck_id IS NOT NULL
+            ) latest ON fm.truck_id = latest.truck_id AND fm.timestamp_utc = latest.max_ts
+            WHERE fm.truck_id IS NOT NULL
         """
 
         if truck_id:
-            query += " AND t.truck_id = :truck_id"
+            query += " AND fm.truck_id = :truck_id"
 
         with engine.connect() as conn:
             if truck_id:
