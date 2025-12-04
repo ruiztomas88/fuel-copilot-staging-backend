@@ -614,7 +614,9 @@ def flush_stale_pending_refuels(max_age_minutes: int = 15) -> List[Dict]:
         result = finalize_pending_refuel(truck_id)
         if result:
             finalized.append(result)
-            logger.info(f"[{truck_id}] ✅ Flushed pending refuel: +{result['gallons']:.1f} gal")
+            logger.info(
+                f"[{truck_id}] ✅ Flushed pending refuel: +{result['gallons']:.1f} gal"
+            )
 
     return finalized
 
