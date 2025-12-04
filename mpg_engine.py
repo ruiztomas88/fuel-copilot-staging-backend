@@ -135,15 +135,13 @@ class MPGConfig:
     - Dry van empty, highway: 6.5 - 7.5 MPG
     - Optimal (descent, empty): 7.0 - 8.5 MPG
 
-    🔧 v3.10.7 FIXES:
-    - min_miles increased to 10.0 for reliable MPG calculation
-    - min_fuel_gal increased to 1.5 for sufficient sample size
-    - max_mpg capped at 9.0 (physically impossible to exceed for Class 8)
-    - ema_alpha reduced to 0.4 for smoother readings
+    🔧 v3.12.18: Reduced min_miles from 10.0 to 5.0 for faster MPG updates
+    This allows MPG to update more frequently while still having enough data
+    for a reasonable calculation. Trade-off: slightly more variance in readings.
     """
 
-    min_miles: float = 10.0  # 🔧 v3.10.7: Increased from 3.0 for reliable MPG
-    min_fuel_gal: float = 1.5  # 🔧 v3.10.7: Increased from 0.5 for sufficient sample
+    min_miles: float = 5.0  # 🔧 v3.12.18: Reduced from 10.0 for faster updates
+    min_fuel_gal: float = 0.75  # 🔧 v3.12.18: Reduced from 1.5 proportionally
 
     # Physical limits for Class 8 trucks (realistic ranges)
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
