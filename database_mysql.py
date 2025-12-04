@@ -1115,7 +1115,7 @@ def get_driver_scorecard(days_back: int = 7) -> Dict[str, Any]:
         FROM fuel_metrics
         WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
         GROUP BY truck_id
-        HAVING total_records > 60
+        HAVING total_records > 10
     """
     )
 
