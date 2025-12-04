@@ -722,13 +722,32 @@ async def get_truck_detail(truck_id: str):
 
         # Convert NaN to None for JSON serialization
         import pandas as pd
+        import numpy as np
 
         clean_record = {}
         for key, value in record.items():
-            if pd.isna(value):
+            try:
+                # Handle various null types
+                if value is None:
+                    clean_record[key] = None
+                elif isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
+                    clean_record[key] = None
+                elif pd.isna(value):
+                    clean_record[key] = None
+                # Convert numpy types to Python native types
+                elif isinstance(value, (np.integer, np.int64, np.int32)):
+                    clean_record[key] = int(value)
+                elif isinstance(value, (np.floating, np.float64, np.float32)):
+                    clean_record[key] = float(value)
+                elif isinstance(value, np.bool_):
+                    clean_record[key] = bool(value)
+                elif isinstance(value, pd.Timestamp):
+                    clean_record[key] = value.isoformat()
+                else:
+                    clean_record[key] = value
+            except (TypeError, ValueError):
+                # If we can't process the value, set it to None
                 clean_record[key] = None
-            else:
-                clean_record[key] = value
 
         # 🔧 FIX: Add 'status' alias for frontend compatibility
         if "truck_status" in clean_record:
