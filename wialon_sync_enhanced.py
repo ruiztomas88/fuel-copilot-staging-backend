@@ -276,12 +276,14 @@ def determine_truck_status(
     pwr_ext: Optional[float] = None,
 ) -> str:
     """
-    Enhanced truck status determination aligned with Beyond App
+    Enhanced truck status determination - EXACT copy from fuel_copilot_v2_1_fixed.py
 
-    Logic (from fuel_copilot_v2_1_fixed.py):
-    - OFFLINE: data_age > 15 min OR no speed data OR no activity
-    - MOVING: speed > 0 (any movement)
-    - STOPPED: engine ON but stationary (rpm > 0 OR fuel_rate > 0.3)
+    Logic:
+    - OFFLINE: data_age > 15 min OR no speed data
+    - MOVING: speed > 2 mph (threshold to filter GPS noise)
+    - STOPPED: engine ON but stationary (rpm > 0 OR fuel_rate > 0.3 L/h)
+    - PARKED: external power > 13.2V (plugged in, engine off)
+    - OFFLINE: no engine activity
     """
     # Check for offline - stale data
     if data_age_min > 15:
@@ -289,16 +291,24 @@ def determine_truck_status(
     if speed is None:
         return "OFFLINE"
 
-    # Moving - any speed > 0 means truck is in motion
-    if speed > 0:
+    # Moving - speed > 2 mph (filters GPS noise)
+    if speed > 2:
         return "MOVING"
 
     # Stationary - check engine status
     rpm_val = rpm or 0
     fuel_rate_val = fuel_rate or 0
+    pwr_ext_val = pwr_ext or 0
 
-    if rpm_val > 0 or fuel_rate_val > 0.3:  # Engine indicators
-        return "STOPPED"  # Engine on but not moving
+    # Engine ON indicators
+    if rpm_val > 0:
+        return "STOPPED"  # RPM > 0 means engine running
+    if fuel_rate_val > 0.3:
+        return "STOPPED"  # Fuel consumption means engine running
+    
+    # Engine OFF but plugged in
+    if pwr_ext_val > 13.2:
+        return "PARKED"  # Shore power connected
 
     # No engine activity = offline
     return "OFFLINE"

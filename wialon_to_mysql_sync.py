@@ -71,12 +71,13 @@ def get_local_connection():
 
 def determine_truck_status(speed, rpm, fuel_rate, data_age_min=0):
     """
-    Determine truck status from speed, RPM, fuel consumption and data freshness
+    Determine truck status - EXACT copy from fuel_copilot_v2_1_fixed.py
     
-    Logic from fuel_copilot_v2_1_fixed.py (aligned with Beyond App):
-    - MOVING: speed > 0 (truck is in motion)
-    - STOPPED: speed = 0 AND (rpm > 0 OR fuel_rate > 0.3) - engine ON, parked
-    - OFFLINE: data_age > 15 min OR no signs of activity
+    Logic:
+    - OFFLINE: data_age > 15 min OR no speed data
+    - MOVING: speed > 2 mph (threshold to filter GPS noise)
+    - STOPPED: engine ON but stationary (rpm > 0 OR fuel_rate > 0.3 L/h)
+    - OFFLINE: no engine activity
 
     Returns: "MOVING", "STOPPED", or "OFFLINE"
     """
@@ -88,17 +89,19 @@ def determine_truck_status(speed, rpm, fuel_rate, data_age_min=0):
     if speed is None:
         return "OFFLINE"
 
-    # Moving if speed > 0 (any movement)
-    if speed > 0:
+    # Moving - speed > 2 mph (filters GPS noise)
+    if speed > 2:
         return "MOVING"
 
     # Stationary - check if engine is running
-    # Engine ON indicators: RPM > 0 or fuel consumption > 0.3 L/h
     rpm_val = rpm or 0
     fuel_rate_val = fuel_rate or 0
     
-    if rpm_val > 0 or fuel_rate_val > 0.3:
-        return "STOPPED"  # Engine ON but not moving
+    # Engine ON indicators
+    if rpm_val > 0:
+        return "STOPPED"  # RPM > 0 means engine running
+    if fuel_rate_val > 0.3:
+        return "STOPPED"  # Fuel consumption means engine running
     
     # No engine activity = offline
     return "OFFLINE"
