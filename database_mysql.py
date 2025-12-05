@@ -2479,18 +2479,22 @@ def _empty_advanced_refuel_analytics(days: int, price: float) -> Dict[str, Any]:
 
 def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
     """
-    🆕 v3.10.5: IMPROVED Fuel Theft & Drain Detection System
+    🆕 v3.12.27: IMPROVED Fuel Theft & Drain Detection System with SENSOR ISSUE detection
 
-    Only flags TRUE anomalies - not sensor issues or normal consumption!
+    Now differentiates between:
+    - THEFT: Fuel drop that doesn't recover
+    - SENSOR_ISSUE: Fuel drop that recovers quickly (sensor glitch)
 
     Detects:
-    1. FUEL THEFT: Sudden large drops (>25 gal) in <30 min while parked
-    2. SIPHONING: Large drops (>15 gal) overnight with no miles
+    1. FUEL THEFT: Sudden large drops (>25 gal) in <30 min while parked, NO recovery
+    2. SIPHONING: Large drops (>15 gal) overnight with no miles, NO recovery
+    3. SENSOR_ISSUE: Drop that recovers within 15 minutes = sensor glitch
 
     IMPORTANT: Filters out:
     - Sensor disconnections (NULL readings)
     - Offline periods
     - Normal consumption
+    - Drops that recover (now classified as SENSOR_ISSUE)
     """
     FUEL_PRICE = FUEL.PRICE_PER_GALLON
 
@@ -2502,6 +2506,13 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
     SIPHON_MIN_GALLONS = 20.0  # Overnight siphoning threshold
     IDLE_CONSUMPTION_GPH = 1.2  # Conservative idle consumption estimate
 
+    # 🆕 Recovery detection thresholds
+    RECOVERY_WINDOW_MINUTES = 15  # Check for recovery within 15 min
+    RECOVERY_TOLERANCE_PCT = (
+        10.0  # If fuel recovers to within 10% of original = sensor issue
+    )
+
+    # 🆕 First query: Get all fuel readings with LEAD to check recovery
     query = text(
         """
         SELECT 
@@ -2523,7 +2534,13 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
             LAG(sensor_gallons) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as prev_sensor_gal,
             LAG(timestamp_utc) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as prev_ts,
             LAG(odometer_mi) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as prev_odo,
-            LAG(truck_status) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as prev_status
+            LAG(truck_status) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as prev_status,
+            LEAD(estimated_pct, 1) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as next_pct_1,
+            LEAD(estimated_pct, 2) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as next_pct_2,
+            LEAD(estimated_pct, 3) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as next_pct_3,
+            LEAD(timestamp_utc, 1) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as next_ts_1,
+            LEAD(timestamp_utc, 2) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as next_ts_2,
+            LEAD(timestamp_utc, 3) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as next_ts_3
         FROM fuel_metrics
         WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
           AND estimated_gallons IS NOT NULL
@@ -2687,10 +2704,56 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                 if not theft_type:
                     continue
 
+                # 🆕 v3.12.27: CHECK FOR RECOVERY - If fuel recovers, it's a SENSOR ISSUE not theft
+                # Look at the next 3 readings to see if fuel recovered
+                next_pct_1 = float(row[19] or 0) if row[19] else None
+                next_pct_2 = float(row[20] or 0) if row[20] else None
+                next_pct_3 = float(row[21] or 0) if row[21] else None
+                next_ts_1 = row[22]
+                next_ts_2 = row[23]
+                next_ts_3 = row[24]
+
+                recovered = False
+                recovery_to_pct = None
+                recovery_time_min = None
+
+                # Check each of the next readings for recovery
+                for next_pct, next_ts in [
+                    (next_pct_1, next_ts_1),
+                    (next_pct_2, next_ts_2),
+                    (next_pct_3, next_ts_3),
+                ]:
+                    if next_pct is None or next_ts is None:
+                        continue
+
+                    # Time since the drop
+                    time_since_drop = (
+                        (next_ts - timestamp).total_seconds() / 60 if timestamp else 999
+                    )
+
+                    # If within recovery window and fuel recovered close to original level
+                    if time_since_drop <= RECOVERY_WINDOW_MINUTES:
+                        recovery_gap = abs(prev_pct - next_pct)
+                        if recovery_gap <= RECOVERY_TOLERANCE_PCT:
+                            # Fuel recovered! This is a sensor issue, not theft
+                            recovered = True
+                            recovery_to_pct = next_pct
+                            recovery_time_min = time_since_drop
+                            break
+
+                # 🆕 If recovered, classify as SENSOR ISSUE instead of theft
+                if recovered:
+                    theft_type = "PROBLEMA DE SENSOR"
+                    confidence = 30  # Low confidence since it's not actual theft
+                    logger.info(
+                        f"🔧 {truck_id}: Drop of {fuel_drop_pct:.1f}% RECOVERED to {recovery_to_pct:.1f}% "
+                        f"in {recovery_time_min:.0f} min - classifying as SENSOR ISSUE"
+                    )
+
                 # Check time of day
                 hour = timestamp.hour if timestamp else 12
                 is_night = hour < 6 or hour > 22
-                if is_night:
+                if is_night and not recovered:
                     confidence = min(100, confidence + 5)
 
                 # Create event record
@@ -2704,31 +2767,51 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                     "theft_type": theft_type,
                     "confidence_pct": confidence,
                     "fuel_drop_gallons": round(fuel_drop_gal, 1),
-                    "unexplained_loss_gallons": round(unexplained_loss, 1),
+                    "unexplained_loss_gallons": (
+                        round(unexplained_loss, 1) if not recovered else 0
+                    ),
                     "fuel_drop_pct": round(fuel_drop_pct, 1),
                     "fuel_before_pct": round(prev_pct, 1),
                     "fuel_after_pct": round(est_pct, 1),
-                    "estimated_loss_usd": round(unexplained_loss * FUEL_PRICE, 2),
+                    "estimated_loss_usd": (
+                        round(unexplained_loss * FUEL_PRICE, 2) if not recovered else 0
+                    ),
                     "time_gap_minutes": round(time_gap_min, 0),
                     "miles_driven": round(miles_driven, 1),
                     "expected_consumption_gal": round(expected_total, 1),
                     "is_night": is_night,
+                    "recovered": recovered,  # 🆕 Flag for recovery
+                    "recovery_to_pct": (
+                        round(recovery_to_pct, 1) if recovery_to_pct else None
+                    ),
+                    "recovery_time_min": (
+                        round(recovery_time_min, 0) if recovery_time_min else None
+                    ),
                 }
                 theft_events.append(theft_event)
-                total_loss_gal += unexplained_loss
 
-                # Track per truck
+                # 🆕 Only count loss if NOT recovered (sensor issues don't count as loss)
+                if not recovered:
+                    total_loss_gal += unexplained_loss
+
+                # Track per truck (but mark sensor issues separately)
                 if truck_id not in truck_patterns:
                     truck_patterns[truck_id] = {
                         "event_count": 0,
+                        "sensor_issue_count": 0,
                         "total_loss_gal": 0,
                         "highest_confidence": 0,
                     }
                 truck_patterns[truck_id]["event_count"] += 1
-                truck_patterns[truck_id]["total_loss_gal"] += unexplained_loss
-                truck_patterns[truck_id]["highest_confidence"] = max(
-                    truck_patterns[truck_id]["highest_confidence"], confidence
-                )
+                if recovered:
+                    truck_patterns[truck_id]["sensor_issue_count"] = (
+                        truck_patterns[truck_id].get("sensor_issue_count", 0) + 1
+                    )
+                else:
+                    truck_patterns[truck_id]["total_loss_gal"] += unexplained_loss
+                    truck_patterns[truck_id]["highest_confidence"] = max(
+                        truck_patterns[truck_id]["highest_confidence"], confidence
+                    )
 
             # Build trucks_at_risk list
             trucks_at_risk = []
@@ -2807,6 +2890,12 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                         }
                     )
 
+            # 🆕 Separate real theft events from sensor issues
+            real_theft_events = [
+                e for e in theft_events if not e.get("recovered", False)
+            ]
+            sensor_issue_events = [e for e in theft_events if e.get("recovered", False)]
+
             return {
                 "period_days": days_back,
                 "fuel_price_per_gal": FUEL_PRICE,
@@ -2816,16 +2905,28 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                     "max_time_minutes": THEFT_MAX_TIME_MIN,
                 },
                 "summary": {
-                    "total_events": len(theft_events),
+                    "total_events": len(real_theft_events),  # Only count real theft
+                    "sensor_issue_events": len(
+                        sensor_issue_events
+                    ),  # 🆕 Separate count
                     "high_confidence_events": len(
-                        [e for e in theft_events if e["confidence_pct"] >= 85]
+                        [e for e in real_theft_events if e["confidence_pct"] >= 85]
                     ),
                     "total_suspected_loss_gallons": round(total_loss_gal, 1),
                     "total_suspected_loss_usd": round(total_loss_gal * FUEL_PRICE, 2),
-                    "trucks_affected": len(trucks_at_risk),
+                    "trucks_affected": len(
+                        [t for t in trucks_at_risk if t["total_loss_gallons"] > 0]
+                    ),
                 },
-                "trucks_at_risk": trucks_at_risk[:20],
-                "events": theft_events[:30],
+                "trucks_at_risk": [
+                    t for t in trucks_at_risk[:20] if t["total_loss_gallons"] > 0
+                ],
+                "events": theft_events[
+                    :30
+                ],  # Include all for display, frontend will filter
+                "sensor_issues": sensor_issue_events[
+                    :20
+                ],  # 🆕 Separate list for sensor issues
                 "insights": insights,
             }
 
