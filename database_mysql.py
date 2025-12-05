@@ -3063,6 +3063,219 @@ def get_route_efficiency_analysis(
         }
 
 
+def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
+    """
+    🆕 v3.14.0: Analyze REAL causes of fuel inefficiency using sensor data.
+
+    Instead of guessing, uses actual speed, RPM, and behavior patterns to
+    attribute inefficiency to specific causes:
+
+    - High Speed Driving (>65 mph): Aerodynamic drag increases exponentially
+    - High RPM Operation (>1600): More fuel per rotation
+    - Aggressive Acceleration: High throttle changes
+    - Excessive Idle: Fuel burned with no miles
+
+    Returns breakdown with percentages and cost attribution.
+    """
+    engine = get_sqlalchemy_engine()
+    FUEL_PRICE = 3.50
+    BASELINE_MPG = 6.5
+    OPTIMAL_SPEED_MAX = 65.0  # MPH
+    OPTIMAL_RPM_MAX = 1600
+
+    try:
+        with engine.connect() as conn:
+            query = text(
+                """
+                SELECT 
+                    -- Total counts for percentages
+                    COUNT(CASE WHEN truck_status = 'MOVING' THEN 1 END) as total_moving,
+                    COUNT(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN 1 END) as total_idle,
+                    
+                    -- High speed analysis (>65 mph)
+                    COUNT(CASE WHEN truck_status = 'MOVING' AND speed_mph > :speed_max THEN 1 END) as high_speed_count,
+                    AVG(CASE WHEN truck_status = 'MOVING' AND speed_mph > :speed_max THEN speed_mph END) as avg_high_speed,
+                    AVG(CASE WHEN truck_status = 'MOVING' AND speed_mph > :speed_max THEN mpg_current END) as mpg_at_high_speed,
+                    
+                    -- High RPM analysis (>1600)
+                    COUNT(CASE WHEN rpm > :rpm_max THEN 1 END) as high_rpm_count,
+                    AVG(CASE WHEN rpm > :rpm_max THEN rpm END) as avg_high_rpm,
+                    AVG(CASE WHEN rpm > :rpm_max THEN mpg_current END) as mpg_at_high_rpm,
+                    
+                    -- Normal operation for comparison
+                    AVG(CASE WHEN truck_status = 'MOVING' AND speed_mph BETWEEN 55 AND 65 THEN mpg_current END) as mpg_at_optimal_speed,
+                    AVG(CASE WHEN rpm BETWEEN 1200 AND 1600 THEN mpg_current END) as mpg_at_optimal_rpm,
+                    
+                    -- Overall MPG and consumption
+                    AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
+                    SUM(CASE WHEN consumption_gph > 0 THEN consumption_gph / 60.0 END) as total_fuel_approx,
+                    MAX(odometer_mi) - MIN(odometer_mi) as total_miles,
+                    
+                    -- Idle consumption
+                    SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN consumption_gph / 60.0 END) as idle_fuel
+                    
+                FROM fuel_metrics
+                WHERE timestamp_utc > NOW() - INTERVAL :days DAY
+                AND (:truck_id IS NULL OR truck_id = :truck_id)
+            """
+            )
+
+            result = conn.execute(
+                query,
+                {
+                    "days": days_back,
+                    "truck_id": truck_id if truck_id != "fleet" else None,
+                    "speed_max": OPTIMAL_SPEED_MAX,
+                    "rpm_max": OPTIMAL_RPM_MAX,
+                },
+            ).fetchone()
+
+            if not result or not result[0]:
+                return {"error": "No data found", "causes": []}
+
+            total_moving = int(result[0] or 1)
+            total_idle = int(result[1] or 0)
+            high_speed_count = int(result[2] or 0)
+            avg_high_speed = float(result[3] or 70)
+            mpg_at_high_speed = float(result[4] or 5.0)
+            high_rpm_count = int(result[5] or 0)
+            avg_high_rpm = float(result[6] or 1800)
+            mpg_at_high_rpm = float(result[7] or 5.5)
+            mpg_at_optimal_speed = float(result[8] or BASELINE_MPG)
+            mpg_at_optimal_rpm = float(result[9] or BASELINE_MPG)
+            avg_mpg = float(result[10] or BASELINE_MPG)
+            total_fuel = float(result[11] or 0)
+            total_miles = float(result[12] or 0)
+            idle_fuel = float(result[13] or 0)
+
+            # Calculate inefficiency causes with REAL data
+            causes = []
+
+            # 1. High Speed Impact
+            if high_speed_count > 0 and total_moving > 0:
+                high_speed_pct = (high_speed_count / total_moving) * 100
+                # MPG loss from high speed: compare to optimal
+                mpg_loss_speed = max(0, mpg_at_optimal_speed - mpg_at_high_speed)
+                # Estimate gallons lost to high speed
+                high_speed_miles_est = total_miles * (high_speed_pct / 100)
+                extra_gal_speed = (
+                    (high_speed_miles_est / mpg_at_high_speed)
+                    - (high_speed_miles_est / mpg_at_optimal_speed)
+                    if mpg_at_high_speed > 0
+                    else 0
+                )
+                extra_gal_speed = max(0, extra_gal_speed)
+
+                causes.append(
+                    {
+                        "cause": "high_speed",
+                        "label": "High Speed Driving",
+                        "label_es": "Conducción a Alta Velocidad",
+                        "description": f"Driving above 65 mph ({high_speed_pct:.0f}% of time, avg {avg_high_speed:.0f} mph)",
+                        "description_es": f"Conduciendo sobre 65 mph ({high_speed_pct:.0f}% del tiempo, prom {avg_high_speed:.0f} mph)",
+                        "pct_of_time": round(high_speed_pct, 1),
+                        "mpg_impact": round(mpg_loss_speed, 2),
+                        "extra_gallons": round(extra_gal_speed, 1),
+                        "extra_cost": round(extra_gal_speed * FUEL_PRICE, 2),
+                        "data_points": high_speed_count,
+                        "recommendation": "Reduce cruising speed to 62-65 mph to improve aerodynamics",
+                        "recommendation_es": "Reducir velocidad de crucero a 62-65 mph para mejorar aerodinámica",
+                    }
+                )
+
+            # 2. High RPM Impact
+            if high_rpm_count > 0 and total_moving > 0:
+                high_rpm_pct = (high_rpm_count / total_moving) * 100
+                mpg_loss_rpm = max(0, mpg_at_optimal_rpm - mpg_at_high_rpm)
+                # Estimate extra fuel from high RPM
+                high_rpm_fuel_est = total_fuel * (high_rpm_pct / 100)
+                optimal_fuel_at_same_pct = (
+                    high_rpm_fuel_est * (mpg_at_high_rpm / mpg_at_optimal_rpm)
+                    if mpg_at_optimal_rpm > 0
+                    else high_rpm_fuel_est
+                )
+                extra_gal_rpm = high_rpm_fuel_est - optimal_fuel_at_same_pct
+                extra_gal_rpm = max(0, extra_gal_rpm)
+
+                causes.append(
+                    {
+                        "cause": "high_rpm",
+                        "label": "High RPM Operation",
+                        "label_es": "Operación a RPM Alta",
+                        "description": f"Engine above 1600 RPM ({high_rpm_pct:.0f}% of time, avg {avg_high_rpm:.0f} RPM)",
+                        "description_es": f"Motor sobre 1600 RPM ({high_rpm_pct:.0f}% del tiempo, prom {avg_high_rpm:.0f} RPM)",
+                        "pct_of_time": round(high_rpm_pct, 1),
+                        "mpg_impact": round(mpg_loss_rpm, 2),
+                        "extra_gallons": round(extra_gal_rpm, 1),
+                        "extra_cost": round(extra_gal_rpm * FUEL_PRICE, 2),
+                        "data_points": high_rpm_count,
+                        "recommendation": "Upshift earlier, use cruise control in sweet spot (1200-1500 RPM)",
+                        "recommendation_es": "Subir de marcha antes, usar control crucero en zona óptima (1200-1500 RPM)",
+                    }
+                )
+
+            # 3. Idle Impact
+            if total_idle > 0 and idle_fuel > 0:
+                idle_pct = (
+                    (total_idle / (total_moving + total_idle)) * 100
+                    if (total_moving + total_idle) > 0
+                    else 0
+                )
+
+                causes.append(
+                    {
+                        "cause": "excessive_idle",
+                        "label": "Excessive Idling",
+                        "label_es": "Ralentí Excesivo",
+                        "description": f"Engine running without moving ({idle_pct:.0f}% of time)",
+                        "description_es": f"Motor encendido sin moverse ({idle_pct:.0f}% del tiempo)",
+                        "pct_of_time": round(idle_pct, 1),
+                        "mpg_impact": 0,  # N/A - no miles driven
+                        "extra_gallons": round(idle_fuel, 1),
+                        "extra_cost": round(idle_fuel * FUEL_PRICE, 2),
+                        "data_points": total_idle,
+                        "recommendation": "Turn off engine when stopped for >2 minutes, consider APU for sleeper",
+                        "recommendation_es": "Apagar motor si parado >2 min, considerar APU para dormir",
+                    }
+                )
+
+            # Calculate total attribution
+            total_extra_cost = sum(c.get("extra_cost", 0) for c in causes)
+
+            # Sort by impact
+            causes.sort(key=lambda x: x.get("extra_cost", 0), reverse=True)
+
+            # Add percentage of total inefficiency
+            for cause in causes:
+                cause["pct_of_inefficiency"] = round(
+                    (
+                        (cause["extra_cost"] / total_extra_cost * 100)
+                        if total_extra_cost > 0
+                        else 0
+                    ),
+                    1,
+                )
+
+            return {
+                "truck_id": truck_id,
+                "period_days": days_back,
+                "total_miles": round(total_miles, 0),
+                "avg_mpg": round(avg_mpg, 2),
+                "baseline_mpg": BASELINE_MPG,
+                "total_inefficiency_cost": round(total_extra_cost, 2),
+                "causes": causes,
+                "data_quality": {
+                    "total_readings": total_moving + total_idle,
+                    "moving_readings": total_moving,
+                    "idle_readings": total_idle,
+                },
+            }
+
+    except Exception as e:
+        logger.error(f"Error analyzing inefficiency causes: {e}")
+        return {"error": str(e), "causes": []}
+
+
 def get_cost_attribution_report(days_back: int = 30) -> Dict:
     """
     Generate detailed cost attribution report for fleet fuel expenses.

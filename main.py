@@ -2035,6 +2035,32 @@ async def get_cost_attribution(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/fuelAnalytics/api/analytics/inefficiency-causes")
+async def get_inefficiency_causes_endpoint(
+    truck_id: str = Query("fleet", description="Truck ID or 'fleet' for all"),
+    days: int = Query(30, ge=1, le=365, description="Days of history to analyze"),
+):
+    """
+    🆕 v3.14.0: Analyze REAL causes of fuel inefficiency using sensor data.
+
+    Uses actual speed, RPM, and behavior patterns to attribute inefficiency:
+    - High Speed Driving (>65 mph): Aerodynamic drag
+    - High RPM Operation (>1600): Less efficient
+    - Excessive Idle: Fuel burned with no miles
+
+    Returns breakdown with percentages, impact in gallons/cost, and recommendations.
+    """
+    try:
+        from database_mysql import get_inefficiency_causes
+
+        result = get_inefficiency_causes(truck_id=truck_id, days_back=days)
+        return result
+
+    except Exception as e:
+        logger.error(f"Inefficiency causes analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 GEOFENCING ENDPOINTS (v3.12.0)
 # ═══════════════════════════════════════════════════════════════════════════════
