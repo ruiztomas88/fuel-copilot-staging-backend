@@ -3065,23 +3065,27 @@ def get_route_efficiency_analysis(
 
 def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
     """
-    🆕 v3.14.0: Analyze REAL causes of fuel inefficiency using sensor data.
+    🆕 v3.14.1: Analyze REAL causes of fuel inefficiency using ALL sensor data.
 
-    Instead of guessing, uses actual speed, RPM, and behavior patterns to
-    attribute inefficiency to specific causes:
+    Uses actual sensor readings to attribute inefficiency to specific causes:
 
     - High Speed Driving (>65 mph): Aerodynamic drag increases exponentially
     - High RPM Operation (>1600): More fuel per rotation
-    - Aggressive Acceleration: High throttle changes
+    - High Engine Load (>80%): Heavy loads consume more fuel
     - Excessive Idle: Fuel burned with no miles
+    - Low Oil Pressure: Mechanical issues affecting efficiency
+    - High Oil Temperature: Engine stress indicator
 
-    Returns breakdown with percentages and cost attribution.
+    Returns breakdown with percentages, MPG impact, and cost attribution.
     """
     engine = get_sqlalchemy_engine()
     FUEL_PRICE = 3.50
     BASELINE_MPG = 6.5
     OPTIMAL_SPEED_MAX = 65.0  # MPH
     OPTIMAL_RPM_MAX = 1600
+    OPTIMAL_LOAD_MAX = 80  # %
+    LOW_OIL_PRESSURE = 35  # PSI
+    HIGH_OIL_TEMP = 240  # °F
 
     try:
         with engine.connect() as conn:
@@ -3112,7 +3116,27 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                     MAX(odometer_mi) - MIN(odometer_mi) as total_miles,
                     
                     -- Idle consumption
-                    SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN consumption_gph / 60.0 END) as idle_fuel
+                    SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN consumption_gph / 60.0 END) as idle_fuel,
+                    
+                    -- 🆕 Engine Load analysis (>80%)
+                    COUNT(CASE WHEN engine_load_pct > :load_max THEN 1 END) as high_load_count,
+                    AVG(CASE WHEN engine_load_pct > :load_max THEN engine_load_pct END) as avg_high_load,
+                    AVG(CASE WHEN engine_load_pct > :load_max THEN mpg_current END) as mpg_at_high_load,
+                    AVG(CASE WHEN engine_load_pct BETWEEN 30 AND 60 THEN mpg_current END) as mpg_at_optimal_load,
+                    
+                    -- 🆕 Oil Pressure analysis (<35 PSI)
+                    COUNT(CASE WHEN oil_pressure_psi < :low_oil_pressure AND oil_pressure_psi > 0 THEN 1 END) as low_oil_pressure_count,
+                    AVG(CASE WHEN oil_pressure_psi < :low_oil_pressure AND oil_pressure_psi > 0 THEN oil_pressure_psi END) as avg_low_oil_pressure,
+                    MIN(CASE WHEN oil_pressure_psi > 0 THEN oil_pressure_psi END) as min_oil_pressure,
+                    AVG(oil_pressure_psi) as avg_oil_pressure,
+                    COUNT(CASE WHEN oil_pressure_psi IS NOT NULL AND oil_pressure_psi > 0 THEN 1 END) as oil_pressure_readings,
+                    
+                    -- 🆕 Oil Temperature analysis (>240°F)
+                    COUNT(CASE WHEN oil_temp_f > :high_oil_temp THEN 1 END) as high_oil_temp_count,
+                    AVG(CASE WHEN oil_temp_f > :high_oil_temp THEN oil_temp_f END) as avg_high_oil_temp,
+                    MAX(oil_temp_f) as max_oil_temp,
+                    AVG(oil_temp_f) as avg_oil_temp,
+                    COUNT(CASE WHEN oil_temp_f IS NOT NULL AND oil_temp_f > 0 THEN 1 END) as oil_temp_readings
                     
                 FROM fuel_metrics
                 WHERE timestamp_utc > NOW() - INTERVAL :days DAY
@@ -3127,12 +3151,16 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                     "truck_id": truck_id if truck_id != "fleet" else None,
                     "speed_max": OPTIMAL_SPEED_MAX,
                     "rpm_max": OPTIMAL_RPM_MAX,
+                    "load_max": OPTIMAL_LOAD_MAX,
+                    "low_oil_pressure": LOW_OIL_PRESSURE,
+                    "high_oil_temp": HIGH_OIL_TEMP,
                 },
             ).fetchone()
 
             if not result or not result[0]:
                 return {"error": "No data found", "causes": []}
 
+            # Basic metrics
             total_moving = int(result[0] or 1)
             total_idle = int(result[1] or 0)
             high_speed_count = int(result[2] or 0)
@@ -3147,6 +3175,26 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
             total_fuel = float(result[11] or 0)
             total_miles = float(result[12] or 0)
             idle_fuel = float(result[13] or 0)
+            
+            # 🆕 Engine Load metrics
+            high_load_count = int(result[14] or 0)
+            avg_high_load = float(result[15] or 85)
+            mpg_at_high_load = float(result[16] or 4.5)
+            mpg_at_optimal_load = float(result[17] or BASELINE_MPG)
+            
+            # 🆕 Oil Pressure metrics
+            low_oil_pressure_count = int(result[18] or 0)
+            avg_low_oil_pressure = float(result[19] or 30)
+            min_oil_pressure = float(result[20] or 0)
+            avg_oil_pressure = float(result[21] or 0)
+            oil_pressure_readings = int(result[22] or 0)
+            
+            # 🆕 Oil Temperature metrics
+            high_oil_temp_count = int(result[23] or 0)
+            avg_high_oil_temp = float(result[24] or 250)
+            max_oil_temp = float(result[25] or 0)
+            avg_oil_temp = float(result[26] or 0)
+            oil_temp_readings = int(result[27] or 0)
 
             # Calculate inefficiency causes with REAL data
             causes = []
@@ -3154,14 +3202,12 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
             # 1. High Speed Impact
             if high_speed_count > 0 and total_moving > 0:
                 high_speed_pct = (high_speed_count / total_moving) * 100
-                # MPG loss from high speed: compare to optimal
                 mpg_loss_speed = max(0, mpg_at_optimal_speed - mpg_at_high_speed)
-                # Estimate gallons lost to high speed
                 high_speed_miles_est = total_miles * (high_speed_pct / 100)
                 extra_gal_speed = (
                     (high_speed_miles_est / mpg_at_high_speed)
                     - (high_speed_miles_est / mpg_at_optimal_speed)
-                    if mpg_at_high_speed > 0
+                    if mpg_at_high_speed > 0 and mpg_at_optimal_speed > 0
                     else 0
                 )
                 extra_gal_speed = max(0, extra_gal_speed)
@@ -3169,17 +3215,21 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                 causes.append(
                     {
                         "cause": "high_speed",
+                        "icon": "🏎️",
                         "label": "High Speed Driving",
                         "label_es": "Conducción a Alta Velocidad",
                         "description": f"Driving above 65 mph ({high_speed_pct:.0f}% of time, avg {avg_high_speed:.0f} mph)",
                         "description_es": f"Conduciendo sobre 65 mph ({high_speed_pct:.0f}% del tiempo, prom {avg_high_speed:.0f} mph)",
                         "pct_of_time": round(high_speed_pct, 1),
                         "mpg_impact": round(mpg_loss_speed, 2),
+                        "mpg_at_issue": round(mpg_at_high_speed, 2),
+                        "mpg_at_optimal": round(mpg_at_optimal_speed, 2),
                         "extra_gallons": round(extra_gal_speed, 1),
                         "extra_cost": round(extra_gal_speed * FUEL_PRICE, 2),
                         "data_points": high_speed_count,
                         "recommendation": "Reduce cruising speed to 62-65 mph to improve aerodynamics",
                         "recommendation_es": "Reducir velocidad de crucero a 62-65 mph para mejorar aerodinámica",
+                        "source": "speed_sensor",
                     }
                 )
 
@@ -3187,7 +3237,6 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
             if high_rpm_count > 0 and total_moving > 0:
                 high_rpm_pct = (high_rpm_count / total_moving) * 100
                 mpg_loss_rpm = max(0, mpg_at_optimal_rpm - mpg_at_high_rpm)
-                # Estimate extra fuel from high RPM
                 high_rpm_fuel_est = total_fuel * (high_rpm_pct / 100)
                 optimal_fuel_at_same_pct = (
                     high_rpm_fuel_est * (mpg_at_high_rpm / mpg_at_optimal_rpm)
@@ -3200,21 +3249,59 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                 causes.append(
                     {
                         "cause": "high_rpm",
+                        "icon": "⚡",
                         "label": "High RPM Operation",
                         "label_es": "Operación a RPM Alta",
                         "description": f"Engine above 1600 RPM ({high_rpm_pct:.0f}% of time, avg {avg_high_rpm:.0f} RPM)",
                         "description_es": f"Motor sobre 1600 RPM ({high_rpm_pct:.0f}% del tiempo, prom {avg_high_rpm:.0f} RPM)",
                         "pct_of_time": round(high_rpm_pct, 1),
                         "mpg_impact": round(mpg_loss_rpm, 2),
+                        "mpg_at_issue": round(mpg_at_high_rpm, 2),
+                        "mpg_at_optimal": round(mpg_at_optimal_rpm, 2),
                         "extra_gallons": round(extra_gal_rpm, 1),
                         "extra_cost": round(extra_gal_rpm * FUEL_PRICE, 2),
                         "data_points": high_rpm_count,
                         "recommendation": "Upshift earlier, use cruise control in sweet spot (1200-1500 RPM)",
                         "recommendation_es": "Subir de marcha antes, usar control crucero en zona óptima (1200-1500 RPM)",
+                        "source": "rpm_sensor",
                     }
                 )
 
-            # 3. Idle Impact
+            # 3. 🆕 High Engine Load Impact
+            if high_load_count > 0 and total_moving > 0 and mpg_at_high_load > 0:
+                high_load_pct = (high_load_count / total_moving) * 100
+                mpg_loss_load = max(0, mpg_at_optimal_load - mpg_at_high_load) if mpg_at_optimal_load else 0
+                high_load_miles_est = total_miles * (high_load_pct / 100)
+                extra_gal_load = (
+                    (high_load_miles_est / mpg_at_high_load)
+                    - (high_load_miles_est / mpg_at_optimal_load)
+                    if mpg_at_high_load > 0 and mpg_at_optimal_load > 0
+                    else 0
+                )
+                extra_gal_load = max(0, extra_gal_load)
+
+                causes.append(
+                    {
+                        "cause": "high_engine_load",
+                        "icon": "⚙️",
+                        "label": "High Engine Load",
+                        "label_es": "Carga de Motor Alta",
+                        "description": f"Engine load above 80% ({high_load_count} events, avg {avg_high_load:.0f}%)",
+                        "description_es": f"Carga del motor sobre 80% ({high_load_count} eventos, prom {avg_high_load:.0f}%)",
+                        "pct_of_time": round(high_load_pct, 1),
+                        "mpg_impact": round(mpg_loss_load, 2),
+                        "mpg_at_issue": round(mpg_at_high_load, 2),
+                        "mpg_at_optimal": round(mpg_at_optimal_load, 2) if mpg_at_optimal_load else None,
+                        "extra_gallons": round(extra_gal_load, 1),
+                        "extra_cost": round(extra_gal_load * FUEL_PRICE, 2),
+                        "data_points": high_load_count,
+                        "recommendation": "Avoid overloading, consider route optimization for hills",
+                        "recommendation_es": "Evitar sobrecarga, optimizar rutas para evitar pendientes",
+                        "source": "engine_load_sensor",
+                    }
+                )
+
+            # 4. Idle Impact
             if total_idle > 0 and idle_fuel > 0:
                 idle_pct = (
                     (total_idle / (total_moving + total_idle)) * 100
@@ -3225,24 +3312,98 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                 causes.append(
                     {
                         "cause": "excessive_idle",
+                        "icon": "⏸️",
                         "label": "Excessive Idling",
                         "label_es": "Ralentí Excesivo",
                         "description": f"Engine running without moving ({idle_pct:.0f}% of time)",
                         "description_es": f"Motor encendido sin moverse ({idle_pct:.0f}% del tiempo)",
                         "pct_of_time": round(idle_pct, 1),
-                        "mpg_impact": 0,  # N/A - no miles driven
+                        "mpg_impact": 0,
                         "extra_gallons": round(idle_fuel, 1),
                         "extra_cost": round(idle_fuel * FUEL_PRICE, 2),
                         "data_points": total_idle,
                         "recommendation": "Turn off engine when stopped for >2 minutes, consider APU for sleeper",
                         "recommendation_es": "Apagar motor si parado >2 min, considerar APU para dormir",
+                        "source": "truck_status",
+                    }
+                )
+
+            # 5. 🆕 Low Oil Pressure (Mechanical Issue)
+            if low_oil_pressure_count > 0 and oil_pressure_readings > 0:
+                low_oil_pct = (low_oil_pressure_count / oil_pressure_readings) * 100
+                # Low oil pressure causes ~5-10% efficiency loss due to increased friction
+                estimated_mpg_loss = avg_mpg * 0.07  # 7% efficiency loss estimate
+                low_oil_miles_est = total_miles * (low_oil_pct / 100)
+                extra_gal_oil = (
+                    low_oil_miles_est / (avg_mpg - estimated_mpg_loss)
+                    - low_oil_miles_est / avg_mpg
+                    if avg_mpg > estimated_mpg_loss
+                    else 0
+                )
+                extra_gal_oil = max(0, extra_gal_oil)
+
+                causes.append(
+                    {
+                        "cause": "low_oil_pressure",
+                        "icon": "🛢️",
+                        "label": "Low Oil Pressure Events",
+                        "label_es": "Eventos de Presión de Aceite Baja",
+                        "description": f"Oil pressure below 35 PSI ({low_oil_pressure_count} events, min {min_oil_pressure:.0f} PSI)",
+                        "description_es": f"Presión de aceite bajo 35 PSI ({low_oil_pressure_count} eventos, mín {min_oil_pressure:.0f} PSI)",
+                        "pct_of_time": round(low_oil_pct, 1),
+                        "mpg_impact": round(estimated_mpg_loss, 2),
+                        "current_avg": round(avg_oil_pressure, 1),
+                        "min_recorded": round(min_oil_pressure, 1),
+                        "extra_gallons": round(extra_gal_oil, 1),
+                        "extra_cost": round(extra_gal_oil * FUEL_PRICE, 2),
+                        "data_points": low_oil_pressure_count,
+                        "recommendation": "⚠️ MECHANICAL: Check oil level, oil pump, and for leaks. Low pressure increases friction and fuel consumption.",
+                        "recommendation_es": "⚠️ MECÁNICO: Revisar nivel de aceite, bomba y fugas. Presión baja aumenta fricción y consumo.",
+                        "source": "oil_pressure_sensor",
+                        "severity": "warning",
+                    }
+                )
+
+            # 6. 🆕 High Oil Temperature (Engine Stress)
+            if high_oil_temp_count > 0 and oil_temp_readings > 0:
+                high_oil_temp_pct = (high_oil_temp_count / oil_temp_readings) * 100
+                # High oil temp causes ~5-8% efficiency loss
+                estimated_mpg_loss = avg_mpg * 0.06
+                high_temp_miles_est = total_miles * (high_oil_temp_pct / 100)
+                extra_gal_temp = (
+                    high_temp_miles_est / (avg_mpg - estimated_mpg_loss)
+                    - high_temp_miles_est / avg_mpg
+                    if avg_mpg > estimated_mpg_loss
+                    else 0
+                )
+                extra_gal_temp = max(0, extra_gal_temp)
+
+                causes.append(
+                    {
+                        "cause": "high_oil_temp",
+                        "icon": "🌡️",
+                        "label": "High Oil Temperature",
+                        "label_es": "Temperatura de Aceite Alta",
+                        "description": f"Oil temp above 240°F ({high_oil_temp_count} events, max {max_oil_temp:.0f}°F)",
+                        "description_es": f"Temp. aceite sobre 240°F ({high_oil_temp_count} eventos, máx {max_oil_temp:.0f}°F)",
+                        "pct_of_time": round(high_oil_temp_pct, 1),
+                        "mpg_impact": round(estimated_mpg_loss, 2),
+                        "current_avg": round(avg_oil_temp, 1),
+                        "max_recorded": round(max_oil_temp, 1),
+                        "extra_gallons": round(extra_gal_temp, 1),
+                        "extra_cost": round(extra_gal_temp * FUEL_PRICE, 2),
+                        "data_points": high_oil_temp_count,
+                        "recommendation": "⚠️ MECHANICAL: Check oil cooler, coolant system. Hot oil loses viscosity and increases wear.",
+                        "recommendation_es": "⚠️ MECÁNICO: Revisar enfriador de aceite y sistema de refrigeración. Aceite caliente pierde viscosidad.",
+                        "source": "oil_temp_sensor",
+                        "severity": "warning",
                     }
                 )
 
             # Calculate total attribution
             total_extra_cost = sum(c.get("extra_cost", 0) for c in causes)
 
-            # Sort by impact
+            # Sort by impact (cost)
             causes.sort(key=lambda x: x.get("extra_cost", 0), reverse=True)
 
             # Add percentage of total inefficiency
@@ -3255,6 +3416,25 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                     ),
                     1,
                 )
+
+            # 🆕 Sensor coverage info
+            sensor_coverage = {
+                "speed_rpm": {"available": True, "readings": total_moving},
+                "engine_load": {
+                    "available": high_load_count > 0 or mpg_at_optimal_load is not None,
+                    "readings": high_load_count,
+                },
+                "oil_pressure": {
+                    "available": oil_pressure_readings > 0,
+                    "readings": oil_pressure_readings,
+                    "avg_psi": round(avg_oil_pressure, 1) if avg_oil_pressure else None,
+                },
+                "oil_temp": {
+                    "available": oil_temp_readings > 0,
+                    "readings": oil_temp_readings,
+                    "avg_f": round(avg_oil_temp, 1) if avg_oil_temp else None,
+                },
+            }
 
             return {
                 "truck_id": truck_id,
@@ -3269,6 +3449,7 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                     "moving_readings": total_moving,
                     "idle_readings": total_idle,
                 },
+                "sensor_coverage": sensor_coverage,
             }
 
     except Exception as e:
