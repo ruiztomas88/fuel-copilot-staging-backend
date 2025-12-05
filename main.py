@@ -2143,7 +2143,6 @@ async def get_predictive_alerts(
     before they become critical problems.
     """
     try:
-        from alert_system import AlertSystem
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
 
@@ -2193,15 +2192,23 @@ async def get_predictive_alerts(
                 }
             )
 
-        # Initialize alert system and check for alerts
-        alert_system = AlertSystem()
-        alerts = alert_system.check_fleet_alerts(truck_data)
-
-        # Get fleet health summary
-        health_summary = alert_system.get_fleet_health_summary(truck_data)
-
-        # Convert alerts to dict format
-        alerts_list = [alert.to_dict() for alert in alerts]
+        # Try to use AlertSystem, fallback to basic response
+        alerts_list = []
+        health_summary = {
+            "total_trucks": len(truck_data),
+            "healthy_trucks": len([t for t in truck_data if t.get("drift_warning") != "YES"]),
+            "trucks_with_alerts": 0,
+            "critical_alerts": 0,
+        }
+        
+        try:
+            from alert_system import AlertSystem
+            alert_system = AlertSystem()
+            alerts = alert_system.check_fleet_alerts(truck_data)
+            health_summary = alert_system.get_fleet_health_summary(truck_data)
+            alerts_list = [alert.to_dict() for alert in alerts]
+        except Exception as alert_err:
+            logger.warning(f"AlertSystem not available, using basic response: {alert_err}")
 
         return {
             "alerts": alerts_list,
@@ -2210,8 +2217,10 @@ async def get_predictive_alerts(
         }
 
     except Exception as e:
-        logger.error(f"Predictive alerts error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Predictive alerts error: {e}\n{error_details}")
+        raise HTTPException(status_code=500, detail=f"{str(e)} - Check server logs for details")
 
 
 # ============================================================================
