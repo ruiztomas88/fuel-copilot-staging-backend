@@ -3175,20 +3175,20 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
             total_fuel = float(result[11] or 0)
             total_miles = float(result[12] or 0)
             idle_fuel = float(result[13] or 0)
-            
+
             # 🆕 Engine Load metrics
             high_load_count = int(result[14] or 0)
             avg_high_load = float(result[15] or 85)
             mpg_at_high_load = float(result[16] or 4.5)
             mpg_at_optimal_load = float(result[17] or BASELINE_MPG)
-            
+
             # 🆕 Oil Pressure metrics
             low_oil_pressure_count = int(result[18] or 0)
             avg_low_oil_pressure = float(result[19] or 30)
             min_oil_pressure = float(result[20] or 0)
             avg_oil_pressure = float(result[21] or 0)
             oil_pressure_readings = int(result[22] or 0)
-            
+
             # 🆕 Oil Temperature metrics
             high_oil_temp_count = int(result[23] or 0)
             avg_high_oil_temp = float(result[24] or 250)
@@ -3270,7 +3270,11 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
             # 3. 🆕 High Engine Load Impact
             if high_load_count > 0 and total_moving > 0 and mpg_at_high_load > 0:
                 high_load_pct = (high_load_count / total_moving) * 100
-                mpg_loss_load = max(0, mpg_at_optimal_load - mpg_at_high_load) if mpg_at_optimal_load else 0
+                mpg_loss_load = (
+                    max(0, mpg_at_optimal_load - mpg_at_high_load)
+                    if mpg_at_optimal_load
+                    else 0
+                )
                 high_load_miles_est = total_miles * (high_load_pct / 100)
                 extra_gal_load = (
                     (high_load_miles_est / mpg_at_high_load)
@@ -3291,7 +3295,11 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                         "pct_of_time": round(high_load_pct, 1),
                         "mpg_impact": round(mpg_loss_load, 2),
                         "mpg_at_issue": round(mpg_at_high_load, 2),
-                        "mpg_at_optimal": round(mpg_at_optimal_load, 2) if mpg_at_optimal_load else None,
+                        "mpg_at_optimal": (
+                            round(mpg_at_optimal_load, 2)
+                            if mpg_at_optimal_load
+                            else None
+                        ),
                         "extra_gallons": round(extra_gal_load, 1),
                         "extra_cost": round(extra_gal_load * FUEL_PRICE, 2),
                         "data_points": high_load_count,
@@ -3329,10 +3337,17 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                 )
 
             # 5. 🆕 Low Oil Pressure (Mechanical Issue)
-            if low_oil_pressure_count > 0 and oil_pressure_readings > 0:
-                low_oil_pct = (low_oil_pressure_count / oil_pressure_readings) * 100
-                # Low oil pressure causes ~5-10% efficiency loss due to increased friction
-                estimated_mpg_loss = avg_mpg * 0.07  # 7% efficiency loss estimate
+            # Use total readings as base to get realistic percentage
+            total_readings = total_moving + total_idle
+            if low_oil_pressure_count > 0 and total_readings > 0:
+                # Calculate % based on ALL readings, not just oil pressure readings
+                low_oil_pct = (low_oil_pressure_count / total_readings) * 100
+                # Cap the percentage at a reasonable max (can't be >50% low pressure realistically)
+                low_oil_pct = min(low_oil_pct, 25.0)
+                # Low oil pressure causes ~3-5% efficiency loss due to increased friction
+                estimated_mpg_loss = (
+                    avg_mpg * 0.04
+                )  # 4% efficiency loss estimate (more conservative)
                 low_oil_miles_est = total_miles * (low_oil_pct / 100)
                 extra_gal_oil = (
                     low_oil_miles_est / (avg_mpg - estimated_mpg_loss)
@@ -3340,7 +3355,9 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                     if avg_mpg > estimated_mpg_loss
                     else 0
                 )
-                extra_gal_oil = max(0, extra_gal_oil)
+                extra_gal_oil = max(
+                    0, min(extra_gal_oil, total_fuel * 0.10)
+                )  # Cap at 10% of total fuel
 
                 causes.append(
                     {
@@ -3365,10 +3382,13 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                 )
 
             # 6. 🆕 High Oil Temperature (Engine Stress)
-            if high_oil_temp_count > 0 and oil_temp_readings > 0:
-                high_oil_temp_pct = (high_oil_temp_count / oil_temp_readings) * 100
-                # High oil temp causes ~5-8% efficiency loss
-                estimated_mpg_loss = avg_mpg * 0.06
+            if high_oil_temp_count > 0 and total_readings > 0:
+                # Calculate % based on ALL readings
+                high_oil_temp_pct = (high_oil_temp_count / total_readings) * 100
+                # Cap at reasonable max
+                high_oil_temp_pct = min(high_oil_temp_pct, 20.0)
+                # High oil temp causes ~3-5% efficiency loss
+                estimated_mpg_loss = avg_mpg * 0.04
                 high_temp_miles_est = total_miles * (high_oil_temp_pct / 100)
                 extra_gal_temp = (
                     high_temp_miles_est / (avg_mpg - estimated_mpg_loss)
@@ -3376,7 +3396,9 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
                     if avg_mpg > estimated_mpg_loss
                     else 0
                 )
-                extra_gal_temp = max(0, extra_gal_temp)
+                extra_gal_temp = max(
+                    0, min(extra_gal_temp, total_fuel * 0.08)
+                )  # Cap at 8% of total fuel
 
                 causes.append(
                     {
