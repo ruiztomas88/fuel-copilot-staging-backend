@@ -63,6 +63,8 @@ class AlertType(Enum):
 
     REFUEL = "refuel"
     THEFT_SUSPECTED = "theft_suspected"
+    THEFT_CONFIRMED = "theft_confirmed"  # 🆕 Drop that didn't recover
+    SENSOR_ISSUE = "sensor_issue"  # 🆕 Drop that recovered = sensor glitch
     DRIFT_WARNING = "drift_warning"
     SENSOR_OFFLINE = "sensor_offline"
     LOW_FUEL = "low_fuel"
@@ -84,6 +86,357 @@ class Alert:
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = utc_now()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 FUEL EVENT CLASSIFIER v1.0
+# ═══════════════════════════════════════════════════════════════════════════════
+# Differentiates between THEFT, SENSOR_ISSUE, and REFUEL events
+# by tracking fuel drops and monitoring for recovery patterns.
+#
+# Logic:
+# - When fuel drops significantly, we buffer it as "pending_drop"
+# - We wait RECOVERY_WINDOW_MINUTES to see if fuel recovers
+# - If fuel recovers to within RECOVERY_TOLERANCE_PCT → SENSOR_ISSUE
+# - If fuel stays low → THEFT_CONFIRMED
+# - If fuel rises by REFUEL_THRESHOLD → REFUEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class PendingFuelDrop:
+    """Tracks a fuel drop waiting for classification"""
+
+    truck_id: str
+    drop_timestamp: datetime
+    fuel_before: float  # Fuel level before drop (%)
+    fuel_after: float  # Fuel level after drop (%)
+    drop_pct: float  # Percentage dropped
+    drop_gal: float  # Gallons dropped
+    location: Optional[str] = None
+    truck_status: str = "UNKNOWN"  # MOVING, STOPPED, IDLE
+
+    def age_minutes(self) -> float:
+        """Minutes since this drop was detected"""
+        return (utc_now() - self.drop_timestamp).total_seconds() / 60
+
+
+class FuelEventClassifier:
+    """
+    🆕 v1.0 - Intelligent fuel event classification
+
+    Differentiates between:
+    - THEFT: Fuel drop that doesn't recover
+    - SENSOR_ISSUE: Fuel drop that recovers quickly (sensor glitch)
+    - REFUEL: Fuel increase
+
+    Configuration (from .env):
+    - RECOVERY_WINDOW_MINUTES: Time to wait for recovery (default: 10)
+    - RECOVERY_TOLERANCE_PCT: How close recovery must be (default: 5%)
+    - SENSOR_VOLATILITY_THRESHOLD: Max std deviation for "noisy sensor" (default: 8)
+    """
+
+    def __init__(self):
+        # Configuration from environment
+        self.recovery_window_minutes = int(os.getenv("RECOVERY_WINDOW_MINUTES", "10"))
+        self.recovery_tolerance_pct = float(os.getenv("RECOVERY_TOLERANCE_PCT", "5.0"))
+        self.drop_threshold_pct = float(os.getenv("DROP_THRESHOLD_PCT", "10.0"))
+        self.refuel_threshold_pct = float(os.getenv("REFUEL_THRESHOLD_PCT", "8.0"))
+        self.sensor_volatility_threshold = float(
+            os.getenv("SENSOR_VOLATILITY_THRESHOLD", "8.0")
+        )
+
+        # Track pending drops awaiting classification
+        self._pending_drops: Dict[str, PendingFuelDrop] = {}
+
+        # Track recent fuel readings for volatility analysis
+        self._fuel_history: Dict[str, List[tuple]] = (
+            {}
+        )  # truck_id -> [(timestamp, fuel_pct), ...]
+        self._max_history_per_truck = 20
+
+        logger.info(f"🔬 FuelEventClassifier initialized:")
+        logger.info(f"   Recovery window: {self.recovery_window_minutes} min")
+        logger.info(f"   Recovery tolerance: {self.recovery_tolerance_pct}%")
+        logger.info(f"   Drop threshold: {self.drop_threshold_pct}%")
+        logger.info(f"   Volatility threshold: {self.sensor_volatility_threshold}")
+
+    def add_fuel_reading(
+        self, truck_id: str, fuel_pct: float, timestamp: datetime = None
+    ):
+        """Record a fuel reading for volatility analysis"""
+        ts = timestamp or utc_now()
+
+        if truck_id not in self._fuel_history:
+            self._fuel_history[truck_id] = []
+
+        self._fuel_history[truck_id].append((ts, fuel_pct))
+
+        # Keep only recent readings
+        if len(self._fuel_history[truck_id]) > self._max_history_per_truck:
+            self._fuel_history[truck_id] = self._fuel_history[truck_id][
+                -self._max_history_per_truck :
+            ]
+
+    def get_sensor_volatility(self, truck_id: str) -> float:
+        """
+        Calculate sensor volatility (standard deviation) for a truck.
+        High volatility = unreliable sensor readings.
+        """
+        history = self._fuel_history.get(truck_id, [])
+        if len(history) < 5:
+            return 0.0
+
+        values = [v for _, v in history]
+        mean = sum(values) / len(values)
+        variance = sum((v - mean) ** 2 for v in values) / len(values)
+        return variance**0.5
+
+    def register_fuel_drop(
+        self,
+        truck_id: str,
+        fuel_before: float,
+        fuel_after: float,
+        tank_capacity_gal: float = 200.0,
+        location: str = None,
+        truck_status: str = "UNKNOWN",
+    ) -> Optional[str]:
+        """
+        Register a detected fuel drop. Returns immediate classification if possible,
+        or None if we need to wait for recovery window.
+
+        Returns:
+            - "IMMEDIATE_THEFT" if conditions are extreme
+            - None if we need to wait for recovery check
+        """
+        drop_pct = fuel_before - fuel_after
+        drop_gal = drop_pct * tank_capacity_gal / 100
+
+        # Check sensor volatility first
+        volatility = self.get_sensor_volatility(truck_id)
+        if volatility > self.sensor_volatility_threshold:
+            logger.warning(
+                f"🔧 {truck_id}: High sensor volatility ({volatility:.1f}). "
+                f"Drop of {drop_pct:.1f}% likely sensor issue."
+            )
+            # Don't buffer - classify as sensor issue immediately if volatility is very high
+            if volatility > self.sensor_volatility_threshold * 1.5:
+                return "SENSOR_VOLATILE"
+
+        # Buffer this drop for recovery monitoring
+        pending = PendingFuelDrop(
+            truck_id=truck_id,
+            drop_timestamp=utc_now(),
+            fuel_before=fuel_before,
+            fuel_after=fuel_after,
+            drop_pct=drop_pct,
+            drop_gal=drop_gal,
+            location=location,
+            truck_status=truck_status,
+        )
+        self._pending_drops[truck_id] = pending
+
+        logger.info(
+            f"⏳ {truck_id}: Fuel drop of {drop_pct:.1f}% ({drop_gal:.1f} gal) buffered. "
+            f"Waiting {self.recovery_window_minutes} min for recovery check."
+        )
+
+        # Check for extreme theft (very large drop while stopped)
+        if drop_pct > 30 and truck_status == "STOPPED":
+            logger.warning(
+                f"🚨 {truck_id}: EXTREME drop ({drop_pct:.1f}%) while stopped - likely theft"
+            )
+            return "IMMEDIATE_THEFT"
+
+        return None
+
+    def check_recovery(
+        self,
+        truck_id: str,
+        current_fuel_pct: float,
+    ) -> Optional[Dict]:
+        """
+        Check if a pending fuel drop has recovered (sensor issue) or stayed low (theft).
+
+        Returns:
+            Dict with classification result, or None if no pending drop or still waiting
+        """
+        pending = self._pending_drops.get(truck_id)
+        if not pending:
+            return None
+
+        age_minutes = pending.age_minutes()
+
+        # Not enough time has passed yet
+        if age_minutes < self.recovery_window_minutes:
+            return None
+
+        # Check if fuel recovered
+        recovery_pct = current_fuel_pct - pending.fuel_after
+        recovered_to = current_fuel_pct
+        original_level = pending.fuel_before
+
+        # Calculate how close to original level
+        recovery_gap = abs(original_level - recovered_to)
+
+        # Remove from pending
+        del self._pending_drops[truck_id]
+
+        # Classification logic
+        if recovery_gap <= self.recovery_tolerance_pct:
+            # Fuel recovered to near-original level = SENSOR ISSUE
+            classification = "SENSOR_ISSUE"
+            logger.info(
+                f"🔧 {truck_id}: Fuel RECOVERED from {pending.fuel_after:.1f}% to {recovered_to:.1f}% "
+                f"(original: {original_level:.1f}%). Classification: SENSOR_ISSUE"
+            )
+        elif recovery_pct > self.refuel_threshold_pct:
+            # Fuel went UP significantly = REFUEL (not theft)
+            classification = "REFUEL_AFTER_DROP"
+            logger.info(
+                f"⛽ {truck_id}: Fuel INCREASED from {pending.fuel_after:.1f}% to {recovered_to:.1f}%. "
+                f"Classification: REFUEL (not theft)"
+            )
+        else:
+            # Fuel stayed low = CONFIRMED THEFT
+            classification = "THEFT_CONFIRMED"
+            logger.warning(
+                f"🚨 {truck_id}: Fuel stayed at {recovered_to:.1f}% after {age_minutes:.0f} min. "
+                f"Original: {original_level:.1f}%. Classification: THEFT_CONFIRMED"
+            )
+
+        return {
+            "classification": classification,
+            "truck_id": truck_id,
+            "original_fuel_pct": original_level,
+            "drop_fuel_pct": pending.fuel_after,
+            "current_fuel_pct": recovered_to,
+            "drop_pct": pending.drop_pct,
+            "drop_gal": pending.drop_gal,
+            "recovery_pct": recovery_pct,
+            "time_waited_minutes": age_minutes,
+            "location": pending.location,
+            "truck_status": pending.truck_status,
+        }
+
+    def process_fuel_reading(
+        self,
+        truck_id: str,
+        last_fuel_pct: float,
+        current_fuel_pct: float,
+        tank_capacity_gal: float = 200.0,
+        location: str = None,
+        truck_status: str = "UNKNOWN",
+    ) -> Optional[Dict]:
+        """
+        Main entry point: Process a new fuel reading and return any classification.
+
+        This method:
+        1. Records the reading for volatility tracking
+        2. Checks for pending drop recovery
+        3. Detects new drops and buffers them
+        4. Detects refuels
+
+        Returns:
+            Dict with event classification, or None if no event
+        """
+        # Track reading for volatility
+        self.add_fuel_reading(truck_id, current_fuel_pct)
+
+        # First, check if any pending drop has recovered/expired
+        recovery_result = self.check_recovery(truck_id, current_fuel_pct)
+        if recovery_result:
+            return recovery_result
+
+        # Check for refuel (significant increase)
+        increase_pct = current_fuel_pct - last_fuel_pct
+        if increase_pct >= self.refuel_threshold_pct:
+            increase_gal = increase_pct * tank_capacity_gal / 100
+            return {
+                "classification": "REFUEL",
+                "truck_id": truck_id,
+                "increase_pct": increase_pct,
+                "increase_gal": increase_gal,
+                "from_pct": last_fuel_pct,
+                "to_pct": current_fuel_pct,
+                "location": location,
+            }
+
+        # Check for significant drop
+        drop_pct = last_fuel_pct - current_fuel_pct
+        if drop_pct >= self.drop_threshold_pct:
+            immediate = self.register_fuel_drop(
+                truck_id=truck_id,
+                fuel_before=last_fuel_pct,
+                fuel_after=current_fuel_pct,
+                tank_capacity_gal=tank_capacity_gal,
+                location=location,
+                truck_status=truck_status,
+            )
+
+            if immediate == "IMMEDIATE_THEFT":
+                return {
+                    "classification": "THEFT_SUSPECTED",
+                    "truck_id": truck_id,
+                    "drop_pct": drop_pct,
+                    "drop_gal": drop_pct * tank_capacity_gal / 100,
+                    "from_pct": last_fuel_pct,
+                    "to_pct": current_fuel_pct,
+                    "location": location,
+                    "truck_status": truck_status,
+                    "reason": "Extreme drop while stopped",
+                }
+            elif immediate == "SENSOR_VOLATILE":
+                return {
+                    "classification": "SENSOR_ISSUE",
+                    "truck_id": truck_id,
+                    "drop_pct": drop_pct,
+                    "from_pct": last_fuel_pct,
+                    "to_pct": current_fuel_pct,
+                    "reason": "High sensor volatility detected",
+                    "volatility": self.get_sensor_volatility(truck_id),
+                }
+
+            # Drop is buffered, waiting for recovery check
+            return {
+                "classification": "PENDING_VERIFICATION",
+                "truck_id": truck_id,
+                "drop_pct": drop_pct,
+                "message": f"Drop detected, monitoring for {self.recovery_window_minutes} min",
+            }
+
+        return None
+
+    def get_pending_drops(self) -> List[PendingFuelDrop]:
+        """Get all pending drops awaiting classification"""
+        return list(self._pending_drops.values())
+
+    def force_classify_pending(
+        self, truck_id: str, current_fuel_pct: float
+    ) -> Optional[Dict]:
+        """Force classification of a pending drop (for manual intervention)"""
+        pending = self._pending_drops.get(truck_id)
+        if not pending:
+            return None
+
+        # Temporarily set a very long window, then check recovery
+        original_window = self.recovery_window_minutes
+        self.recovery_window_minutes = 0
+        result = self.check_recovery(truck_id, current_fuel_pct)
+        self.recovery_window_minutes = original_window
+        return result
+
+
+# Global classifier instance
+_fuel_classifier: Optional[FuelEventClassifier] = None
+
+
+def get_fuel_classifier() -> FuelEventClassifier:
+    """Get or create the global FuelEventClassifier instance"""
+    global _fuel_classifier
+    if _fuel_classifier is None:
+        _fuel_classifier = FuelEventClassifier()
+    return _fuel_classifier
 
 
 @dataclass
@@ -419,6 +772,8 @@ class AlertManager:
         type_emoji = {
             AlertType.REFUEL: "⛽",
             AlertType.THEFT_SUSPECTED: "🚨",
+            AlertType.THEFT_CONFIRMED: "🆘",  # 🆕
+            AlertType.SENSOR_ISSUE: "🔧",  # 🆕
             AlertType.DRIFT_WARNING: "📉",
             AlertType.SENSOR_OFFLINE: "📵",
             AlertType.LOW_FUEL: "🔋",
@@ -541,6 +896,73 @@ class AlertManager:
             },
         )
         return self.send_alert(alert, channels=["sms", "email"])  # 🆕 Added email
+
+    def alert_theft_confirmed(
+        self,
+        truck_id: str,
+        fuel_drop_gallons: float,
+        fuel_drop_pct: float,
+        time_waited_minutes: float,
+        location: str = None,
+    ) -> bool:
+        """
+        🆕 Send CONFIRMED theft alert (fuel drop that didn't recover)
+        CRITICAL priority - SMS + Email
+        """
+        alert = Alert(
+            alert_type=AlertType.THEFT_CONFIRMED,
+            priority=AlertPriority.CRITICAL,
+            truck_id=truck_id,
+            message=f"🆘 FUEL THEFT CONFIRMED!\n"
+            f"Drop: {fuel_drop_gallons:.1f} gal ({fuel_drop_pct:.1f}%)\n"
+            f"Fuel did NOT recover after {time_waited_minutes:.0f} minutes.\n"
+            f"ACTION REQUIRED: Investigate immediately!",
+            details={
+                "fuel_drop_gallons": f"{fuel_drop_gallons:.1f}",
+                "fuel_drop_pct": f"{fuel_drop_pct:.1f}%",
+                "verification_time": f"{time_waited_minutes:.0f} min",
+                "location": location or "Unknown",
+                "action": "INVESTIGATE IMMEDIATELY",
+            },
+        )
+        return self.send_alert(alert, channels=["sms", "email"])
+
+    def alert_sensor_issue(
+        self,
+        truck_id: str,
+        drop_pct: float,
+        drop_gal: float,
+        recovery_info: str = None,
+        volatility: float = None,
+    ) -> bool:
+        """
+        🆕 Send sensor issue alert (fuel drop that recovered = sensor glitch)
+        MEDIUM priority - Email only (no SMS spam)
+        """
+        details = {
+            "drop_detected": f"{drop_pct:.1f}% ({drop_gal:.1f} gal)",
+            "status": "RECOVERED - Likely sensor malfunction",
+            "action": "Schedule sensor inspection/calibration",
+        }
+
+        if volatility is not None:
+            details["sensor_volatility"] = f"{volatility:.1f} (high = unreliable)"
+
+        if recovery_info:
+            details["recovery_details"] = recovery_info
+
+        alert = Alert(
+            alert_type=AlertType.SENSOR_ISSUE,
+            priority=AlertPriority.MEDIUM,
+            truck_id=truck_id,
+            message=f"🔧 SENSOR ISSUE DETECTED\n"
+            f"Fuel dropped {drop_pct:.1f}% but recovered.\n"
+            f"This is NOT theft - sensor needs inspection.\n"
+            f"Schedule maintenance to check fuel level sensor.",
+            details=details,
+        )
+        # Email only - don't spam SMS for sensor issues
+        return self.send_alert(alert, channels=["email"])
 
     def alert_refuel(
         self,
@@ -669,9 +1091,35 @@ def get_alert_manager() -> AlertManager:
 def send_theft_alert(
     truck_id: str, fuel_drop_gallons: float, fuel_drop_pct: float, location: str = None
 ) -> bool:
-    """Quick function to send theft alert"""
+    """Quick function to send theft SUSPECTED alert"""
     return get_alert_manager().alert_theft_suspected(
         truck_id, fuel_drop_gallons, fuel_drop_pct, location
+    )
+
+
+def send_theft_confirmed_alert(
+    truck_id: str,
+    fuel_drop_gallons: float,
+    fuel_drop_pct: float,
+    time_waited_minutes: float,
+    location: str = None,
+) -> bool:
+    """🆕 Quick function to send CONFIRMED theft alert (drop didn't recover)"""
+    return get_alert_manager().alert_theft_confirmed(
+        truck_id, fuel_drop_gallons, fuel_drop_pct, time_waited_minutes, location
+    )
+
+
+def send_sensor_issue_alert(
+    truck_id: str,
+    drop_pct: float,
+    drop_gal: float,
+    recovery_info: str = None,
+    volatility: float = None,
+) -> bool:
+    """🆕 Quick function to send sensor issue alert (drop recovered = sensor glitch)"""
+    return get_alert_manager().alert_sensor_issue(
+        truck_id, drop_pct, drop_gal, recovery_info, volatility
     )
 
 

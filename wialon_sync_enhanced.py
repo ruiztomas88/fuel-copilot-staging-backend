@@ -46,6 +46,14 @@ from idle_engine import (
 )
 from wialon_reader import WialonReader, WialonConfig, TRUCK_UNIT_MAPPING
 
+# 🆕 v3.12.27: Import fuel event classifier for theft/sensor differentiation
+from alert_service import (
+    get_fuel_classifier,
+    get_alert_manager,
+    send_theft_confirmed_alert,
+    send_sensor_issue_alert,
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1373,6 +1381,89 @@ def sync_cycle(
                             fuel_after=finalized["end_pct"],
                             timestamp_utc=finalized["timestamp"],
                         )
+
+                # 🆕 v3.12.27: Process fuel events with intelligent classification
+                # This differentiates THEFT from SENSOR_ISSUE by monitoring recovery
+                try:
+                    fuel_classifier = get_fuel_classifier()
+                    last_sensor = metrics.get("fuel_before_pct") or 0
+                    current_sensor = metrics.get("sensor_pct") or 0
+
+                    if last_sensor > 0 and current_sensor > 0:
+                        location = None
+                        if metrics.get("latitude") and metrics.get("longitude"):
+                            location = f"({metrics['latitude']:.4f}, {metrics['longitude']:.4f})"
+
+                        # Get tank capacity for this truck
+                        tank_cap = TANK_CAPACITIES.get(
+                            truck_id, TANK_CAPACITIES.get("default", 200.0)
+                        )
+
+                        fuel_event = fuel_classifier.process_fuel_reading(
+                            truck_id=truck_id,
+                            last_fuel_pct=last_sensor,
+                            current_fuel_pct=current_sensor,
+                            tank_capacity_gal=tank_cap,
+                            location=location,
+                            truck_status=metrics.get("truck_status", "UNKNOWN"),
+                        )
+
+                        if fuel_event:
+                            classification = fuel_event.get("classification")
+
+                            if classification == "THEFT_CONFIRMED":
+                                # Fuel stayed low - confirmed theft
+                                logger.warning(
+                                    f"🚨 {truck_id}: THEFT CONFIRMED - sending alert"
+                                )
+                                send_theft_confirmed_alert(
+                                    truck_id=truck_id,
+                                    fuel_drop_gallons=fuel_event.get("drop_gal", 0),
+                                    fuel_drop_pct=fuel_event.get("drop_pct", 0),
+                                    time_waited_minutes=fuel_event.get(
+                                        "time_waited_minutes", 0
+                                    ),
+                                    location=location,
+                                )
+
+                            elif classification == "SENSOR_ISSUE":
+                                # Fuel recovered - sensor problem
+                                logger.info(
+                                    f"🔧 {truck_id}: SENSOR ISSUE detected - sending maintenance alert"
+                                )
+                                recovery_info = (
+                                    f"Dropped from {fuel_event.get('original_fuel_pct', 0):.1f}% "
+                                    f"to {fuel_event.get('drop_fuel_pct', 0):.1f}%, "
+                                    f"recovered to {fuel_event.get('current_fuel_pct', 0):.1f}%"
+                                )
+                                send_sensor_issue_alert(
+                                    truck_id=truck_id,
+                                    drop_pct=fuel_event.get("drop_pct", 0),
+                                    drop_gal=fuel_event.get("drop_gal", 0),
+                                    recovery_info=recovery_info,
+                                    volatility=fuel_classifier.get_sensor_volatility(
+                                        truck_id
+                                    ),
+                                )
+
+                            elif classification == "THEFT_SUSPECTED":
+                                # Extreme drop while stopped - immediate alert
+                                logger.warning(
+                                    f"🚨 {truck_id}: THEFT SUSPECTED (extreme drop)"
+                                )
+                                # This is handled by the old system already
+
+                            elif classification == "PENDING_VERIFICATION":
+                                # Drop detected, waiting for recovery check
+                                logger.info(f"⏳ {truck_id}: Drop pending verification")
+
+                            # Log all classified events
+                            logger.debug(
+                                f"📊 {truck_id}: Fuel event classified as {classification}"
+                            )
+
+                except Exception as e:
+                    logger.error(f"Error in fuel classifier for {truck_id}: {e}")
 
                 # Log with details
                 status_emoji = {
