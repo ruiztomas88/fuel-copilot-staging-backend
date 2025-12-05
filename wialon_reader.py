@@ -69,12 +69,16 @@ class WialonConfig:
         "obd_speed": "obd_speed",  # Engine Speed
         "engine_hours": "engine_hours",  # Engine Hours
         "pwr_ext": "pwr_ext",  # External Power (Voltage)
-        "oil_press": "oil_press",  # Oil Pressure
+        "oil_press": "oil_press",  # Oil Pressure (psi)
         # 🆕 NEW SENSORS for improved Kalman accuracy
         "total_fuel_used": "total_fuel_used",  # ECU cumulative fuel counter (gallons)
         "total_idle_fuel": "total_idle_fuel",  # ECU idle fuel counter
         "engine_load": "engine_load",  # Engine load % (indicates effort)
         "ambient_temp": "air_temp",  # Ambient temperature
+        # 🆕 v3.12.26: Engine Health sensors from Pacific Track
+        "oil_temp": "oil_temp",  # Oil Temperature (°F)
+        "def_level": "def_lvl",  # DEF Level (%)
+        "intake_air_temp": "intake_air_temp",  # Intake Air Temperature (°F)
     }
 
 
@@ -107,6 +111,10 @@ class TruckSensorData:
     total_idle_fuel: Optional[float] = None  # ECU idle fuel (gallons)
     engine_load: Optional[float] = None  # Engine load % (0-100)
     ambient_temp: Optional[float] = None  # Ambient temperature °F
+    # 🆕 v3.12.26: Engine Health sensors
+    oil_temp: Optional[float] = None  # Oil Temperature °F
+    def_level: Optional[float] = None  # DEF Level %
+    intake_air_temp: Optional[float] = None  # Intake Air Temperature °F
 
     def __post_init__(self):
         """Ensure timestamp is timezone-aware"""
@@ -556,6 +564,10 @@ class WialonReader:
                             total_idle_fuel=sensor_data.get("total_idle_fuel"),
                             engine_load=sensor_data.get("engine_load"),
                             ambient_temp=sensor_data.get("ambient_temp"),
+                            # 🆕 v3.12.26: Engine Health sensors
+                            oil_temp=sensor_data.get("oil_temp"),
+                            def_level=sensor_data.get("def_level"),
+                            intake_air_temp=sensor_data.get("intake_air_temp"),
                         )
                         all_data.append(truck_data)
                         trucks_with_data.add(truck_id)

@@ -897,11 +897,11 @@ def process_truck(
     total_fuel_used = sensor_data.get("total_fuel_used")  # Gallons (ECU counter)
     pwr_ext = sensor_data.get("pwr_ext")  # Battery voltage (V)
     engine_load = sensor_data.get("engine_load")  # Engine load %
-    
-    # New sensors for enhanced monitoring
-    oil_pressure = sensor_data.get("oil_pressure")  # PSI
-    oil_temp = sensor_data.get("oil_temp")  # °F
-    def_level = sensor_data.get("def_level")  # DEF level percentage
+    # 🆕 v3.12.26: Engine Health sensors
+    oil_press = sensor_data.get("oil_press")  # Oil Pressure (psi)
+    oil_temp = sensor_data.get("oil_temp")  # Oil Temperature (°F)
+    def_level = sensor_data.get("def_level")  # DEF Level (%)
+    intake_air_temp = sensor_data.get("intake_air_temp")  # Intake Air Temp (°F)
 
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
@@ -1159,6 +1159,13 @@ def process_truck(
         # Refuel event details for persistence and notifications
         "refuel_event": refuel_event,
         "fuel_before_pct": estimator.last_fuel_lvl_pct if refuel_event else None,
+        # 🆕 v3.12.26: Engine Health sensors
+        "oil_pressure_psi": oil_press,
+        "oil_temp_f": oil_temp,
+        "battery_voltage": pwr_ext,
+        "engine_load_pct": engine_load,
+        "def_level_pct": def_level,
+        "intake_air_temp_f": intake_air_temp,
     }
 
 
@@ -1189,8 +1196,8 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  altitude_ft, hdop, coolant_temp_f,
                  idle_method, idle_mode, drift_pct, drift_warning,
                  anchor_detected, anchor_type, data_age_min,
-                 oil_pressure_psi, battery_voltage, engine_load_pct,
-                 oil_temp_f, def_level_pct)
+                 oil_pressure_psi, oil_temp_f, battery_voltage, 
+                 engine_load_pct, def_level_pct)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
@@ -1218,9 +1225,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     drift_warning = VALUES(drift_warning),
                     data_age_min = VALUES(data_age_min),
                     oil_pressure_psi = VALUES(oil_pressure_psi),
+                    oil_temp_f = VALUES(oil_temp_f),
                     battery_voltage = VALUES(battery_voltage),
                     engine_load_pct = VALUES(engine_load_pct),
-                    oil_temp_f = VALUES(oil_temp_f),
                     def_level_pct = VALUES(def_level_pct)
             """
 
@@ -1254,10 +1261,11 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 metrics["anchor_detected"],
                 metrics["anchor_type"],
                 metrics["data_age_min"],
+                # 🆕 v3.12.26: Engine Health sensors
                 metrics.get("oil_pressure_psi"),
+                metrics.get("oil_temp_f"),
                 metrics.get("battery_voltage"),
                 metrics.get("engine_load_pct"),
-                metrics.get("oil_temp_f"),
                 metrics.get("def_level_pct"),
             )
 
