@@ -263,6 +263,7 @@ def get_refuel_history(
     🔧 FIX v3.9.2: Now uses SQLAlchemy connection pooling
     🔧 FIX v3.10.13: Consolidate BY DAY - one refuel per truck per day
                      Minimum 40 gal threshold to filter sensor noise
+    🔧 FIX v3.12.21: Also read from refuel_events table (where detected refuels are saved)
 
     Returns: List of dicts matching RefuelEvent model:
         - truck_id: str
@@ -274,6 +275,72 @@ def get_refuel_history(
         - fuel_level_after: float (optional)
     """
 
+    # First, try to get from refuel_events table (where detected refuels are saved)
+    refuel_events_query = text("""
+        SELECT 
+            truck_id,
+            timestamp_utc,
+            gallons_added as refuel_gallons,
+            fuel_after as fuel_level_after_pct,
+            fuel_before as fuel_level_before_pct,
+            refuel_type,
+            confidence
+        FROM refuel_events
+        WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
+        {truck_filter}
+        ORDER BY timestamp_utc DESC
+    """.format(truck_filter="AND truck_id = :truck_id" if truck_id else ""))
+    
+    params = {"days_back": days_back}
+    if truck_id:
+        params["truck_id"] = truck_id
+
+    try:
+        engine = get_sqlalchemy_engine()
+        with engine.connect() as conn:
+            result = conn.execute(refuel_events_query, params)
+            refuel_events_rows = result.mappings().all()
+            
+            if refuel_events_rows:
+                logger.info(f"Found {len(refuel_events_rows)} refuels in refuel_events table")
+                
+                consolidated_results = []
+                for row in refuel_events_rows:
+                    ts = row["timestamp_utc"]
+                    if isinstance(ts, str):
+                        ts = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                    
+                    gallons = float(row.get("refuel_gallons", 0) or 0)
+                    fuel_after = float(row.get("fuel_level_after_pct", 0) or 0)
+                    fuel_before = float(row.get("fuel_level_before_pct", 0) or 0)
+                    
+                    # Convert fuel_after from gallons to percentage if needed
+                    # The refuel_events table stores actual percentage values
+                    if fuel_after > 100:
+                        # It's in gallons, convert to percentage assuming 200 gal tank
+                        fuel_after_pct = (fuel_after / 200) * 100
+                    else:
+                        fuel_after_pct = fuel_after
+                    
+                    refuel_event = {
+                        "truck_id": row["truck_id"],
+                        "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S"),
+                        "date": ts.strftime("%Y-%m-%d"),
+                        "time": ts.strftime("%H:%M:%S"),
+                        "gallons": round(gallons, 1),
+                        "liters": round(gallons * 3.78541, 1),
+                        "fuel_level_after": round(fuel_after_pct, 1) if fuel_after_pct > 0 else None,
+                        "fuel_level_before": round(fuel_before, 1) if fuel_before > 0 else None,
+                        "source": "refuel_events",
+                    }
+                    consolidated_results.append(refuel_event)
+                
+                return consolidated_results
+
+    except Exception as e:
+        logger.warning(f"Could not read from refuel_events table: {e}")
+
+    # Fallback: read from fuel_metrics table
     if truck_id:
         query = text(
             """
