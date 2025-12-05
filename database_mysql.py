@@ -2168,6 +2168,7 @@ def test_connection() -> bool:
 def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
     """
     🆕 v3.10.3: World-Class Refuel Analytics Dashboard
+    🔧 v3.12.25: Now reads from refuel_events table (where wialon_sync saves detected refuels)
 
     Provides comprehensive refuel intelligence:
     1. Refuel Events Timeline with precise gallons calculation
@@ -2179,63 +2180,52 @@ def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
     """
     FUEL_PRICE = FUEL.PRICE_PER_GALLON
 
-    # Query 1: All refuel events with detailed metrics
+    # 🔧 v3.12.25: Query from refuel_events table (where detected refuels are saved)
+    # This table is populated by wialon_sync_service when it detects refuel events
     refuel_query = text(
         """
         SELECT 
-            fm.truck_id,
-            fm.timestamp_utc,
-            fm.refuel_gallons,
-            fm.estimated_pct as fuel_after_pct,
-            fm.estimated_gallons as fuel_after_gal,
-            fm.sensor_pct as sensor_after_pct,
-            fm.truck_status,
-            fm.speed_mph,
-            fm.odometer_mi,
-            fm.altitude_ft,
-            -- Get previous record for fuel_before calculation
-            LAG(fm.estimated_pct) OVER (PARTITION BY fm.truck_id ORDER BY fm.timestamp_utc) as fuel_before_pct,
-            LAG(fm.estimated_gallons) OVER (PARTITION BY fm.truck_id ORDER BY fm.timestamp_utc) as fuel_before_gal,
-            LAG(fm.sensor_pct) OVER (PARTITION BY fm.truck_id ORDER BY fm.timestamp_utc) as sensor_before_pct,
-            LAG(fm.timestamp_utc) OVER (PARTITION BY fm.truck_id ORDER BY fm.timestamp_utc) as prev_timestamp,
-            LAG(fm.odometer_mi) OVER (PARTITION BY fm.truck_id ORDER BY fm.timestamp_utc) as prev_odometer
-        FROM fuel_metrics fm
-        WHERE fm.timestamp_utc > NOW() - INTERVAL :days_back DAY
-          AND fm.refuel_gallons > 0
-        ORDER BY fm.timestamp_utc DESC
+            truck_id,
+            timestamp_utc,
+            gallons_added as refuel_gallons,
+            fuel_after,
+            fuel_before,
+            refuel_type,
+            confidence
+        FROM refuel_events
+        WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
+        ORDER BY timestamp_utc DESC
     """
     )
 
-    # Query 2: Summary statistics per truck
+    # Query 2: Summary statistics per truck from refuel_events
     summary_query = text(
         """
         SELECT 
             truck_id,
             COUNT(*) as refuel_count,
-            SUM(refuel_gallons) as total_gallons,
-            AVG(refuel_gallons) as avg_gallons,
-            MIN(refuel_gallons) as min_gallons,
-            MAX(refuel_gallons) as max_gallons,
-            AVG(estimated_pct) as avg_fuel_level_after
-        FROM fuel_metrics
+            SUM(gallons_added) as total_gallons,
+            AVG(gallons_added) as avg_gallons,
+            MIN(gallons_added) as min_gallons,
+            MAX(gallons_added) as max_gallons,
+            AVG(fuel_after) as avg_fuel_level_after
+        FROM refuel_events
         WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
-          AND refuel_gallons > 0
         GROUP BY truck_id
         ORDER BY total_gallons DESC
     """
     )
 
-    # Query 3: Pattern analysis (hour of day, day of week)
+    # Query 3: Pattern analysis (hour of day, day of week) from refuel_events
     pattern_query = text(
         """
         SELECT 
             HOUR(timestamp_utc) as hour_of_day,
             DAYOFWEEK(timestamp_utc) as day_of_week,
             COUNT(*) as refuel_count,
-            SUM(refuel_gallons) as total_gallons
-        FROM fuel_metrics
+            SUM(gallons_added) as total_gallons
+        FROM refuel_events
         WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
-          AND refuel_gallons > 0
         GROUP BY HOUR(timestamp_utc), DAYOFWEEK(timestamp_utc)
         ORDER BY hour_of_day
     """
@@ -2258,92 +2248,33 @@ def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
             if not refuel_results:
                 return _empty_advanced_refuel_analytics(days_back, FUEL_PRICE)
 
-            # Process refuel events - CONSOLIDATE BY DAY
-            # 🔧 v3.10.13: Consolidate all refuel records from same day as ONE refuel
-            # This fixes false positives from sensor oscillations throughout the day
+            # 🔧 v3.12.25: Process events directly from refuel_events table
+            # No need for complex consolidation - wialon_sync already does this
             refuel_events = []
             anomalies = []
             total_gallons = 0
             total_cost = 0
 
-            # First pass: collect all events per truck PER DAY
-            truck_day_refuels = {}  # (truck_id, date) -> list of (timestamp, row)
             for row in refuel_results:
                 truck_id = row[0]
                 timestamp = row[1]
-                day_key = (
-                    truck_id,
-                    timestamp.strftime("%Y-%m-%d") if timestamp else "unknown",
-                )
-                if day_key not in truck_day_refuels:
-                    truck_day_refuels[day_key] = []
-                truck_day_refuels[day_key].append((timestamp, row))
-
-            # Second pass: take the LARGEST single refuel from each day
-            # This represents the actual fuel purchase, not oscillation artifacts
-
-            for (truck_id, date_str), day_records in truck_day_refuels.items():
-                # Sort by timestamp
-                day_records.sort(key=lambda x: x[0])
-
-                # Find the record with the LARGEST refuel_gallons for this day
-                # This is most likely the actual refuel event
-                best_record = max(day_records, key=lambda x: float(x[1][2] or 0))
-                best_ts, best_row = best_record
-
-                # Use the largest single refuel amount (not sum)
-                refuel_gallons_val = float(best_row[2] or 0)
-
-                # 🔧 v3.10.13: Skip amounts below 40 gal (~$140) - likely sensor noise
-                if refuel_gallons_val < 40:
-                    continue
-
-                # Get fuel levels from the best record
-                fuel_after_pct = float(best_row[3] or 0)
-
-                # 🔧 v3.12.0: Lowered threshold from 55% to 40% to capture partial refuels
-                # A real refuel should result in fuel > 40% (allows emergency/partial fills)
-                if fuel_after_pct < 40:
-                    continue
-
-                # Cap at reasonable max
-                total_group_gallons = min(refuel_gallons_val, 200.0)
-
-                fuel_after_gal = float(best_row[4] or 0)
-                sensor_after_pct = float(best_row[5] or 0)
-                truck_status = best_row[6]
-                speed_mph = float(best_row[7] or 0)
-                odometer = float(best_row[8] or 0)
-                altitude = float(best_row[9] or 0)
-                fuel_before_pct = float(best_row[10] or 0)
-                fuel_before_gal = float(
-                    best_row[11] or 0
-                )  # 🆕 v3.10.15: Add fuel_before in gallons
-                prev_timestamp = best_row[13]
-                prev_odometer = float(best_row[14] or 0)
+                refuel_gallons = float(row[2] or 0)
+                fuel_after_pct = float(row[3] or 0)
+                fuel_before_pct = float(row[4] or 0)
+                refuel_type = row[5] or "NORMAL"
+                confidence = float(row[6] or 0)
 
                 # Calculate derived metrics
-                cost = total_group_gallons * FUEL_PRICE
-                total_gallons += total_group_gallons
+                cost = refuel_gallons * FUEL_PRICE
+                total_gallons += refuel_gallons
                 total_cost += cost
 
-                # Miles since last record
-                miles_since_last = (
-                    max(0, odometer - prev_odometer) if prev_odometer else 0
-                )
-
-                # Time since last reading
-                if prev_timestamp and best_ts:
-                    time_gap_minutes = (best_ts - prev_timestamp).total_seconds() / 60
-                else:
-                    time_gap_minutes = 0
-
-                # Calculate fill type
+                # Calculate fill type based on fuel_after percentage
                 if fuel_after_pct >= 95:
                     fill_type = "LLENO COMPLETO"
                 elif fuel_after_pct >= 80:
                     fill_type = "LLENO PARCIAL"
-                elif total_group_gallons < 50:
+                elif refuel_gallons < 50:
                     fill_type = "RECARGA PEQUEÑA"
                 else:
                     fill_type = "RECARGA NORMAL"
@@ -2352,48 +2283,45 @@ def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
                 anomaly_flags = []
                 if fuel_after_pct > 100:
                     anomaly_flags.append("SOBRE-LLENADO")
-                if speed_mph > 5:
-                    anomaly_flags.append("RECARGA EN MOVIMIENTO")
-                if total_group_gallons > 180:
+                if refuel_gallons > 180:
                     anomaly_flags.append("CANTIDAD MUY GRANDE")
-                if sensor_after_pct and abs(sensor_after_pct - fuel_after_pct) > 15:
-                    anomaly_flags.append("DISCREPANCIA SENSOR")
+                if confidence < 0.8:
+                    anomaly_flags.append("BAJA CONFIANZA")
+
+                date_str = timestamp.strftime("%Y-%m-%d") if timestamp else ""
+                time_str = timestamp.strftime("%H:%M") if timestamp else ""
 
                 event = {
                     "truck_id": truck_id,
                     "timestamp": (
-                        best_ts.strftime("%Y-%m-%d %H:%M:%S") if best_ts else None
+                        timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else None
                     ),
                     "date": date_str,
-                    "time": best_ts.strftime("%H:%M") if best_ts else None,
-                    "gallons": round(total_group_gallons, 1),
-                    "liters": round(total_group_gallons * 3.78541, 1),
+                    "time": time_str,
+                    "gallons": round(refuel_gallons, 1),
+                    "liters": round(refuel_gallons * 3.78541, 1),
                     "cost_usd": round(cost, 2),
                     "fuel_before_pct": (
                         round(fuel_before_pct, 1) if fuel_before_pct else None
                     ),
                     "fuel_after_pct": round(fuel_after_pct, 1),
-                    "fuel_before_gal": (
-                        round(fuel_before_gal, 1) if fuel_before_gal else None
-                    ),
-                    "fuel_after_gal": (
-                        round(fuel_after_gal, 1) if fuel_after_gal else None
-                    ),
+                    "fuel_before_gal": None,  # Not available in refuel_events
+                    "fuel_after_gal": None,  # Not available in refuel_events
                     "fuel_added_pct": (
                         round(fuel_after_pct - fuel_before_pct, 1)
                         if fuel_before_pct
                         else None
                     ),
-                    "sensor_pct": (
-                        round(sensor_after_pct, 1) if sensor_after_pct else None
-                    ),
+                    "sensor_pct": None,  # Not available in refuel_events
                     "fill_type": fill_type,
-                    "miles_since_last": round(miles_since_last, 1),
-                    "time_gap_minutes": round(time_gap_minutes, 0),
-                    "altitude_ft": round(altitude, 0),
+                    "refuel_type": refuel_type,
+                    "confidence": round(confidence, 2),
+                    "miles_since_last": 0,  # Not tracked in refuel_events
+                    "time_gap_minutes": 0,  # Not tracked in refuel_events
+                    "altitude_ft": 0,  # Not tracked in refuel_events
                     "anomalies": anomaly_flags,
                     "has_anomaly": len(anomaly_flags) > 0,
-                    "consolidated_from": len(day_records),  # Records this day
+                    "consolidated_from": 1,
                 }
                 refuel_events.append(event)
 
@@ -2405,10 +2333,7 @@ def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
                             "gallons": event["gallons"],
                             "flags": anomaly_flags,
                             "severity": (
-                                "ALTA"
-                                if "SOBRE-LLENADO" in anomaly_flags
-                                or "RECARGA EN MOVIMIENTO" in anomaly_flags
-                                else "MEDIA"
+                                "ALTA" if "SOBRE-LLENADO" in anomaly_flags else "MEDIA"
                             ),
                         }
                     )
