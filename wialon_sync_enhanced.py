@@ -1148,12 +1148,6 @@ def process_truck(
         "anchor_detected": anchor_detected,
         "anchor_type": anchor_type,
         "data_age_min": round(data_age_min, 2),
-        # New sensor fields
-        "oil_pressure_psi": oil_pressure,
-        "battery_voltage": pwr_ext,
-        "engine_load_pct": engine_load,
-        "oil_temp_f": oil_temp,
-        "def_level_pct": def_level,
         "refuel_detected": "YES" if refuel_event else "NO",
         "theft_detected": "YES" if theft_event else "NO",
         # Refuel event details for persistence and notifications

@@ -77,7 +77,7 @@ class WialonConfig:
         "ambient_temp": "air_temp",  # Ambient temperature
         # 🆕 v3.12.26: Engine Health sensors from Pacific Track
         "oil_temp": "oil_temp",  # Oil Temperature (°F)
-        "def_level": "def_lvl",  # DEF Level (%)
+        "def_level": "def_level",  # DEF Level (%) - Fixed: was def_lvl
         "intake_air_temp": "intake_air_temp",  # Intake Air Temperature (°F)
     }
 
