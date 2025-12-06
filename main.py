@@ -2061,6 +2061,37 @@ async def get_inefficiency_causes_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/fuelAnalytics/api/analytics/inefficiency-by-truck")
+async def get_inefficiency_by_truck_endpoint(
+    days: int = Query(30, ge=1, le=365, description="Days of history to analyze"),
+    sort_by: str = Query(
+        "total_cost",
+        description="Sort by: total_cost, high_load, high_speed, idle, low_mpg, high_rpm",
+    ),
+):
+    """
+    🆕 v3.12.33: Get inefficiency breakdown BY TRUCK with all causes.
+
+    Returns each truck with their specific inefficiency causes and costs,
+    sorted by the specified metric.
+
+    Useful for:
+    - Identifying which trucks need attention
+    - Driver coaching targets
+    - Maintenance prioritization
+    - Route optimization candidates
+    """
+    try:
+        from database_mysql import get_inefficiency_by_truck
+
+        result = get_inefficiency_by_truck(days_back=days, sort_by=sort_by)
+        return result
+
+    except Exception as e:
+        logger.error(f"Inefficiency by truck error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 GEOFENCING ENDPOINTS (v3.12.0)
 # ═══════════════════════════════════════════════════════════════════════════════

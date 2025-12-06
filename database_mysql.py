@@ -4722,3 +4722,387 @@ def get_sensor_coverage_report() -> Dict:
             "coverage_pct": {},
             "trucks": [],
         }
+
+
+def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") -> Dict:
+    """
+    🆕 v3.12.33: Get inefficiency breakdown BY TRUCK with all causes.
+
+    Returns each truck with their specific inefficiency causes and costs,
+    sorted by the specified metric.
+
+    Args:
+        days_back: Days of history to analyze
+        sort_by: Sort metric - 'total_cost', 'high_load', 'idle', 'high_speed', 'low_mpg'
+
+    Returns:
+        Dict with fleet summary and per-truck breakdown
+    """
+    engine = get_sqlalchemy_engine()
+    FUEL_PRICE = 3.50
+    BASELINE_MPG = 5.7
+    BASELINE_IDLE_GPH = 0.8
+    OPTIMAL_SPEED_MAX = 65.0
+    OPTIMAL_RPM_MAX = 1600
+    OPTIMAL_LOAD_MAX = 80
+    LOW_OIL_PRESSURE = 35
+    HIGH_OIL_TEMP = 240
+
+    try:
+        with engine.connect() as conn:
+            query = text(
+                """
+                SELECT 
+                    truck_id,
+                    
+                    -- Basic metrics
+                    COUNT(*) as total_readings,
+                    COUNT(CASE WHEN truck_status = 'MOVING' THEN 1 END) as moving_readings,
+                    COUNT(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN 1 END) as idle_readings,
+                    MAX(odometer_mi) - MIN(odometer_mi) as total_miles,
+                    AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
+                    
+                    -- High Speed (>65 mph)
+                    COUNT(CASE WHEN truck_status = 'MOVING' AND speed_mph > :speed_max THEN 1 END) as high_speed_count,
+                    AVG(CASE WHEN truck_status = 'MOVING' AND speed_mph > :speed_max THEN speed_mph END) as avg_high_speed,
+                    AVG(CASE WHEN truck_status = 'MOVING' AND speed_mph > :speed_max THEN mpg_current END) as mpg_at_high_speed,
+                    AVG(CASE WHEN truck_status = 'MOVING' AND speed_mph BETWEEN 55 AND 65 THEN mpg_current END) as mpg_at_optimal_speed,
+                    
+                    -- High RPM (>1600)
+                    COUNT(CASE WHEN rpm > :rpm_max THEN 1 END) as high_rpm_count,
+                    AVG(CASE WHEN rpm > :rpm_max THEN rpm END) as avg_high_rpm,
+                    AVG(CASE WHEN rpm > :rpm_max THEN mpg_current END) as mpg_at_high_rpm,
+                    AVG(CASE WHEN rpm BETWEEN 1200 AND 1600 THEN mpg_current END) as mpg_at_optimal_rpm,
+                    
+                    -- High Engine Load (>80%)
+                    COUNT(CASE WHEN engine_load_pct > :load_max THEN 1 END) as high_load_count,
+                    AVG(CASE WHEN engine_load_pct > :load_max THEN engine_load_pct END) as avg_high_load,
+                    AVG(CASE WHEN engine_load_pct > :load_max THEN mpg_current END) as mpg_at_high_load,
+                    AVG(CASE WHEN engine_load_pct BETWEEN 30 AND 60 THEN mpg_current END) as mpg_at_optimal_load,
+                    
+                    -- Idle
+                    SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN consumption_gph / 60.0 END) as idle_fuel_gal,
+                    AVG(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN consumption_gph END) as avg_idle_gph,
+                    
+                    -- Low Oil Pressure (<35 PSI)
+                    COUNT(CASE WHEN oil_pressure_psi < :low_oil_psi AND oil_pressure_psi > 0 THEN 1 END) as low_oil_count,
+                    MIN(CASE WHEN oil_pressure_psi > 0 THEN oil_pressure_psi END) as min_oil_psi,
+                    
+                    -- High Oil Temp (>240°F)
+                    COUNT(CASE WHEN oil_temp_f > :high_oil_temp THEN 1 END) as high_oil_temp_count,
+                    MAX(oil_temp_f) as max_oil_temp
+                    
+                FROM fuel_metrics
+                WHERE timestamp_utc > NOW() - INTERVAL :days DAY
+                GROUP BY truck_id
+                HAVING COUNT(*) > 100
+                ORDER BY truck_id
+            """
+            )
+
+            result = conn.execute(
+                query,
+                {
+                    "days": days_back,
+                    "speed_max": OPTIMAL_SPEED_MAX,
+                    "rpm_max": OPTIMAL_RPM_MAX,
+                    "load_max": OPTIMAL_LOAD_MAX,
+                    "low_oil_psi": LOW_OIL_PRESSURE,
+                    "high_oil_temp": HIGH_OIL_TEMP,
+                },
+            )
+
+            trucks_data = []
+            fleet_totals = {
+                "total_cost": 0.0,
+                "high_load_cost": 0.0,
+                "high_speed_cost": 0.0,
+                "high_rpm_cost": 0.0,
+                "idle_cost": 0.0,
+                "low_oil_cost": 0.0,
+                "high_temp_cost": 0.0,
+            }
+
+            for row in result:
+                truck_id = row[0]
+                total_readings = int(row[1] or 0)
+                moving_readings = int(row[2] or 0)
+                idle_readings = int(row[3] or 0)
+                total_miles = float(row[4] or 0)
+                avg_mpg = float(row[5] or BASELINE_MPG)
+
+                if total_miles <= 0 or moving_readings == 0:
+                    continue
+
+                # High Speed calculations
+                high_speed_count = int(row[6] or 0)
+                avg_high_speed = float(row[7] or 70)
+                mpg_at_high_speed = float(row[8] or avg_mpg)
+                mpg_at_optimal_speed = float(row[9] or avg_mpg)
+
+                high_speed_pct = (
+                    (high_speed_count / moving_readings * 100)
+                    if moving_readings > 0
+                    else 0
+                )
+                high_speed_miles = total_miles * (high_speed_pct / 100)
+                high_speed_extra_gal = 0
+                if (
+                    mpg_at_high_speed > 0
+                    and mpg_at_optimal_speed > 0
+                    and high_speed_miles > 0
+                ):
+                    high_speed_extra_gal = max(
+                        0,
+                        (high_speed_miles / mpg_at_high_speed)
+                        - (high_speed_miles / mpg_at_optimal_speed),
+                    )
+                high_speed_cost = high_speed_extra_gal * FUEL_PRICE
+
+                # High RPM calculations
+                high_rpm_count = int(row[10] or 0)
+                avg_high_rpm = float(row[11] or 1700)
+                mpg_at_high_rpm = float(row[12] or avg_mpg)
+                mpg_at_optimal_rpm = float(row[13] or avg_mpg)
+
+                high_rpm_pct = (
+                    (high_rpm_count / moving_readings * 100)
+                    if moving_readings > 0
+                    else 0
+                )
+                high_rpm_miles = total_miles * (high_rpm_pct / 100)
+                high_rpm_extra_gal = 0
+                if (
+                    mpg_at_high_rpm > 0
+                    and mpg_at_optimal_rpm > 0
+                    and high_rpm_miles > 0
+                ):
+                    high_rpm_extra_gal = max(
+                        0,
+                        (high_rpm_miles / mpg_at_high_rpm)
+                        - (high_rpm_miles / mpg_at_optimal_rpm),
+                    )
+                high_rpm_cost = high_rpm_extra_gal * FUEL_PRICE
+
+                # High Engine Load calculations
+                high_load_count = int(row[14] or 0)
+                avg_high_load = float(row[15] or 90)
+                mpg_at_high_load = float(row[16] or avg_mpg)
+                mpg_at_optimal_load = float(row[17] or avg_mpg)
+
+                high_load_pct = (
+                    (high_load_count / moving_readings * 100)
+                    if moving_readings > 0
+                    else 0
+                )
+                high_load_miles = total_miles * (high_load_pct / 100)
+                high_load_extra_gal = 0
+                if (
+                    mpg_at_high_load > 0
+                    and mpg_at_optimal_load > 0
+                    and high_load_miles > 0
+                ):
+                    high_load_extra_gal = max(
+                        0,
+                        (high_load_miles / mpg_at_high_load)
+                        - (high_load_miles / mpg_at_optimal_load),
+                    )
+                high_load_cost = high_load_extra_gal * FUEL_PRICE
+
+                # Idle calculations
+                idle_fuel_gal = float(row[18] or 0)
+                avg_idle_gph = float(row[19] or BASELINE_IDLE_GPH)
+
+                # Calculate idle "waste" (anything above baseline idle rate)
+                idle_waste_gal = 0
+                if avg_idle_gph > BASELINE_IDLE_GPH and idle_fuel_gal > 0:
+                    waste_ratio = (avg_idle_gph - BASELINE_IDLE_GPH) / avg_idle_gph
+                    idle_waste_gal = idle_fuel_gal * waste_ratio
+                idle_cost = idle_waste_gal * FUEL_PRICE
+
+                # Low Oil Pressure (mechanical issue indicator)
+                low_oil_count = int(row[20] or 0)
+                min_oil_psi = float(row[21] or 35)
+
+                low_oil_pct = (
+                    (low_oil_count / total_readings * 100) if total_readings > 0 else 0
+                )
+                # Estimate 5% efficiency loss during low oil pressure events
+                low_oil_miles = total_miles * (low_oil_pct / 100)
+                low_oil_extra_gal = (
+                    (low_oil_miles / (avg_mpg * 0.95) - low_oil_miles / avg_mpg)
+                    if avg_mpg > 0
+                    else 0
+                )
+                low_oil_extra_gal = max(0, low_oil_extra_gal)
+                low_oil_cost = low_oil_extra_gal * FUEL_PRICE
+
+                # High Oil Temp (engine stress)
+                high_oil_temp_count = int(row[22] or 0)
+                max_oil_temp = float(row[23] or 200)
+
+                high_temp_pct = (
+                    (high_oil_temp_count / total_readings * 100)
+                    if total_readings > 0
+                    else 0
+                )
+                # Estimate 4% efficiency loss during high temp
+                high_temp_miles = total_miles * (high_temp_pct / 100)
+                high_temp_extra_gal = (
+                    (high_temp_miles / (avg_mpg * 0.96) - high_temp_miles / avg_mpg)
+                    if avg_mpg > 0
+                    else 0
+                )
+                high_temp_extra_gal = max(0, high_temp_extra_gal)
+                high_temp_cost = high_temp_extra_gal * FUEL_PRICE
+
+                # Total cost for this truck
+                total_truck_cost = (
+                    high_load_cost
+                    + high_speed_cost
+                    + high_rpm_cost
+                    + idle_cost
+                    + low_oil_cost
+                    + high_temp_cost
+                )
+
+                # MPG vs baseline efficiency
+                mpg_vs_baseline = (
+                    ((avg_mpg - BASELINE_MPG) / BASELINE_MPG * 100)
+                    if BASELINE_MPG > 0
+                    else 0
+                )
+
+                truck_data = {
+                    "truck_id": truck_id,
+                    "total_miles": round(total_miles, 0),
+                    "avg_mpg": round(avg_mpg, 2),
+                    "mpg_vs_baseline": round(mpg_vs_baseline, 1),
+                    "total_readings": total_readings,
+                    "total_inefficiency_cost": round(total_truck_cost, 2),
+                    "causes": {
+                        "high_engine_load": {
+                            "events": high_load_count,
+                            "pct_of_time": round(high_load_pct, 1),
+                            "avg_load": round(avg_high_load, 0),
+                            "extra_gallons": round(high_load_extra_gal, 1),
+                            "extra_cost": round(high_load_cost, 2),
+                        },
+                        "high_speed": {
+                            "events": high_speed_count,
+                            "pct_of_time": round(high_speed_pct, 1),
+                            "avg_speed": round(avg_high_speed, 0),
+                            "extra_gallons": round(high_speed_extra_gal, 1),
+                            "extra_cost": round(high_speed_cost, 2),
+                        },
+                        "high_rpm": {
+                            "events": high_rpm_count,
+                            "pct_of_time": round(high_rpm_pct, 1),
+                            "avg_rpm": round(avg_high_rpm, 0),
+                            "extra_gallons": round(high_rpm_extra_gal, 1),
+                            "extra_cost": round(high_rpm_cost, 2),
+                        },
+                        "excessive_idle": {
+                            "events": idle_readings,
+                            "total_gallons": round(idle_fuel_gal, 1),
+                            "waste_gallons": round(idle_waste_gal, 1),
+                            "avg_gph": round(avg_idle_gph, 2),
+                            "extra_cost": round(idle_cost, 2),
+                        },
+                        "low_oil_pressure": {
+                            "events": low_oil_count,
+                            "pct_of_time": round(low_oil_pct, 1),
+                            "min_psi": round(min_oil_psi, 0),
+                            "extra_gallons": round(low_oil_extra_gal, 1),
+                            "extra_cost": round(low_oil_cost, 2),
+                            "severity": "warning" if low_oil_count > 100 else "info",
+                        },
+                        "high_oil_temp": {
+                            "events": high_oil_temp_count,
+                            "pct_of_time": round(high_temp_pct, 1),
+                            "max_temp_f": round(max_oil_temp, 0),
+                            "extra_gallons": round(high_temp_extra_gal, 1),
+                            "extra_cost": round(high_temp_cost, 2),
+                            "severity": (
+                                "warning" if high_oil_temp_count > 50 else "info"
+                            ),
+                        },
+                    },
+                    "top_issue": None,  # Will be set below
+                }
+
+                # Determine top issue for this truck
+                cause_costs = [
+                    ("high_engine_load", high_load_cost),
+                    ("high_speed", high_speed_cost),
+                    ("high_rpm", high_rpm_cost),
+                    ("excessive_idle", idle_cost),
+                    ("low_oil_pressure", low_oil_cost),
+                    ("high_oil_temp", high_temp_cost),
+                ]
+                top_cause = max(cause_costs, key=lambda x: x[1])
+                truck_data["top_issue"] = top_cause[0] if top_cause[1] > 0 else None
+
+                trucks_data.append(truck_data)
+
+                # Aggregate fleet totals
+                fleet_totals["total_cost"] += total_truck_cost
+                fleet_totals["high_load_cost"] += high_load_cost
+                fleet_totals["high_speed_cost"] += high_speed_cost
+                fleet_totals["high_rpm_cost"] += high_rpm_cost
+                fleet_totals["idle_cost"] += idle_cost
+                fleet_totals["low_oil_cost"] += low_oil_cost
+                fleet_totals["high_temp_cost"] += high_temp_cost
+
+            # Sort trucks by the specified metric
+            sort_key_map = {
+                "total_cost": lambda x: x["total_inefficiency_cost"],
+                "high_load": lambda x: x["causes"]["high_engine_load"]["extra_cost"],
+                "high_speed": lambda x: x["causes"]["high_speed"]["extra_cost"],
+                "idle": lambda x: x["causes"]["excessive_idle"]["extra_cost"],
+                "low_mpg": lambda x: -x["avg_mpg"],  # Lower MPG = worse
+                "high_rpm": lambda x: x["causes"]["high_rpm"]["extra_cost"],
+            }
+
+            sort_func = sort_key_map.get(sort_by, sort_key_map["total_cost"])
+            trucks_data.sort(key=sort_func, reverse=True)
+
+            return {
+                "period_days": days_back,
+                "truck_count": len(trucks_data),
+                "sort_by": sort_by,
+                "fleet_summary": {
+                    "total_inefficiency_cost": round(fleet_totals["total_cost"], 2),
+                    "by_cause": {
+                        "high_engine_load": round(fleet_totals["high_load_cost"], 2),
+                        "high_speed": round(fleet_totals["high_speed_cost"], 2),
+                        "high_rpm": round(fleet_totals["high_rpm_cost"], 2),
+                        "excessive_idle": round(fleet_totals["idle_cost"], 2),
+                        "low_oil_pressure": round(fleet_totals["low_oil_cost"], 2),
+                        "high_oil_temp": round(fleet_totals["high_temp_cost"], 2),
+                    },
+                    "top_fleet_issue": max(
+                        [
+                            ("high_engine_load", fleet_totals["high_load_cost"]),
+                            ("high_speed", fleet_totals["high_speed_cost"]),
+                            ("high_rpm", fleet_totals["high_rpm_cost"]),
+                            ("excessive_idle", fleet_totals["idle_cost"]),
+                            ("low_oil_pressure", fleet_totals["low_oil_cost"]),
+                            ("high_oil_temp", fleet_totals["high_temp_cost"]),
+                        ],
+                        key=lambda x: x[1],
+                    )[0],
+                },
+                "trucks": trucks_data,
+            }
+
+    except Exception as e:
+        logger.error(f"Error in get_inefficiency_by_truck: {e}")
+        return {
+            "period_days": days_back,
+            "truck_count": 0,
+            "sort_by": sort_by,
+            "fleet_summary": {"total_inefficiency_cost": 0, "by_cause": {}},
+            "trucks": [],
+            "error": str(e),
+        }
