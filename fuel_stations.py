@@ -469,7 +469,7 @@ class FuelStationService:
         current_lng: float,
         current_fuel_pct: float,
         tank_capacity_gal: float = 200,
-        avg_mpg: float = 6.5,
+        avg_mpg: float = 5.7,
     ) -> List[RefuelRecommendation]:
         """
         Get optimal refueling recommendations based on current status.
@@ -637,7 +637,7 @@ async def get_refuel_recommendations(
     lng: float = Query(..., description="Current longitude"),
     fuel_pct: float = Query(..., description="Current fuel percentage"),
     tank_capacity: float = Query(200, description="Tank capacity in gallons"),
-    avg_mpg: float = Query(6.5, description="Average MPG"),
+    avg_mpg: float = Query(5.7, description="Average MPG"),
 ):
     """Get optimal refueling recommendations for a truck."""
     recommendations = await fuel_station_service.get_refuel_recommendations(

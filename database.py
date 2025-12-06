@@ -1065,8 +1065,8 @@ class DatabaseManager:
                 idle_val = None if pd.isna(idle_gph) else round(float(idle_gph), 2)
 
                 # Calculate efficiency score (higher MPG = better, lower idle = better)
-                # Normalize: MPG target ~6.5, idle target ~0.8
-                mpg_score = (mpg / 6.5) * 100 if mpg > 0 and not pd.isna(mpg) else 0
+                # Normalize: MPG target ~5.7 (fleet baseline v3.12.31), idle target ~0.8
+                mpg_score = (mpg / 5.7) * 100 if mpg > 0 and not pd.isna(mpg) else 0
 
                 # 🔧 FIX: Cap idle_score at 200% to prevent infinity
                 if idle_gph > 0 and not pd.isna(idle_gph):

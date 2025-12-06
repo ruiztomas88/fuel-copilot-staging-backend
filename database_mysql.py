@@ -35,7 +35,7 @@ except ImportError:
 
     class FUEL:
         PRICE_PER_GALLON = 3.50
-        BASELINE_MPG = 6.5
+        BASELINE_MPG = 5.7
 
     class DB_CONFIG:
         HOST = "localhost"
@@ -1109,7 +1109,7 @@ def _empty_loss_response(days: int, price: float) -> Dict[str, Any]:
         "period_days": days,
         "truck_count": 0,
         "fuel_price_per_gal": price,
-        "baseline_mpg": 6.5,
+        "baseline_mpg": 5.7,
         "summary": {
             "total_loss_gal": 0,
             "total_loss_usd": 0,
@@ -1686,7 +1686,7 @@ def _empty_enhanced_kpis(days: int, price: float) -> Dict[str, Any]:
         },
         "efficiency": {
             "avg_mpg": 0,
-            "baseline_mpg": 6.5,
+            "baseline_mpg": 5.7,
             "mpg_gap": 0,
             "mpg_achievement_pct": 0,
             "total_miles": 0,
@@ -2122,7 +2122,7 @@ def _empty_enhanced_loss_analysis(days: int, price: float) -> Dict[str, Any]:
         "period_days": days,
         "truck_count": 0,
         "fuel_price_per_gal": price,
-        "baseline_mpg": 6.5,
+        "baseline_mpg": 5.7,
         "summary": {
             "total_loss": {"gallons": 0, "usd": 0},
             "by_cause": {
@@ -2960,7 +2960,7 @@ def get_route_efficiency_analysis(
     """
     engine = get_sqlalchemy_engine()
     FUEL_PRICE = 3.50
-    BASELINE_MPG = 6.5
+    BASELINE_MPG = 5.7
 
     try:
         with engine.connect() as conn:
@@ -3181,7 +3181,7 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
     """
     engine = get_sqlalchemy_engine()
     FUEL_PRICE = 3.50
-    BASELINE_MPG = 6.5
+    BASELINE_MPG = 5.7
     OPTIMAL_SPEED_MAX = 65.0  # MPH
     OPTIMAL_RPM_MAX = 1600
     OPTIMAL_LOAD_MAX = 80  # %
@@ -3598,7 +3598,7 @@ def get_cost_attribution_report(days_back: int = 30) -> Dict:
     """
     engine = get_sqlalchemy_engine()
     FUEL_PRICE = 3.50
-    BASELINE_MPG = 6.5
+    BASELINE_MPG = 5.7
     BASELINE_IDLE_GPH = 0.8
 
     try:

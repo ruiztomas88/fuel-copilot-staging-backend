@@ -87,7 +87,7 @@ class FleetSummary(BaseModel):
                 "critical_count": 0,
                 "warning_count": 2,
                 "healthy_count": 34,
-                "avg_mpg": 6.5,
+                "avg_mpg": 5.7,
                 "avg_idle_gph": 0.85,
                 "truck_details": [],
                 "timestamp": "2025-11-20T04:30:00",

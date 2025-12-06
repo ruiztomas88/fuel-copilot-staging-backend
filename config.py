@@ -20,8 +20,8 @@ class FuelConfig:
     PRICE_PER_GALLON: float = 3.50
 
     # Baseline MPG for comparison (fleet average for Peterbilt/Kenworth trucks)
-    # Trucks below this are flagged as inefficient
-    BASELINE_MPG: float = 6.5
+    # Based on fleet analysis: 30 trucks, 42K records, avg 5.72 MPG (v3.12.31)
+    BASELINE_MPG: float = 5.7
 
     # Minimum MPG to consider valid (filters noise)
     MIN_VALID_MPG: float = 3.5
