@@ -14,6 +14,7 @@ from collections import defaultdict
 
 load_dotenv()
 
+
 def get_connection():
     return pymysql.connect(
         host=os.getenv("LOCAL_DB_HOST", "localhost"),
@@ -24,17 +25,19 @@ def get_connection():
         cursorclass=pymysql.cursors.DictCursor,
     )
 
+
 def analyze_mpg():
     conn = get_connection()
-    
+
     print("=" * 70)
     print("📊 MPG BASELINE ANALYSIS")
     print("=" * 70)
-    
+
     try:
         with conn.cursor() as cursor:
             # Check how much data we have
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT 
                     COUNT(*) as total_records,
                     COUNT(DISTINCT truck_id) as trucks,
@@ -42,26 +45,32 @@ def analyze_mpg():
                     MAX(timestamp_utc) as last_record,
                     COUNT(CASE WHEN mpg_current IS NOT NULL AND mpg_current > 0 AND mpg_current < 20 THEN 1 END) as valid_mpg_records
                 FROM fuel_metrics
-            """)
+            """
+            )
             overview = cursor.fetchone()
-            
+
             print(f"\n📈 DATA OVERVIEW:")
             print(f"   Total records: {overview['total_records']:,}")
             print(f"   Trucks: {overview['trucks']}")
-            print(f"   Date range: {overview['first_record']} to {overview['last_record']}")
+            print(
+                f"   Date range: {overview['first_record']} to {overview['last_record']}"
+            )
             print(f"   Valid MPG records: {overview['valid_mpg_records']:,}")
-            
-            if overview['valid_mpg_records'] < 100:
+
+            if overview["valid_mpg_records"] < 100:
                 print("\n⚠️  Not enough valid MPG data yet. Need at least 100 records.")
-                print("   MPG tracking requires trucks to be MOVING with valid fuel consumption.")
+                print(
+                    "   MPG tracking requires trucks to be MOVING with valid fuel consumption."
+                )
                 return
-            
+
             # Analyze MPG by truck
             print(f"\n{'='*70}")
             print("🚛 MPG BY TRUCK (last 30 days, MOVING status only):")
             print(f"{'='*70}")
-            
-            cursor.execute("""
+
+            cursor.execute(
+                """
                 SELECT 
                     truck_id,
                     COUNT(*) as samples,
@@ -79,12 +88,14 @@ def analyze_mpg():
                 GROUP BY truck_id
                 HAVING samples >= 10
                 ORDER BY avg_mpg DESC
-            """)
+            """
+            )
             truck_mpg = cursor.fetchall()
-            
+
             if not truck_mpg:
                 # Try without the PERCENTILE function (MySQL 5.7 compatibility)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT 
                         truck_id,
                         COUNT(*) as samples,
@@ -101,14 +112,16 @@ def analyze_mpg():
                     GROUP BY truck_id
                     HAVING samples >= 10
                     ORDER BY avg_mpg DESC
-                """)
+                """
+                )
                 truck_mpg = cursor.fetchall()
-            
+
             if not truck_mpg:
                 print("\n⚠️  No valid MPG data for MOVING trucks in the last 30 days.")
                 print("   Trying with all available data...")
-                
-                cursor.execute("""
+
+                cursor.execute(
+                    """
                     SELECT 
                         truck_id,
                         COUNT(*) as samples,
@@ -123,34 +136,40 @@ def analyze_mpg():
                     GROUP BY truck_id
                     HAVING samples >= 5
                     ORDER BY avg_mpg DESC
-                """)
+                """
+                )
                 truck_mpg = cursor.fetchall()
-            
+
             if truck_mpg:
-                print(f"\n{'Truck':<12} {'Samples':>8} {'Avg MPG':>10} {'Min':>8} {'Max':>8} {'StdDev':>8}")
+                print(
+                    f"\n{'Truck':<12} {'Samples':>8} {'Avg MPG':>10} {'Min':>8} {'Max':>8} {'StdDev':>8}"
+                )
                 print("-" * 60)
-                
+
                 all_avgs = []
                 for row in truck_mpg:
-                    std = row['std_mpg'] or 0
-                    print(f"{row['truck_id']:<12} {row['samples']:>8} {row['avg_mpg']:>10.2f} {row['min_mpg']:>8.2f} {row['max_mpg']:>8.2f} {std:>8.2f}")
-                    all_avgs.append(row['avg_mpg'])
-                
+                    std = row["std_mpg"] or 0
+                    print(
+                        f"{row['truck_id']:<12} {row['samples']:>8} {row['avg_mpg']:>10.2f} {row['min_mpg']:>8.2f} {row['max_mpg']:>8.2f} {std:>8.2f}"
+                    )
+                    all_avgs.append(row["avg_mpg"])
+
                 # Fleet average
                 fleet_avg = sum(all_avgs) / len(all_avgs) if all_avgs else 0
-                
+
                 print("-" * 60)
                 print(f"{'FLEET AVG':<12} {'':<8} {fleet_avg:>10.2f}")
             else:
                 print("\n❌ No MPG data available for analysis.")
                 return
-            
+
             # Analyze by speed range
             print(f"\n{'='*70}")
             print("🚗 MPG BY SPEED RANGE:")
             print(f"{'='*70}")
-            
-            cursor.execute("""
+
+            cursor.execute(
+                """
                 SELECT 
                     CASE 
                         WHEN speed_mph < 30 THEN '0-30 mph (City)'
@@ -169,21 +188,25 @@ def analyze_mpg():
                   AND truck_status = 'MOVING'
                 GROUP BY speed_range
                 ORDER BY MIN(speed_mph)
-            """)
+            """
+            )
             speed_mpg = cursor.fetchall()
-            
+
             if speed_mpg:
                 print(f"\n{'Speed Range':<25} {'Samples':>10} {'Avg MPG':>10}")
                 print("-" * 50)
                 for row in speed_mpg:
-                    print(f"{row['speed_range']:<25} {row['samples']:>10} {row['avg_mpg']:>10.2f}")
-            
+                    print(
+                        f"{row['speed_range']:<25} {row['samples']:>10} {row['avg_mpg']:>10.2f}"
+                    )
+
             # Consumption rate analysis
             print(f"\n{'='*70}")
             print("⛽ CONSUMPTION RATE ANALYSIS:")
             print(f"{'='*70}")
-            
-            cursor.execute("""
+
+            cursor.execute(
+                """
                 SELECT 
                     truck_id,
                     AVG(consumption_gph) as avg_gph,
@@ -196,38 +219,48 @@ def analyze_mpg():
                   AND timestamp_utc >= NOW() - INTERVAL 30 DAY
                 GROUP BY truck_id
                 ORDER BY truck_id
-            """)
+            """
+            )
             consumption = cursor.fetchall()
-            
+
             if consumption:
-                print(f"\n{'Truck':<12} {'Avg GPH':>10} {'Moving GPH':>12} {'Idle GPH':>10}")
+                print(
+                    f"\n{'Truck':<12} {'Avg GPH':>10} {'Moving GPH':>12} {'Idle GPH':>10}"
+                )
                 print("-" * 50)
                 for row in consumption:
-                    moving = row['moving_gph'] or 0
-                    idle = row['idle_gph'] or 0
-                    print(f"{row['truck_id']:<12} {row['avg_gph']:>10.2f} {moving:>12.2f} {idle:>10.2f}")
-            
+                    moving = row["moving_gph"] or 0
+                    idle = row["idle_gph"] or 0
+                    print(
+                        f"{row['truck_id']:<12} {row['avg_gph']:>10.2f} {moving:>12.2f} {idle:>10.2f}"
+                    )
+
             # Recommendations
             print(f"\n{'='*70}")
             print("📋 RECOMMENDATIONS:")
             print(f"{'='*70}")
-            
+
             if truck_mpg and fleet_avg > 0:
                 print(f"\n   Current fleet average MPG: {fleet_avg:.2f}")
                 print(f"\n   Suggested baseline values for config:")
                 print(f"   - MPG_BASELINE_HIGHWAY: {min(fleet_avg + 1, 8.0):.1f}")
                 print(f"   - MPG_BASELINE_CITY: {max(fleet_avg - 1.5, 4.0):.1f}")
                 print(f"   - MPG_BASELINE_MIXED: {fleet_avg:.1f}")
-                
+
                 # Identify best and worst performers
                 if len(truck_mpg) >= 2:
                     best = truck_mpg[0]
                     worst = truck_mpg[-1]
-                    print(f"\n   🏆 Best performer: {best['truck_id']} ({best['avg_mpg']:.2f} MPG)")
-                    print(f"   ⚠️  Needs attention: {worst['truck_id']} ({worst['avg_mpg']:.2f} MPG)")
-            
+                    print(
+                        f"\n   🏆 Best performer: {best['truck_id']} ({best['avg_mpg']:.2f} MPG)"
+                    )
+                    print(
+                        f"   ⚠️  Needs attention: {worst['truck_id']} ({worst['avg_mpg']:.2f} MPG)"
+                    )
+
     finally:
         conn.close()
+
 
 if __name__ == "__main__":
     analyze_mpg()

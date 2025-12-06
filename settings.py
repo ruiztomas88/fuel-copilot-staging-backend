@@ -253,9 +253,10 @@ class FuelSettings:
         default_factory=lambda: _get_env_float("FUEL_PRICE_PER_GALLON", 3.50)
     )
 
-    # Efficiency baselines
+    # Efficiency baselines (v3.12.31: Updated based on 42K records fleet analysis)
+    # Fleet avg: 5.72 MPG | Highway: 6.7 MPG | City: 4.2 MPG
     baseline_mpg: float = field(
-        default_factory=lambda: _get_env_float("BASELINE_MPG", 6.5)
+        default_factory=lambda: _get_env_float("BASELINE_MPG", 5.7)
     )
     min_valid_mpg: float = field(
         default_factory=lambda: _get_env_float("MIN_VALID_MPG", 3.5)

@@ -147,7 +147,7 @@ class MPGConfig:
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
     max_mpg: float = 9.0  # 🔧 v3.10.7: Absolute maximum (empty, downhill, highway)
     ema_alpha: float = 0.4  # 🔧 v3.10.7: Reduced from 0.6 for smoother readings
-    fallback_mpg: float = 5.8  # Conservative baseline for estimation
+    fallback_mpg: float = 5.7  # 🔧 v3.12.31: Updated to fleet average (was 5.8)
 
     # Dynamic alpha settings
     use_dynamic_alpha: bool = True  # Enable variance-based alpha adjustment
