@@ -739,22 +739,26 @@ def save_refuel_event(
     """
     try:
         with connection.cursor() as cursor:
-            # 🔧 v3.12.28: Check for duplicate refuel (same truck within 5 min window)
+            # 🔧 v3.12.30: Check for duplicate refuel using fuel_after percentage
+            # Previous check used gallons_added ±5 gal, but Kalman drift can cause
+            # different gallon calculations for same actual refuel.
+            # fuel_after is more stable - same sensor reading = same after%.
             check_query = """
-                SELECT id FROM refuel_events 
+                SELECT id, gallons_added FROM refuel_events 
                 WHERE truck_id = %s 
                   AND timestamp_utc BETWEEN %s - INTERVAL 5 MINUTE AND %s + INTERVAL 5 MINUTE
-                  AND ABS(gallons_added - %s) < 5
+                  AND ABS(fuel_after - %s) < 2
                 LIMIT 1
             """
             cursor.execute(
-                check_query, (truck_id, timestamp_utc, timestamp_utc, gallons_added)
+                check_query, (truck_id, timestamp_utc, timestamp_utc, fuel_after)
             )
             existing = cursor.fetchone()
 
             if existing:
                 logger.info(
-                    f"⏭️ Duplicate refuel skipped: {truck_id} +{gallons_added:.1f} gal (already exists)"
+                    f"⏭️ Duplicate refuel skipped: {truck_id} +{gallons_added:.1f} gal "
+                    f"(existing: +{existing['gallons_added']:.1f} gal at {fuel_after:.1f}%)"
                 )
                 return False
 
