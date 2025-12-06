@@ -27,12 +27,11 @@ carriers:
 trucks:
   VD3579:
     carrier_id: skylord
-    capacity_gallons: 240
-    capacity_liters: 908.5
+    # 🔧 Calibrado Dec 2025: Análisis de 9 recibos reales muestra capacidad efectiva ~180 gal
+    # Sensor no-lineal: error esperado ±15%
+    capacity_gallons: 180
+    capacity_liters: 681.4
     unit_id: 401849345
-    # 🔧 Calibrated 2024-12-05: Actual purchase 101.3 gal, sensor showed 120 gal
-    # Factor = 101.3 / 120 = 0.844
-    refuel_factor: 0.844
     mpg:
       highway: 7.47
       city: 3.83
