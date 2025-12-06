@@ -435,33 +435,36 @@ def detect_refuel(
     truck_id: str = "",
 ) -> Optional[Dict]:
     """
-    Gap-aware refuel detection
+    Gap-aware refuel detection using Kalman estimate as baseline.
+
+    🔧 v3.12.29: Use Kalman estimate (estimated_pct) as "before" reference
+    - The Kalman filter tracks expected fuel level based on consumption model
+    - When sensor shows higher than Kalman after a gap → refuel detected
+    - This is more accurate than comparing two noisy sensor readings
 
     Criteria:
     - Time gap between 5 min and 2 hours (typical refuel window)
-    - Fuel increase > 15% (matches fuel_copilot_v2_1_fixed.py threshold)
-    - Truck was stopped during gap
+    - Sensor > Kalman by > 15% (fuel was added)
+    - Minimum 10 gallons added
 
-    🔧 v3.12.16: Increased from 5% to 15% to reduce false positives from sensor noise
-    Sensor noise can cause 10% swings; real refuels are typically 30-60% jumps
-    
-    🔧 v3.12.28: Added refuel_factor support for sensor calibration
-    - Some sensors don't report accurate % (e.g., VD3579 sensor reads high)
-    - refuel_factor corrects the % → gallons conversion
+    The Kalman represents "what we expected" after consumption
+    The Sensor represents "what's actually in the tank now"
+    Difference = fuel added during the gap
     """
-    if last_sensor_pct is None or sensor_pct is None:
+    if sensor_pct is None or estimated_pct is None:
         return None
 
     # Time gap validation (5 min to 2 hours)
     if time_gap_hours < 5 / 60 or time_gap_hours > 2:
         return None
 
-    # Calculate increase
-    fuel_increase_pct = sensor_pct - last_sensor_pct
+    # 🔧 v3.12.29: Calculate increase using Kalman as baseline
+    # fuel_increase = current_sensor - kalman_estimate (what we expected)
+    fuel_increase_pct = sensor_pct - estimated_pct
 
-    # Minimum thresholds - MATCHED TO fuel_copilot_v2_1_fixed.py
+    # Minimum thresholds
     # 🔧 v3.12.16: 15% threshold reduces false positives from sensor noise
-    min_increase_pct = 15.0  # Was 5.0, too low for noisy sensors
+    min_increase_pct = 15.0
     min_increase_gal = 10.0
 
     # 🔧 v3.12.28: Apply refuel_factor for sensor calibration
@@ -472,19 +475,18 @@ def detect_refuel(
     if fuel_increase_pct >= min_increase_pct and increase_gal >= min_increase_gal:
         # Extra safety: reject small jumps when tank is already nearly full
         # (likely sensor noise, not actual refuel)
-        if estimated_pct > 90 and fuel_increase_pct < 20:
+        if sensor_pct > 95 and fuel_increase_pct < 20:
             return None
 
         factor_note = f" (factor={refuel_factor})" if refuel_factor != 1.0 else ""
         logger.info(
-            f"⛽ REFUEL DETECTED: +{fuel_increase_pct:.1f}% "
-            f"(+{increase_gal:.1f} gal{factor_note}) over {time_gap_hours*60:.0f} min"
+            f"⛽ REFUEL DETECTED: Kalman={estimated_pct:.1f}% → Sensor={sensor_pct:.1f}% "
+            f"(+{fuel_increase_pct:.1f}%, +{increase_gal:.1f} gal{factor_note}) over {time_gap_hours*60:.0f} min"
         )
 
-        # 🔧 v3.12.21: Include prev_pct and new_pct for logging/notifications
         return {
             "type": "REFUEL",
-            "prev_pct": last_sensor_pct,
+            "prev_pct": estimated_pct,  # 🔧 Now using Kalman estimate as "before"
             "new_pct": sensor_pct,
             "increase_pct": fuel_increase_pct,
             "increase_gal": increase_gal,
@@ -1012,18 +1014,18 @@ def process_truck(
         last_sensor_pct_for_refuel = prev_data.get("fuel_lvl")
 
     if sensor_pct is not None:
-        # 🔍 Debug: Log refuel check parameters
-        if last_sensor_pct_for_refuel is not None:
-            fuel_jump = sensor_pct - last_sensor_pct_for_refuel
-            if fuel_jump > 10:  # Log significant jumps
-                logger.info(
-                    f"[REFUEL-CHECK] {truck_id}: prev={last_sensor_pct_for_refuel:.1f}%, "
-                    f"curr={sensor_pct:.1f}%, jump={fuel_jump:.1f}%, gap={time_gap_hours*60:.1f}min, status={truck_status}"
-                )
+        # 🔍 Debug: Log refuel check parameters (now using Kalman as baseline)
+        kalman_pct = estimator.level_pct
+        fuel_vs_kalman = sensor_pct - kalman_pct
+        if fuel_vs_kalman > 10:  # Log significant jumps vs Kalman
+            logger.info(
+                f"[REFUEL-CHECK] {truck_id}: kalman={kalman_pct:.1f}%, sensor={sensor_pct:.1f}%, "
+                f"diff={fuel_vs_kalman:.1f}%, gap={time_gap_hours*60:.1f}min"
+            )
 
         refuel_event = detect_refuel(
             sensor_pct=sensor_pct,
-            estimated_pct=estimator.level_pct,
+            estimated_pct=kalman_pct,
             last_sensor_pct=last_sensor_pct_for_refuel,
             time_gap_hours=time_gap_hours,
             truck_status=truck_status,
