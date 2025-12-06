@@ -709,10 +709,33 @@ def save_refuel_event(
     """
     Save refuel event to refuel_events table.
 
-    Returns True if successfully inserted, False otherwise.
+    🔧 v3.12.28: Added duplicate check to prevent double inserts.
+    Checks for existing refuel within 5-minute window for same truck.
+
+    Returns True if successfully inserted, False if duplicate or error.
     """
     try:
         with connection.cursor() as cursor:
+            # 🔧 v3.12.28: Check for duplicate refuel (same truck within 5 min window)
+            check_query = """
+                SELECT id FROM refuel_events 
+                WHERE truck_id = %s 
+                  AND timestamp_utc BETWEEN %s - INTERVAL 5 MINUTE AND %s + INTERVAL 5 MINUTE
+                  AND ABS(gallons_added - %s) < 5
+                LIMIT 1
+            """
+            cursor.execute(
+                check_query, (truck_id, timestamp_utc, timestamp_utc, gallons_added)
+            )
+            existing = cursor.fetchone()
+
+            if existing:
+                logger.info(
+                    f"⏭️ Duplicate refuel skipped: {truck_id} +{gallons_added:.1f} gal (already exists)"
+                )
+                return False
+
+            # Insert new refuel event
             query = """
                 INSERT INTO refuel_events 
                 (timestamp_utc, truck_id, carrier_id, fuel_before, fuel_after, 
@@ -1363,7 +1386,8 @@ def sync_cycle(
 
                     # If a previous refuel was finalized, save and notify
                     if finalized:
-                        save_refuel_event(
+                        # 🔧 v3.12.28: Only notify if save was successful (not duplicate)
+                        was_saved = save_refuel_event(
                             connection=local_conn,
                             truck_id=finalized["truck_id"],
                             timestamp_utc=finalized["timestamp"],
@@ -1374,13 +1398,14 @@ def sync_cycle(
                             longitude=metrics.get("longitude"),
                             refuel_type="GAP_DETECTED",
                         )
-                        send_refuel_notification(
-                            truck_id=finalized["truck_id"],
-                            gallons_added=finalized["gallons"],
-                            fuel_before=finalized["start_pct"],
-                            fuel_after=finalized["end_pct"],
-                            timestamp_utc=finalized["timestamp"],
-                        )
+                        if was_saved:
+                            send_refuel_notification(
+                                truck_id=finalized["truck_id"],
+                                gallons_added=finalized["gallons"],
+                                fuel_before=finalized["start_pct"],
+                                fuel_after=finalized["end_pct"],
+                                timestamp_utc=finalized["timestamp"],
+                            )
 
                 # 🆕 v3.12.27: Process fuel events with intelligent classification
                 # This differentiates THEFT from SENSOR_ISSUE by monitoring recovery
@@ -1510,10 +1535,11 @@ def sync_cycle(
             traceback.print_exc()
 
     # 🆕 v3.12.20: Flush any stale pending refuels (older than 15 min)
+    # 🔧 v3.12.28: Only notify if save was successful (not duplicate)
     stale_refuels = flush_stale_pending_refuels(max_age_minutes=15)
     for finalized in stale_refuels:
         try:
-            save_refuel_event(
+            was_saved = save_refuel_event(
                 connection=local_conn,
                 truck_id=finalized["truck_id"],
                 timestamp_utc=finalized["timestamp"],
@@ -1522,13 +1548,14 @@ def sync_cycle(
                 gallons_added=finalized["gallons"],
                 refuel_type="GAP_DETECTED",
             )
-            send_refuel_notification(
-                truck_id=finalized["truck_id"],
-                gallons_added=finalized["gallons"],
-                fuel_before=finalized["start_pct"],
-                fuel_after=finalized["end_pct"],
-                timestamp_utc=finalized["timestamp"],
-            )
+            if was_saved:
+                send_refuel_notification(
+                    truck_id=finalized["truck_id"],
+                    gallons_added=finalized["gallons"],
+                    fuel_before=finalized["start_pct"],
+                    fuel_after=finalized["end_pct"],
+                    timestamp_utc=finalized["timestamp"],
+                )
         except Exception as e:
             logger.error(f"Error saving stale refuel for {finalized['truck_id']}: {e}")
 
