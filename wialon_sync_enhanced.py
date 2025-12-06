@@ -96,10 +96,11 @@ KALMAN_CONFIG = {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def load_tank_capacities() -> Dict[str, float]:
-    """Load tank capacities from tanks.yaml"""
+def load_tank_config() -> tuple[Dict[str, float], Dict[str, float]]:
+    """Load tank capacities and refuel factors from tanks.yaml"""
     yaml_path = Path(__file__).parent / "tanks.yaml"
     capacities: Dict[str, float] = {"default": 200.0}
+    refuel_factors: Dict[str, float] = {"default": 1.0}  # Default: no adjustment
 
     if yaml_path.exists():
         try:
@@ -108,16 +109,27 @@ def load_tank_capacities() -> Dict[str, float]:
             trucks = config.get("trucks", {})
             for truck_id, truck_config in trucks.items():
                 capacities[truck_id] = float(truck_config.get("capacity_gallons", 200))
+                # Load refuel_factor if specified (for sensor calibration)
+                if "refuel_factor" in truck_config:
+                    refuel_factors[truck_id] = float(truck_config["refuel_factor"])
             logger.info(
                 f"✅ Loaded capacities for {len(trucks)} trucks from tanks.yaml"
             )
+            factors_count = len([k for k in refuel_factors if k != "default"])
+            if factors_count > 0:
+                logger.info(f"✅ Loaded refuel_factors for {factors_count} trucks")
         except Exception as e:
             logger.warning(f"⚠️ Could not load tanks.yaml: {e}")
 
-    return capacities
+    return capacities, refuel_factors
 
 
-TANK_CAPACITIES = load_tank_capacities()
+TANK_CAPACITIES, REFUEL_FACTORS = load_tank_config()
+
+
+def get_refuel_factor(truck_id: str) -> float:
+    """Get refuel factor for a truck (sensor calibration adjustment)"""
+    return REFUEL_FACTORS.get(truck_id, REFUEL_FACTORS["default"])
 
 
 def get_tank_capacity_liters(truck_id: str) -> float:
@@ -420,6 +432,7 @@ def detect_refuel(
     time_gap_hours: float,
     truck_status: str,
     tank_capacity_gal: float,
+    truck_id: str = "",
 ) -> Optional[Dict]:
     """
     Gap-aware refuel detection
@@ -431,6 +444,10 @@ def detect_refuel(
 
     🔧 v3.12.16: Increased from 5% to 15% to reduce false positives from sensor noise
     Sensor noise can cause 10% swings; real refuels are typically 30-60% jumps
+    
+    🔧 v3.12.28: Added refuel_factor support for sensor calibration
+    - Some sensors don't report accurate % (e.g., VD3579 sensor reads high)
+    - refuel_factor corrects the % → gallons conversion
     """
     if last_sensor_pct is None or sensor_pct is None:
         return None
@@ -447,7 +464,10 @@ def detect_refuel(
     min_increase_pct = 15.0  # Was 5.0, too low for noisy sensors
     min_increase_gal = 10.0
 
-    increase_gal = (fuel_increase_pct / 100) * tank_capacity_gal
+    # 🔧 v3.12.28: Apply refuel_factor for sensor calibration
+    refuel_factor = get_refuel_factor(truck_id)
+    increase_gal_raw = (fuel_increase_pct / 100) * tank_capacity_gal
+    increase_gal = increase_gal_raw * refuel_factor
 
     if fuel_increase_pct >= min_increase_pct and increase_gal >= min_increase_gal:
         # Extra safety: reject small jumps when tank is already nearly full
@@ -455,9 +475,10 @@ def detect_refuel(
         if estimated_pct > 90 and fuel_increase_pct < 20:
             return None
 
+        factor_note = f" (factor={refuel_factor})" if refuel_factor != 1.0 else ""
         logger.info(
             f"⛽ REFUEL DETECTED: +{fuel_increase_pct:.1f}% "
-            f"(+{increase_gal:.1f} gal) over {time_gap_hours*60:.0f} min"
+            f"(+{increase_gal:.1f} gal{factor_note}) over {time_gap_hours*60:.0f} min"
         )
 
         # 🔧 v3.12.21: Include prev_pct and new_pct for logging/notifications
@@ -1007,6 +1028,7 @@ def process_truck(
             time_gap_hours=time_gap_hours,
             truck_status=truck_status,
             tank_capacity_gal=tank_capacity_gal,
+            truck_id=truck_id,
         )
 
         if refuel_event:
