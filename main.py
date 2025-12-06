@@ -1387,7 +1387,7 @@ async def get_driver_scorecard_endpoint(
     - RPM Discipline (1200-1600 optimal)
     - Idle Management (vs fleet average)
     - Fuel Consistency (consumption variability)
-    - MPG Performance (vs 6.5 baseline)
+    - MPG Performance (vs 5.7 baseline)
 
     Returns:
         Driver rankings with overall score, grade (A+/A/B/C/D), and breakdown
@@ -2333,7 +2333,7 @@ async def get_next_refuel_prediction(
             )
             consumption_gph = row_dict.get("avg_consumption_gph_24h") or 4.0
             idle_gph = row_dict.get("avg_idle_gph_24h") or 0.8
-            avg_mpg = row_dict.get("avg_mpg_24h") or 6.5
+            avg_mpg = row_dict.get("avg_mpg_24h") or 5.7  # v3.12.31: updated baseline
             status = row_dict.get("truck_status") or "STOPPED"
 
             # Estimate tank capacity (assume 200 gal for now, could be from trucks table)

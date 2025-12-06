@@ -380,7 +380,9 @@ class RefuelPredictionEngine:
                         avg_daily_miles=(
                             statistics.mean(daily_miles) if daily_miles else 0
                         ),
-                        avg_mpg=statistics.mean(mpgs) if mpgs else 6.5,
+                        avg_mpg=(
+                            statistics.mean(mpgs) if mpgs else 5.7
+                        ),  # v3.12.31: updated baseline
                         std_consumption_gpd=std_consumption_gpd,
                         weekday_factor=weekday_factor,
                         sample_days=len(rows),

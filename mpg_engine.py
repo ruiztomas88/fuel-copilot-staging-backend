@@ -325,7 +325,7 @@ def estimate_fuel_from_distance(
 
     Example:
         >>> estimate_fuel_from_distance(10.0)  # 10 miles
-        1.72  # gallons (at 5.8 MPG baseline)
+        1.75  # gallons (at 5.7 MPG baseline)
     """
     if distance_miles <= 0:
         return 0.0

@@ -103,15 +103,15 @@ class TruckDailySummary:
         """Calculate efficiency score (0-100)"""
         score = 100.0
 
-        # MPG penalty/bonus (benchmark 6.5 MPG)
+        # MPG penalty/bonus (benchmark 5.7 MPG - v3.12.31)
         if self.avg_mpg:
-            if self.avg_mpg < 5.5:
+            if self.avg_mpg < 4.7:
                 score -= 20
-            elif self.avg_mpg < 6.0:
+            elif self.avg_mpg < 5.2:
                 score -= 10
-            elif self.avg_mpg > 7.0:
+            elif self.avg_mpg > 6.5:
                 score += 10
-            elif self.avg_mpg > 7.5:
+            elif self.avg_mpg > 7.0:
                 score += 15
 
         # Idle penalty (>2 hours is excessive)
