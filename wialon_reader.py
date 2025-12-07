@@ -238,14 +238,14 @@ class WialonReader:
         return datetime.fromtimestamp(epoch, tz=timezone.utc)
 
     def get_latest_sensor_data(
-        self, unit_id: int, max_age_seconds: int = 10800
+        self, unit_id: int, max_age_seconds: int = 3600
     ) -> Optional[Dict[str, Any]]:
         """
         Get latest sensor data for a specific unit
 
         Args:
             unit_id: Wialon unit ID
-            max_age_seconds: Maximum age of data to accept (default 3 hours - v3.14.3)
+            max_age_seconds: Maximum age of data to accept (default 1 hour - v3.15.1)
 
         Returns:
             Dict with sensor values or None if no recent data
@@ -411,9 +411,9 @@ class WialonReader:
 
         try:
             with self.connection.cursor() as cursor:
-                # Calculate cutoff epoch (3 hours ago - increased from 1 hour to handle Wialon delays)
-                # 🔧 v3.14.3: Extended window to 3 hours to prevent "No data" when Wialon is delayed
-                cutoff_epoch = int(time.time()) - 10800  # 3 hours = 10800 seconds
+                # Calculate cutoff epoch (1 hour ago)
+                # 🔧 v3.15.1: Reverted to 1 hour - Wialon delay issue was resolved
+                cutoff_epoch = int(time.time()) - 3600  # 1 hour = 3600 seconds
 
                 # Get relevant parameter names
                 relevant_params = list(self.config.SENSOR_PARAMS.values())

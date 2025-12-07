@@ -577,7 +577,9 @@ class DatabaseManager:
                             ),
                             # 🆕 v3.15.1: Add gallons for dashboard display
                             "estimated_gallons": (
-                                round(estimated_gallons, 1) if estimated_gallons else None
+                                round(estimated_gallons, 1)
+                                if estimated_gallons
+                                else None
                             ),
                             "sensor_pct": round(sensor_pct, 1) if sensor_pct else 0,
                             "sensor_gallons": (
