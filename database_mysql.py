@@ -1582,7 +1582,12 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
                 "projections": {
                     "daily": {
                         "cost": round(
-                            total_cost / days_back if days_back > 0 else total_cost, 2
+                            (
+                                total_cost / days_back
+                                if days_back > 0
+                                else total_cost
+                            ),
+                            2,
                         ),
                         "gallons": round(
                             (
@@ -1593,7 +1598,12 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
                             2,
                         ),
                         "miles": round(
-                            total_miles / days_back if days_back > 0 else total_miles, 1
+                            (
+                                total_miles / days_back
+                                if days_back > 0
+                                else total_miles
+                            ),
+                            1,
                         ),
                     },
                     "monthly": {
@@ -4750,6 +4760,7 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
 
     try:
         with engine.connect() as conn:
+            # 🔧 FIX v3.14.3: Filter invalid odometer readings (< 1000) and calculate actual days
             query = text(
                 """
                 SELECT 
@@ -4759,8 +4770,12 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
                     COUNT(*) as total_readings,
                     COUNT(CASE WHEN truck_status = 'MOVING' THEN 1 END) as moving_readings,
                     COUNT(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN 1 END) as idle_readings,
-                    MAX(odometer_mi) - MIN(odometer_mi) as total_miles,
+                    -- 🔧 FIX: Only use valid odometer readings (> 1000 mi) to avoid sensor noise
+                    MAX(CASE WHEN odometer_mi > 1000 THEN odometer_mi END) - MIN(CASE WHEN odometer_mi > 1000 THEN odometer_mi END) as total_miles,
                     AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
+                    -- 🆕 Actual days of data for this truck
+                    DATEDIFF(MAX(timestamp_utc), MIN(timestamp_utc)) as actual_days,
+                    MAX(CASE WHEN odometer_mi > 1000 THEN odometer_mi END) as current_odometer,
                     
                     -- High Speed (>65 mph)
                     COUNT(CASE WHEN truck_status = 'MOVING' AND speed_mph > :speed_max THEN 1 END) as high_speed_count,
@@ -4830,15 +4845,23 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
                 idle_readings = int(row[3] or 0)
                 total_miles = float(row[4] or 0)
                 avg_mpg = float(row[5] or BASELINE_MPG)
+                # 🆕 v3.14.3: New fields for actual period and odometer
+                actual_days = int(row[6] or 1)  # Avoid division by zero
+                current_odometer = float(row[7] or 0)
 
                 if total_miles <= 0 or moving_readings == 0:
                     continue
 
-                # High Speed calculations
-                high_speed_count = int(row[6] or 0)
-                avg_high_speed = float(row[7] or 70)
-                mpg_at_high_speed = float(row[8] or avg_mpg)
-                mpg_at_optimal_speed = float(row[9] or avg_mpg)
+                # 🔧 Sanity check: if miles seem unreasonable for the period, cap it
+                max_reasonable_miles = actual_days * 800  # Max 800 mi/day
+                if total_miles > max_reasonable_miles and actual_days > 0:
+                    total_miles = max_reasonable_miles
+
+                # High Speed calculations (indices shifted by +2)
+                high_speed_count = int(row[8] or 0)
+                avg_high_speed = float(row[9] or 70)
+                mpg_at_high_speed = float(row[10] or avg_mpg)
+                mpg_at_optimal_speed = float(row[11] or avg_mpg)
 
                 high_speed_pct = (
                     (high_speed_count / moving_readings * 100)
@@ -4859,11 +4882,11 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
                     )
                 high_speed_cost = high_speed_extra_gal * FUEL_PRICE
 
-                # High RPM calculations
-                high_rpm_count = int(row[10] or 0)
-                avg_high_rpm = float(row[11] or 1700)
-                mpg_at_high_rpm = float(row[12] or avg_mpg)
-                mpg_at_optimal_rpm = float(row[13] or avg_mpg)
+                # High RPM calculations (indices +2 for new fields)
+                high_rpm_count = int(row[12] or 0)
+                avg_high_rpm = float(row[13] or 1700)
+                mpg_at_high_rpm = float(row[14] or avg_mpg)
+                mpg_at_optimal_rpm = float(row[15] or avg_mpg)
 
                 high_rpm_pct = (
                     (high_rpm_count / moving_readings * 100)
@@ -4884,11 +4907,11 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
                     )
                 high_rpm_cost = high_rpm_extra_gal * FUEL_PRICE
 
-                # High Engine Load calculations
-                high_load_count = int(row[14] or 0)
-                avg_high_load = float(row[15] or 90)
-                mpg_at_high_load = float(row[16] or avg_mpg)
-                mpg_at_optimal_load = float(row[17] or avg_mpg)
+                # High Engine Load calculations (indices +2 for new fields)
+                high_load_count = int(row[16] or 0)
+                avg_high_load = float(row[17] or 90)
+                mpg_at_high_load = float(row[18] or avg_mpg)
+                mpg_at_optimal_load = float(row[19] or avg_mpg)
 
                 high_load_pct = (
                     (high_load_count / moving_readings * 100)
@@ -4909,9 +4932,9 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
                     )
                 high_load_cost = high_load_extra_gal * FUEL_PRICE
 
-                # Idle calculations
-                idle_fuel_gal = float(row[18] or 0)
-                avg_idle_gph = float(row[19] or BASELINE_IDLE_GPH)
+                # Idle calculations (indices +2 for new fields)
+                idle_fuel_gal = float(row[20] or 0)
+                avg_idle_gph = float(row[21] or BASELINE_IDLE_GPH)
 
                 # Calculate idle "waste" (anything above baseline idle rate)
                 idle_waste_gal = 0
@@ -4920,9 +4943,9 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
                     idle_waste_gal = idle_fuel_gal * waste_ratio
                 idle_cost = idle_waste_gal * FUEL_PRICE
 
-                # Low Oil Pressure (mechanical issue indicator)
-                low_oil_count = int(row[20] or 0)
-                min_oil_psi = float(row[21] or 35)
+                # Low Oil Pressure (mechanical issue indicator) (indices +2)
+                low_oil_count = int(row[22] or 0)
+                min_oil_psi = float(row[23] or 35)
 
                 low_oil_pct = (
                     (low_oil_count / total_readings * 100) if total_readings > 0 else 0
@@ -4937,9 +4960,9 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
                 low_oil_extra_gal = max(0, low_oil_extra_gal)
                 low_oil_cost = low_oil_extra_gal * FUEL_PRICE
 
-                # High Oil Temp (engine stress)
-                high_oil_temp_count = int(row[22] or 0)
-                max_oil_temp = float(row[23] or 200)
+                # High Oil Temp (engine stress) (indices +2)
+                high_oil_temp_count = int(row[24] or 0)
+                max_oil_temp = float(row[25] or 200)
 
                 high_temp_pct = (
                     (high_oil_temp_count / total_readings * 100)
@@ -4976,6 +4999,8 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
                 truck_data = {
                     "truck_id": truck_id,
                     "total_miles": round(total_miles, 0),
+                    "current_odometer": round(current_odometer, 0),
+                    "actual_days": actual_days,  # 🆕 v3.14.3: Real days of data
                     "avg_mpg": round(avg_mpg, 2),
                     "mpg_vs_baseline": round(mpg_vs_baseline, 1),
                     "total_readings": total_readings,
@@ -5067,10 +5092,23 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
             sort_func = sort_key_map.get(sort_by, sort_key_map["total_cost"])
             trucks_data.sort(key=sort_func, reverse=True)
 
+            # 🆕 v3.14.3: Calculate actual data period across all trucks
+            actual_data_days = (
+                max([t.get("actual_days", 1) for t in trucks_data])
+                if trucks_data
+                else 0
+            )
+
             return {
-                "period_days": days_back,
+                "period_days_requested": days_back,
+                "period_days_actual": actual_data_days,  # 🆕 Real days of data available
                 "truck_count": len(trucks_data),
                 "sort_by": sort_by,
+                "note": (
+                    f"Data available for {actual_data_days} days (requested {days_back})"
+                    if actual_data_days < days_back
+                    else None
+                ),
                 "fleet_summary": {
                     "total_inefficiency_cost": round(fleet_totals["total_cost"], 2),
                     "by_cause": {
