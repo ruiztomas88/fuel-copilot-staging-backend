@@ -303,16 +303,15 @@ def determine_truck_status(
     coolant_temp: Optional[float] = None,
 ) -> str:
     """
-    Enhanced truck status determination v4 - Fixed OFFLINE priority bug
+    Enhanced truck status determination v3 - Fixed STOPPED detection
 
-    🔧 FIX v3.14.2: Check speed/RPM BEFORE data age
-    Previously, trucks with speed > 60 mph were marked OFFLINE if data was >15 min old
-    Now: Active trucks (speed > 0 or RPM > 0) are NEVER marked OFFLINE
+    🔧 FIX v3.12.1: Check engine indicators BEFORE speed check
+    Previously, speed=None would return OFFLINE even if RPM > 0 (engine running)
 
     Status Hierarchy:
-    1. MOVING: Vehicle in motion (speed > 2 mph) - HIGHEST PRIORITY
+    1. OFFLINE: Data too old (>15 min)
     2. STOPPED: Engine ON but stationary (RPM > 0, speed = 0 or None) - IDLING
-    3. OFFLINE: Data too old (>15 min) AND no activity
+    3. MOVING: Vehicle in motion (speed > 2 mph)
     4. PARKED: Engine OFF, vehicle connected (shore power or recent data)
     5. OFFLINE: No activity detected
 
@@ -322,18 +321,18 @@ def determine_truck_status(
     - Engine load > 0%
     - Coolant temp > 120°F (engine at operating temp)
     """
-    # Get safe values
+    # Check for offline - stale data (no communication in 15+ minutes)
+    if data_age_min > 15:
+        return "OFFLINE"
+
+    # 🔧 FIX v3.12.1: Check engine indicators FIRST (before speed check)
+    # This ensures trucks with RPM > 0 but speed=None are marked STOPPED, not OFFLINE
     rpm_val = rpm or 0
     fuel_rate_val = fuel_rate or 0
     engine_load_val = engine_load or 0
     coolant_temp_val = coolant_temp or 0  # °F
     pwr_ext_val = pwr_ext or 0
     speed_val = speed or 0
-
-    # 🔧 FIX v3.14.2: Check speed FIRST - if truck is moving, it's NOT offline!
-    # This fixes trucks showing 72 mph but marked as OFFLINE
-    if speed_val > 2:
-        return "MOVING"
 
     # Engine ON indicators (any one = engine running)
     engine_running = (
@@ -344,13 +343,12 @@ def determine_truck_status(
     )
 
     # If engine is running and speed is low/none = STOPPED (idling)
-    if engine_running:
+    if engine_running and speed_val < 2:
         return "STOPPED"
 
-    # NOW check for offline - stale data (no communication in 15+ minutes)
-    # Only applies if NO speed and NO engine activity
-    if data_age_min > 15:
-        return "OFFLINE"
+    # Moving - speed > 2 mph (filters GPS noise/drift)
+    if speed_val > 2:
+        return "MOVING"
 
     # No GPS data and no engine indicators = truly offline
     if speed is None and not engine_running:

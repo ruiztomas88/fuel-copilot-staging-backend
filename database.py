@@ -449,6 +449,7 @@ class DatabaseManager:
         """Get individual truck details for fleet summary table
 
         🔧 v3.12.10: Fixed SQL to use actual column names from fuel_metrics table
+        🔧 v3.15.1: Added estimated_gallons and sensor_gallons for dashboard display
         """
         try:
             from sqlalchemy import text
@@ -460,7 +461,7 @@ class DatabaseManager:
 
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
-                # 🔧 v3.12.13: Use ACTUAL column names from DESCRIBE fuel_metrics
+                # 🔧 v3.15.1: Added gallons columns for dashboard display
                 result = conn.execute(
                     text(
                         """
@@ -478,7 +479,10 @@ class DatabaseManager:
                         t1.mpg_current,
                         -- 24h averages
                         mpg_avg.avg_mpg_24h,
-                        idle_avg.avg_idle_gph_24h
+                        idle_avg.avg_idle_gph_24h,
+                        -- 🆕 v3.15.1: Gallons for display
+                        t1.estimated_gallons,
+                        t1.sensor_gallons
                     FROM fuel_metrics t1
                     INNER JOIN (
                         SELECT truck_id, MAX(timestamp_utc) as max_time
@@ -529,6 +533,9 @@ class DatabaseManager:
                     mpg_current = row[10]
                     avg_mpg_24h = row[11]
                     avg_idle_gph_24h = row[12]
+                    # 🆕 v3.15.1: Gallons for dashboard display
+                    estimated_gallons = row[13]
+                    sensor_gallons = row[14]
 
                     # 🔧 v3.12.13: Display MPG only for MOVING, Idle only for STOPPED
                     display_mpg = None
@@ -568,7 +575,14 @@ class DatabaseManager:
                             "estimated_pct": (
                                 round(estimated_pct, 1) if estimated_pct else 0
                             ),
+                            # 🆕 v3.15.1: Add gallons for dashboard display
+                            "estimated_gallons": (
+                                round(estimated_gallons, 1) if estimated_gallons else None
+                            ),
                             "sensor_pct": round(sensor_pct, 1) if sensor_pct else 0,
+                            "sensor_gallons": (
+                                round(sensor_gallons, 1) if sensor_gallons else None
+                            ),
                             "drift": round(drift_pct, 1) if drift_pct else 0,
                             "drift_pct": round(drift_pct, 1) if drift_pct else 0,
                             "mpg": display_mpg,
