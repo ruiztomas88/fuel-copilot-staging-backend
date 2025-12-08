@@ -3081,6 +3081,36 @@ async def get_fleet_cost_per_mile(
             for row in rows
         ]
 
+        # Fallback: Use odometer-based calculation if no daily_miles data
+        if not trucks_data:
+            logger.info("No daily_miles data, using odometer-based calculation")
+            fallback_query = """
+                SELECT 
+                    truck_id,
+                    MAX(odometer) - MIN(odometer) as miles,
+                    AVG(CASE WHEN mpg > 0 THEN mpg END) as avg_mpg,
+                    MAX(engine_hours) - MIN(engine_hours) as engine_hours,
+                    COUNT(*) as records
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                GROUP BY truck_id
+                HAVING miles > 10
+            """
+            with engine.connect() as conn:
+                result = conn.execute(text(fallback_query), {"days": days})
+                rows = result.fetchall()
+            
+            trucks_data = [
+                {
+                    "truck_id": row[0],
+                    "miles": float(row[1] or 0),
+                    "gallons": float(row[1] or 0) / max(float(row[2] or 5.5), 1),  # Estimate from MPG
+                    "engine_hours": float(row[3] or 0),
+                    "avg_mpg": float(row[2] or 5.5),
+                }
+                for row in rows
+            ]
+
         # Note: Currently fleet is single-carrier, no filtering needed
         # Future: Filter by carrier_id when multi-tenant is enabled
 
@@ -3267,6 +3297,43 @@ async def get_fleet_utilization(
                     "engine_off_hours": max(0, engine_off),
                 }
             )
+
+        # Fallback: If no time data, estimate from odometer/speed patterns
+        if not trucks_data:
+            logger.info("No time breakdown data, using odometer-based estimation")
+            fallback_query = """
+                SELECT 
+                    truck_id,
+                    MAX(odometer) - MIN(odometer) as miles,
+                    AVG(speed) as avg_speed,
+                    COUNT(*) as readings
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                GROUP BY truck_id
+                HAVING miles > 0
+            """
+            with engine.connect() as conn:
+                result = conn.execute(text(fallback_query), {"days": days})
+                rows = result.fetchall()
+            
+            for row in rows:
+                miles = float(row[1] or 0)
+                avg_speed = float(row[2] or 35)  # Default 35 mph average
+                # Estimate driving hours from miles and average speed
+                driving = miles / max(avg_speed, 1) if avg_speed > 0 else miles / 35
+                # Estimate idle as 25% of driving time
+                idle = driving * 0.25
+                productive_idle = idle * 0.3
+                non_productive_idle = idle * 0.7
+                engine_off = max(0, total_hours - driving - idle)
+                
+                trucks_data.append({
+                    "truck_id": row[0],
+                    "driving_hours": driving,
+                    "productive_idle_hours": productive_idle,
+                    "non_productive_idle_hours": non_productive_idle,
+                    "engine_off_hours": engine_off,
+                })
 
         # Note: Currently fleet is single-carrier, no filtering needed
 
