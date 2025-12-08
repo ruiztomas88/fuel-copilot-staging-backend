@@ -34,6 +34,28 @@ class CostTrendDirection(str, Enum):
     DECLINING = "declining"  # Costs going up (bad)
 
 
+class CostTier(str, Enum):
+    """Cost performance tier based on benchmark comparison"""
+
+    ELITE = "elite"  # Below benchmark (excellent)
+    GOOD = "good"  # At benchmark
+    AVERAGE = "average"  # Slightly above benchmark
+    NEEDS_IMPROVEMENT = "needs_improvement"  # Well above benchmark
+
+    @classmethod
+    def from_cost_per_mile(cls, cpm: float) -> "CostTier":
+        """Classify cost tier based on industry benchmark"""
+        benchmark = INDUSTRY_BENCHMARKS["cost_per_mile_total"]
+        if cpm < benchmark * 0.95:
+            return cls.ELITE
+        elif cpm <= benchmark * 1.05:
+            return cls.GOOD
+        elif cpm <= benchmark * 1.20:
+            return cls.AVERAGE
+        else:
+            return cls.NEEDS_IMPROVEMENT
+
+
 # Industry benchmarks (source: ATRI, ATA, Geotab)
 INDUSTRY_BENCHMARKS = {
     "cost_per_mile_total": 2.26,  # Geotab average for Class 8 trucks
@@ -108,12 +130,49 @@ class CostBreakdown:
             "tire_cost_per_mile": round(self.tire_cost_per_mile, 4),
             "depreciation_per_mile": round(self.depreciation_per_mile, 4),
             "total_cost_per_mile": round(self.total_cost_per_mile, 4),
-            "breakdown_percentages": {
-                "fuel": round(self.fuel_percent, 1),
-                "maintenance": round(self.maintenance_percent, 1),
-                "tires": round(self.tire_percent, 1),
-                "depreciation": round(self.depreciation_percent, 1),
-            },
+            "breakdown_percentages": self.breakdown_percentages,
+        }
+
+    @property
+    def breakdown_percentages(self) -> Dict[str, float]:
+        """Return breakdown as percentages dict"""
+        if self.total_cost_per_mile <= 0:
+            return {"fuel": 0, "maintenance": 0, "tires": 0, "depreciation": 0}
+        return {
+            "fuel": round(self.fuel_percent, 1),
+            "maintenance": round(self.maintenance_percent, 1),
+            "tires": round(self.tire_percent, 1),
+            "depreciation": round(self.depreciation_percent, 1),
+        }
+
+
+@dataclass
+class SpeedImpactAnalysis:
+    """Analysis of how speed affects fuel costs"""
+
+    current_speed_mph: float
+    optimal_speed_mph: float = 55.0
+    estimated_mpg: float = 0.0
+    optimal_mpg: float = 6.5
+    monthly_miles: float = 0.0
+    fuel_price: float = 3.50
+    monthly_fuel_cost: float = 0.0
+    optimal_fuel_cost: float = 0.0
+    potential_monthly_savings: float = 0.0
+    mpg_loss_percent: float = 0.0
+
+    def to_dict(self) -> Dict:
+        return {
+            "current_speed_mph": self.current_speed_mph,
+            "optimal_speed_mph": self.optimal_speed_mph,
+            "estimated_mpg": round(self.estimated_mpg, 2),
+            "optimal_mpg": round(self.optimal_mpg, 2),
+            "monthly_miles": self.monthly_miles,
+            "fuel_price": self.fuel_price,
+            "monthly_fuel_cost": round(self.monthly_fuel_cost, 2),
+            "optimal_fuel_cost": round(self.optimal_fuel_cost, 2),
+            "potential_monthly_savings": round(self.potential_monthly_savings, 2),
+            "mpg_loss_percent": round(self.mpg_loss_percent, 1),
         }
 
 
@@ -139,6 +198,9 @@ class TruckCostAnalysis:
     vs_fleet_avg_percent: float = 0.0  # % vs fleet average
     vs_industry_benchmark_percent: float = 0.0  # % vs $2.26 Geotab
 
+    # Cost tier classification
+    cost_tier: Optional[CostTier] = None
+
     # Trend analysis
     trend_direction: CostTrendDirection = CostTrendDirection.STABLE
     trend_percent_change: float = 0.0  # % change vs previous period
@@ -150,6 +212,13 @@ class TruckCostAnalysis:
     # Ranking
     fleet_rank: int = 0
     total_trucks: int = 0
+
+    def __post_init__(self):
+        """Auto-calculate cost tier"""
+        if self.cost_tier is None and self.cost_breakdown:
+            self.cost_tier = CostTier.from_cost_per_mile(
+                self.cost_breakdown.total_cost_per_mile
+            )
 
     def to_dict(self) -> Dict:
         return {
@@ -281,7 +350,7 @@ class CostPerMileEngine:
     4. Real-time cost tracking (not just monthly reports)
     """
 
-    def __init__(self, db_connection=None, cost_config: Dict = None):
+    def __init__(self, db_connection=None, cost_config: Optional[Dict] = None):
         """
         Initialize Cost Per Mile Engine.
 
@@ -294,7 +363,7 @@ class CostPerMileEngine:
         logger.info("✅ CostPerMileEngine initialized")
 
     def calculate_fuel_cost_per_mile(
-        self, miles: float, gallons: float, fuel_price: float = None
+        self, miles: float, gallons: float, fuel_price: Optional[float] = None
     ) -> float:
         """
         Calculate fuel cost per mile.
@@ -355,7 +424,7 @@ class CostPerMileEngine:
         miles: float,
         gallons: float,
         engine_hours: float,
-        fuel_price: float = None,
+        fuel_price: Optional[float] = None,
     ) -> CostBreakdown:
         """
         Calculate complete cost breakdown per mile.
@@ -388,9 +457,9 @@ class CostPerMileEngine:
         self,
         truck_id: str,
         period_days: int = 30,
-        truck_data: Dict = None,
-        fleet_avg_cpm: float = None,
-        previous_period_cpm: float = None,
+        truck_data: Optional[Dict] = None,
+        fleet_avg_cpm: Optional[float] = None,
+        previous_period_cpm: Optional[float] = None,
     ) -> TruckCostAnalysis:
         """
         Perform complete cost analysis for a single truck.
@@ -515,7 +584,25 @@ class CostPerMileEngine:
 
         if not trucks_data:
             logger.warning("No trucks data provided for fleet cost analysis")
-            return None
+            # Return a default empty summary instead of None
+            return FleetCostSummary(
+                period_start=period_start,
+                period_end=now,
+                period_days=period_days,
+                total_trucks=0,
+                total_miles=0,
+                total_fuel_gallons=0,
+                total_fuel_cost=0,
+                fleet_avg_cost_per_mile=0,
+                cost_breakdown=CostBreakdown(0, 0, 0, 0, 0),
+                vs_industry_benchmark_percent=0,
+                best_truck="",
+                best_cost_per_mile=0,
+                worst_truck="",
+                worst_cost_per_mile=0,
+                total_potential_savings_per_month=0,
+                truck_analyses=[],
+            )
 
         # Calculate fleet totals
         total_miles = sum(t.get("miles", 0) for t in trucks_data)
@@ -580,7 +667,10 @@ class CostPerMileEngine:
         )
 
     def get_cost_history(
-        self, truck_id: str = None, period_days: int = 90, granularity: str = "week"
+        self,
+        truck_id: Optional[str] = None,
+        period_days: int = 90,
+        granularity: str = "week",
     ) -> List[Dict]:
         """
         Get historical cost per mile data for trending charts.
@@ -628,6 +718,58 @@ class CostPerMileEngine:
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "data": summary.to_dict(),
         }
+
+    def calculate_speed_impact(
+        self,
+        current_speed_mph: float,
+        monthly_miles: float,
+        fuel_price: Optional[float] = None,
+    ) -> SpeedImpactAnalysis:
+        """
+        Calculate how speed affects fuel costs.
+
+        Based on DOE research: MPG drops ~1% for every 1 MPH above 50.
+
+        Args:
+            current_speed_mph: Current average speed
+            monthly_miles: Monthly miles driven
+            fuel_price: Optional fuel price override
+
+        Returns:
+            SpeedImpactAnalysis with savings potential
+        """
+        fuel_price = fuel_price or self.config["fuel_price_per_gallon"]
+        optimal_speed = 55.0
+        optimal_mpg = 6.5  # Class 8 optimal at 55 mph
+
+        # Calculate MPG loss due to speed
+        # Every 1 MPH above 50 = ~1% fuel economy drop
+        speed_penalty = max(0, current_speed_mph - 50) * 0.01
+        estimated_mpg = optimal_mpg * (1 - speed_penalty)
+        estimated_mpg = max(4.0, estimated_mpg)  # Floor at 4 MPG
+
+        # Calculate costs
+        current_gallons = monthly_miles / estimated_mpg
+        optimal_gallons = monthly_miles / optimal_mpg
+
+        current_cost = current_gallons * fuel_price
+        optimal_cost = optimal_gallons * fuel_price
+        savings = current_cost - optimal_cost
+
+        mpg_loss = ((optimal_mpg - estimated_mpg) / optimal_mpg) * 100
+
+        return SpeedImpactAnalysis(
+            current_speed_mph=current_speed_mph,
+            optimal_speed_mph=optimal_speed,
+            estimated_mpg=estimated_mpg,
+            optimal_mpg=optimal_mpg,
+            monthly_miles=monthly_miles,
+            fuel_price=fuel_price,
+            monthly_fuel_cost=current_cost,
+            optimal_fuel_cost=optimal_cost,
+            potential_monthly_savings=max(0, savings),
+            mpg_loss_percent=mpg_loss,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

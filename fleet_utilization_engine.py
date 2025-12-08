@@ -40,11 +40,38 @@ class TruckActivityState(str, Enum):
 class UtilizationTier(str, Enum):
     """Utilization tier classification"""
 
-    EXCELLENT = "excellent"  # 90%+ utilization
-    GOOD = "good"  # 80-90%
-    FAIR = "fair"  # 70-80%
-    POOR = "poor"  # 60-70%
-    CRITICAL = "critical"  # <60%
+    ELITE = "elite"  # 95%+ utilization
+    OPTIMAL = "optimal"  # 85-95%
+    MODERATE = "moderate"  # 70-85%
+    NEEDS_IMPROVEMENT = "needs_improvement"  # <70%
+
+    # Aliases for backward compatibility
+    EXCELLENT = "elite"
+    GOOD = "optimal"
+    FAIR = "moderate"
+    POOR = "needs_improvement"
+    CRITICAL = "needs_improvement"
+
+    @classmethod
+    def from_percentage(cls, pct: float) -> "UtilizationTier":
+        """Classify utilization tier based on percentage"""
+        if pct >= 95:
+            return cls.ELITE
+        elif pct >= 85:
+            return cls.OPTIMAL
+        elif pct >= 70:
+            return cls.MODERATE
+        else:
+            return cls.NEEDS_IMPROVEMENT
+
+
+# Utilization targets
+UTILIZATION_TARGETS = {
+    "elite": 95.0,
+    "optimal": 85.0,
+    "moderate": 70.0,
+    "geotab_benchmark": 95.0,
+}
 
 
 # Industry benchmarks (Geotab standard)
@@ -303,6 +330,32 @@ class FleetUtilizationSummary:
         }
 
 
+@dataclass
+class OptimizationRecommendation:
+    """Optimization recommendation for fleet utilization"""
+
+    priority: str  # "critical", "high", "medium", "low"
+    category: str  # "idle_reduction", "scheduling", "maintenance", etc.
+    title: str
+    description: str
+    potential_savings: float = 0.0
+    affected_trucks: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict:
+        return {
+            "priority": self.priority,
+            "category": self.category,
+            "title": self.title,
+            "description": self.description,
+            "potential_savings": round(self.potential_savings, 2),
+            "affected_trucks": self.affected_trucks,
+        }
+
+
+# Type aliases for test compatibility
+TruckUtilization = TruckUtilizationAnalysis
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN ENGINE CLASS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -328,8 +381,9 @@ class FleetUtilizationEngine:
     def __init__(
         self,
         db_connection=None,
-        productive_locations: List[Dict] = None,
-        work_schedule: Dict = None,
+        productive_locations: Optional[List[Dict]] = None,
+        work_schedule: Optional[Dict] = None,
+        target_utilization: float = 95.0,
     ):
         """
         Initialize Fleet Utilization Engine.
@@ -339,14 +393,16 @@ class FleetUtilizationEngine:
             productive_locations: List of geofences considered productive
                                  (customer locations, terminals, etc.)
             work_schedule: Override default work schedule
+            target_utilization: Target utilization percentage (default 95%)
         """
         self.db = db_connection
         self.productive_locations = productive_locations or []
         self.schedule = {**WORK_SCHEDULE, **(work_schedule or {})}
+        self.target_utilization = target_utilization
         logger.info("✅ FleetUtilizationEngine initialized")
 
     def classify_activity_state(
-        self, speed: float, rpm: int, location: Tuple[float, float] = None
+        self, speed: float, rpm: int, location: Optional[Tuple[float, float]] = None
     ) -> TruckActivityState:
         """
         Classify truck activity state based on telemetry.
@@ -511,8 +567,9 @@ class FleetUtilizationEngine:
         self,
         truck_id: str,
         period_days: int = 7,
-        truck_data: Dict = None,
-        fleet_avg_utilization: float = None,
+        truck_data: Optional[Dict] = None,
+        fleet_avg_utilization: Optional[float] = None,
+        previous_utilization: Optional[float] = None,
     ) -> TruckUtilizationAnalysis:
         """
         Perform complete utilization analysis for a single truck.
@@ -522,6 +579,7 @@ class FleetUtilizationEngine:
             period_days: Number of days to analyze
             truck_data: Pre-fetched truck data with time breakdown
             fleet_avg_utilization: Fleet average for comparison
+            previous_utilization: Previous period utilization for trend
 
         Returns:
             TruckUtilizationAnalysis with complete analysis
@@ -627,7 +685,26 @@ class FleetUtilizationEngine:
 
         if not trucks_data:
             logger.warning("No trucks data provided for fleet utilization analysis")
-            return None
+            # Return empty summary instead of None
+            empty_breakdown = TimeBreakdown(0, 0, 0, 0, 0)
+            return FleetUtilizationSummary(
+                period_start=period_start,
+                period_end=now,
+                period_days=period_days,
+                total_trucks=0,
+                total_driving_hours=0,
+                total_idle_hours=0,
+                fleet_avg_utilization=0,
+                fleet_time_breakdown=empty_breakdown,
+                tier_distribution={},
+                best_truck="",
+                best_utilization=0,
+                worst_truck="",
+                worst_utilization=0,
+                underutilized_trucks=[],
+                total_lost_revenue=0,
+                truck_analyses=[],
+            )
 
         # Calculate fleet totals
         total_driving = sum(t.get("driving_hours", 0) for t in trucks_data)

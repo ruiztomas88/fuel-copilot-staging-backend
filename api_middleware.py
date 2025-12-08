@@ -12,6 +12,7 @@ Usage:
     setup_middleware(app)
 """
 
+import os
 import time
 import logging
 from typing import Callable, Optional, Dict
@@ -25,6 +26,15 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
+
+
+def is_testing_mode() -> bool:
+    """🆕 v4.1: Check if we're in testing mode (rate limiting disabled).
+
+    Note: Set SKIP_RATE_LIMIT=1 to disable rate limiting.
+    This is different from TESTING which is for general test mode.
+    """
+    return os.getenv("SKIP_RATE_LIMIT", "").lower() in ("1", "true", "yes")
 
 
 # ===========================================
@@ -149,7 +159,12 @@ class RateLimiter:
         Raises HTTPException(429) if rate limited.
 
         🆕 v3.12.21: Now supports role-based limits.
+        🆕 v4.1: Disabled in TESTING_MODE
         """
+        # Skip rate limiting in test mode
+        if is_testing_mode():
+            return
+
         client_id = self._get_client_id(request)
         user_role = role or self._get_user_role(request)
         rpm, rps, burst = self._get_limits_for_role(user_role)

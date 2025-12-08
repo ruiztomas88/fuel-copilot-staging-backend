@@ -40,7 +40,7 @@ class TestMPGConfig:
         assert config.min_mpg == 3.5  # Physical min for Class 8
         assert config.max_mpg == 9.0  # Physical max for Class 8
         assert config.ema_alpha == 0.4  # v3.10.7: Reduced for smoother readings
-        assert config.fallback_mpg == 5.8
+        assert config.fallback_mpg == 5.7  # v4.0: Updated fallback
 
     def test_invalid_min_mpg_greater_than_max(self):
         """Should raise error if min_mpg >= max_mpg"""

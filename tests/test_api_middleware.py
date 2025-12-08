@@ -40,7 +40,8 @@ class TestRateLimiter:
     """Tests for RateLimiter class"""
 
     @pytest.fixture
-    def limiter(self):
+    def limiter(self, enable_rate_limiting):
+        """Rate limiter fixture - requires rate limiting to be enabled."""
         # 🆕 v3.12.21: Use anonymous limits (30 rpm) for testing
         return RateLimiter(
             requests_per_minute=30,  # Matches anonymous role

@@ -32,7 +32,7 @@ class TestRateLimitFunctions:
         result = get_rate_limit_for_role("unknown_role")
         assert result == RATE_LIMITS["anonymous"]
 
-    def test_check_rate_limit_allows_first_request(self):
+    def test_check_rate_limit_allows_first_request(self, enable_rate_limiting):
         """First request should always be allowed"""
         from main import check_rate_limit, _rate_limit_store
 
@@ -45,7 +45,7 @@ class TestRateLimitFunctions:
         assert allowed is True
         assert remaining >= 0
 
-    def test_check_rate_limit_tracks_requests(self):
+    def test_check_rate_limit_tracks_requests(self, enable_rate_limiting):
         """Should track requests over time"""
         from main import check_rate_limit, _rate_limit_store
 

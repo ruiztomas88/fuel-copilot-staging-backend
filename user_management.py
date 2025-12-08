@@ -20,41 +20,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
-from contextlib import contextmanager
 
-import pymysql
-from pymysql.cursors import DictCursor
+import pymysql  # For exception types
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# DATABASE CONNECTION
-# =============================================================================
-def _get_db_config() -> Dict:
-    """Get database configuration from environment."""
-    return {
-        "host": os.getenv("MYSQL_HOST", "localhost"),
-        "port": int(os.getenv("MYSQL_PORT", "3306")),
-        "user": os.getenv("MYSQL_USER", "fuel_admin"),
-        "password": os.getenv("MYSQL_PASSWORD", ""),
-        "database": os.getenv("MYSQL_DATABASE", "fuel_copilot"),
-        "charset": "utf8mb4",
-        "cursorclass": DictCursor,
-        "autocommit": True,
-    }
-
-
-@contextmanager
-def get_db_connection():
-    """Get database connection with automatic cleanup."""
-    conn = None
-    try:
-        conn = pymysql.connect(**_get_db_config())
-        yield conn
-    finally:
-        if conn:
-            conn.close()
+# Centralized database connection
+from db_connection import get_pymysql_connection as get_db_connection
 
 
 # =============================================================================
