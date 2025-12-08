@@ -1440,18 +1440,20 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
             )
 
             total_gallons = moving_gallons + idle_gallons
-            
+
             # MPG analysis
             avg_mpg = float(result[6] or BASELINE_MPG)
-            
+
             # 🔧 v3.15.2: Calculate total_miles from odometer OR from fuel/MPG
             # odom_delta_mi is often NULL/0 due to sensor issues
             odom_miles = float(result[7] or 0)
-            
+
             # If no odometer data, estimate miles from: miles = gallons × MPG
             if odom_miles < 1 and avg_mpg > 0 and moving_gallons > 0:
                 total_miles = moving_gallons * avg_mpg
-                logger.info(f"📏 Estimated miles from fuel: {moving_gallons:.1f} gal × {avg_mpg:.1f} MPG = {total_miles:.1f} mi")
+                logger.info(
+                    f"📏 Estimated miles from fuel: {moving_gallons:.1f} gal × {avg_mpg:.1f} MPG = {total_miles:.1f} mi"
+                )
             else:
                 total_miles = odom_miles
 
@@ -1592,11 +1594,7 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
                 "projections": {
                     "daily": {
                         "cost": round(
-                            (
-                                total_cost / days_back
-                                if days_back > 0
-                                else total_cost
-                            ),
+                            (total_cost / days_back if days_back > 0 else total_cost),
                             2,
                         ),
                         "gallons": round(
@@ -1608,11 +1606,7 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
                             2,
                         ),
                         "miles": round(
-                            (
-                                total_miles / days_back
-                                if days_back > 0
-                                else total_miles
-                            ),
+                            (total_miles / days_back if days_back > 0 else total_miles),
                             1,
                         ),
                     },

@@ -475,7 +475,12 @@ def detect_refuel(
     if fuel_increase_pct >= min_increase_pct and increase_gal >= min_increase_gal:
         # Extra safety: reject small jumps when tank is already nearly full
         # (likely sensor noise, not actual refuel)
-        if sensor_pct > 95 and fuel_increase_pct < 20:
+        # 🔧 v3.15.3: Allow refuels >25 gal even near full tank (FF7702 case)
+        # A jump from 80%→99% is valid (~38 gal) even though <20% increase
+        if sensor_pct > 95 and fuel_increase_pct < 20 and increase_gal < 25:
+            logger.debug(
+                f"⏭️ Skipping small near-full jump: {truck_id} +{fuel_increase_pct:.1f}% +{increase_gal:.1f}gal"
+            )
             return None
 
         factor_note = f" (factor={refuel_factor})" if refuel_factor != 1.0 else ""
