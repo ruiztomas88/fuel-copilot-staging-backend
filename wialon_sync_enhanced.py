@@ -443,9 +443,13 @@ def detect_refuel(
     - This is more accurate than comparing two noisy sensor readings
 
     Criteria:
-    - Time gap between 5 min and 2 hours (typical refuel window)
+    - Time gap between 5 min and 24 hours (extended for overnight refuels)
     - Sensor > Kalman by > 15% (fuel was added)
     - Minimum 10 gallons added
+
+    🔧 v3.15.4: Extended max gap from 2h to 24h to catch overnight refuels
+    Many trucks refuel when offline (nights/weekends) and the 2h limit
+    was causing missed detections (e.g., FF7702).
 
     The Kalman represents "what we expected" after consumption
     The Sensor represents "what's actually in the tank now"
@@ -454,8 +458,9 @@ def detect_refuel(
     if sensor_pct is None or estimated_pct is None:
         return None
 
-    # Time gap validation (5 min to 2 hours)
-    if time_gap_hours < 5 / 60 or time_gap_hours > 2:
+    # Time gap validation (5 min to 24 hours)
+    # 🔧 v3.15.4: Extended from 2h to 24h for overnight refuels
+    if time_gap_hours < 5 / 60 or time_gap_hours > 24:
         return None
 
     # 🔧 v3.12.29: Calculate increase using Kalman as baseline
