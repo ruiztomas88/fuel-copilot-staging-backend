@@ -524,6 +524,7 @@ def get_fleet_summary() -> Dict[str, Any]:
 
     🔧 FIX v3.9.2: Now uses SQLAlchemy connection pooling
     🆕 v3.12.22: Cached for 30 seconds
+    🔧 FIX v4.1: Filter MPG to exclude idle (speed > 5)
     """
     query = text(
         """
@@ -532,7 +533,7 @@ def get_fleet_summary() -> Dict[str, Any]:
             SUM(CASE WHEN truck_status != 'OFFLINE' THEN 1 ELSE 0 END) as active_trucks,
             SUM(CASE WHEN truck_status = 'OFFLINE' THEN 1 ELSE 0 END) as offline_trucks,
             AVG(estimated_pct) as avg_fuel_level,
-            AVG(mpg_current) as avg_mpg,
+            AVG(CASE WHEN speed_mph > 5 AND mpg_current > 0 THEN mpg_current END) as avg_mpg,
             AVG(consumption_lph) as avg_consumption,
             SUM(CASE WHEN drift_warning = 'YES' THEN 1 ELSE 0 END) as trucks_with_drift
         FROM (
