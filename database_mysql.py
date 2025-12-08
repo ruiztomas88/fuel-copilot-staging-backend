@@ -40,7 +40,8 @@ except ImportError:
         return decorator
 
 
-logger = logging.getLogger(__name__)
+# 🔧 FIX v3.12.23: Removed duplicate logger declaration (was on line 43)
+# Logger already declared on line 23
 
 # 🔧 FIX v3.9.2: Import centralized config
 # Add parent directory to path to import config from root

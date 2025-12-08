@@ -792,7 +792,9 @@ async def health_check():
     try:
         fleet_summary = db.get_fleet_summary()
         data_fresh = fleet_summary.get("active_trucks", 0) > 0
-    except:
+    except Exception as e:
+        # 🔧 FIX v3.12.23: Properly catch and log exceptions instead of bare except
+        logger.warning(f"Failed to check data freshness: {e}")
         data_fresh = False
 
     # Get bulk handler stats if available
@@ -802,8 +804,9 @@ async def health_check():
 
         handler = get_bulk_handler()
         bulk_stats = handler.get_stats()
-    except:
-        pass
+    except Exception as e:
+        # 🔧 FIX v3.12.23: Properly handle exception instead of bare except
+        logger.debug(f"Bulk handler stats not available: {e}")
 
     # Build health response
     health_data = {
@@ -2986,13 +2989,13 @@ async def get_fleet_cost_per_mile(
 ):
     """
     🆕 v4.0: Get cost per mile analysis for entire fleet.
-    
+
     Superior to Geotab because:
     - Uses Kalman-filtered fuel consumption for accuracy
     - Provides detailed breakdown: Fuel + Maintenance + Tires + Depreciation
     - Compares against industry benchmark ($2.26/mile)
     - Generates actionable savings recommendations
-    
+
     Returns:
         Fleet-wide cost analysis with individual truck breakdowns
     """
@@ -3000,10 +3003,10 @@ async def get_fleet_cost_per_mile(
         from cost_per_mile_engine import CostPerMileEngine
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
-        
+
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
-        
+
         # Get fleet data for the period
         query = """
             SELECT 
@@ -3018,11 +3021,11 @@ async def get_fleet_cost_per_mile(
             GROUP BY truck_id
             HAVING miles > 0
         """
-        
+
         with engine.connect() as conn:
             result = conn.execute(text(query), {"days": days})
             rows = result.fetchall()
-        
+
         trucks_data = [
             {
                 "truck_id": row[0],
@@ -3033,14 +3036,14 @@ async def get_fleet_cost_per_mile(
             }
             for row in rows
         ]
-        
+
         # Note: Currently fleet is single-carrier, no filtering needed
         # Future: Filter by carrier_id when multi-tenant is enabled
-        
+
         report = cpm_engine.generate_cost_report(trucks_data, period_days=days)
-        
+
         return report
-        
+
     except Exception as e:
         logger.error(f"Cost per mile analysis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -3054,7 +3057,7 @@ async def get_truck_cost_per_mile(
 ):
     """
     🆕 v4.0: Get cost per mile analysis for a specific truck.
-    
+
     Returns:
         Detailed cost breakdown and comparison for the specified truck
     """
@@ -3062,12 +3065,12 @@ async def get_truck_cost_per_mile(
         from cost_per_mile_engine import CostPerMileEngine
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
-        
+
         # Note: Access control by carrier_id (currently single carrier)
-        
+
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
-        
+
         # Get truck data for the period
         query = """
             SELECT 
@@ -3080,32 +3083,34 @@ async def get_truck_cost_per_mile(
                 AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
                 AND mpg > 0
         """
-        
+
         with engine.connect() as conn:
             result = conn.execute(text(query), {"truck_id": truck_id, "days": days})
             row = result.fetchone()
-        
+
         if not row or not row[0]:
-            raise HTTPException(status_code=404, detail=f"No data found for truck {truck_id}")
-        
+            raise HTTPException(
+                status_code=404, detail=f"No data found for truck {truck_id}"
+            )
+
         truck_data = {
             "miles": float(row[0] or 0),
             "gallons": float(row[1] or 0),
             "engine_hours": float(row[2] or 0),
             "avg_mpg": float(row[3] or 0),
         }
-        
+
         analysis = cpm_engine.analyze_truck_costs(
             truck_id=truck_id,
             period_days=days,
             truck_data=truck_data,
         )
-        
+
         return {
             "status": "success",
             "data": analysis.to_dict(),
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -3121,25 +3126,25 @@ async def get_speed_cost_impact(
 ):
     """
     🆕 v4.0: Calculate cost impact of speeding.
-    
+
     Based on Geotab research: "Every 5 mph over 60 reduces fuel efficiency by ~0.7 MPG"
-    
+
     Returns:
         Cost impact analysis showing potential savings from speed reduction
     """
     try:
         from cost_per_mile_engine import calculate_speed_cost_impact
-        
+
         impact = calculate_speed_cost_impact(
             avg_speed_mph=avg_speed_mph,
             monthly_miles=monthly_miles,
         )
-        
+
         return {
             "status": "success",
             "data": impact,
         }
-        
+
     except Exception as e:
         logger.error(f"Speed impact analysis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -3157,12 +3162,12 @@ async def get_fleet_utilization(
 ):
     """
     🆕 v4.0: Get fleet utilization analysis.
-    
+
     Calculates utilization rate (Geotab target: 95%) based on:
     - Driving time vs Available time
     - Productive idle (loading/unloading) vs Non-productive idle
     - Engine off time
-    
+
     Returns:
         Fleet-wide utilization metrics and individual truck breakdowns
     """
@@ -3170,10 +3175,10 @@ async def get_fleet_utilization(
         from fleet_utilization_engine import FleetUtilizationEngine
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
-        
+
         engine = get_sqlalchemy_engine()
         util_engine = FleetUtilizationEngine()
-        
+
         # Get activity data for the period
         # We'll estimate time breakdowns from speed and RPM patterns
         query = """
@@ -3193,14 +3198,14 @@ async def get_fleet_utilization(
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
             GROUP BY truck_id
         """
-        
+
         with engine.connect() as conn:
             result = conn.execute(text(query), {"days": days})
             rows = result.fetchall()
-        
+
         trucks_data = []
         total_hours = days * 24
-        
+
         for row in rows:
             driving = float(row[1] or 0)
             idle = float(row[2] or 0)
@@ -3208,21 +3213,23 @@ async def get_fleet_utilization(
             productive_idle = idle * 0.3
             non_productive_idle = idle * 0.7
             engine_off = total_hours - driving - idle
-            
-            trucks_data.append({
-                "truck_id": row[0],
-                "driving_hours": driving,
-                "productive_idle_hours": productive_idle,
-                "non_productive_idle_hours": non_productive_idle,
-                "engine_off_hours": max(0, engine_off),
-            })
-        
+
+            trucks_data.append(
+                {
+                    "truck_id": row[0],
+                    "driving_hours": driving,
+                    "productive_idle_hours": productive_idle,
+                    "non_productive_idle_hours": non_productive_idle,
+                    "engine_off_hours": max(0, engine_off),
+                }
+            )
+
         # Note: Currently fleet is single-carrier, no filtering needed
-        
+
         report = util_engine.generate_utilization_report(trucks_data, period_days=days)
-        
+
         return report
-        
+
     except Exception as e:
         logger.error(f"Fleet utilization error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -3236,7 +3243,7 @@ async def get_truck_utilization(
 ):
     """
     🆕 v4.0: Get utilization analysis for a specific truck.
-    
+
     Returns:
         Detailed utilization metrics and recommendations for the specified truck
     """
@@ -3244,12 +3251,12 @@ async def get_truck_utilization(
         from fleet_utilization_engine import FleetUtilizationEngine
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
-        
+
         # Note: Access control by carrier_id (currently single carrier)
-        
+
         engine = get_sqlalchemy_engine()
         util_engine = FleetUtilizationEngine()
-        
+
         query = """
             SELECT 
                 SUM(CASE 
@@ -3264,39 +3271,41 @@ async def get_truck_utilization(
             WHERE truck_id = :truck_id
                 AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
         """
-        
+
         with engine.connect() as conn:
             result = conn.execute(text(query), {"truck_id": truck_id, "days": days})
             row = result.fetchone()
-        
+
         if not row:
-            raise HTTPException(status_code=404, detail=f"No data found for truck {truck_id}")
-        
+            raise HTTPException(
+                status_code=404, detail=f"No data found for truck {truck_id}"
+            )
+
         total_hours = days * 24
         driving = float(row[0] or 0)
         idle = float(row[1] or 0)
         productive_idle = idle * 0.3
         non_productive_idle = idle * 0.7
         engine_off = total_hours - driving - idle
-        
+
         truck_data = {
             "driving_hours": driving,
             "productive_idle_hours": productive_idle,
             "non_productive_idle_hours": non_productive_idle,
             "engine_off_hours": max(0, engine_off),
         }
-        
+
         analysis = util_engine.analyze_truck_utilization(
             truck_id=truck_id,
             period_days=days,
             truck_data=truck_data,
         )
-        
+
         return {
             "status": "success",
             "data": analysis.to_dict(),
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -3311,12 +3320,12 @@ async def get_utilization_optimization(
 ):
     """
     🆕 v4.0: Get fleet optimization recommendations based on utilization.
-    
+
     Identifies:
     - Underutilized trucks (candidates for reassignment)
     - Fleet size recommendations
     - Potential revenue recovery
-    
+
     Returns:
         Optimization recommendations with financial impact
     """
@@ -3324,10 +3333,10 @@ async def get_utilization_optimization(
         from fleet_utilization_engine import FleetUtilizationEngine
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
-        
+
         engine = get_sqlalchemy_engine()
         util_engine = FleetUtilizationEngine()
-        
+
         # Get utilization data (same as fleet endpoint)
         query = """
             SELECT 
@@ -3344,40 +3353,45 @@ async def get_utilization_optimization(
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
             GROUP BY truck_id
         """
-        
+
         with engine.connect() as conn:
             result = conn.execute(text(query), {"days": days})
             rows = result.fetchall()
-        
+
         trucks_data = []
         total_hours = days * 24
-        
+
         for row in rows:
             driving = float(row[1] or 0)
             idle = float(row[2] or 0)
             productive_idle = idle * 0.3
             non_productive_idle = idle * 0.7
             engine_off = total_hours - driving - idle
-            
-            trucks_data.append({
-                "truck_id": row[0],
-                "driving_hours": driving,
-                "productive_idle_hours": productive_idle,
-                "non_productive_idle_hours": non_productive_idle,
-                "engine_off_hours": max(0, engine_off),
-            })
-        
+
+            trucks_data.append(
+                {
+                    "truck_id": row[0],
+                    "driving_hours": driving,
+                    "productive_idle_hours": productive_idle,
+                    "non_productive_idle_hours": non_productive_idle,
+                    "engine_off_hours": max(0, engine_off),
+                }
+            )
+
         # Note: Currently fleet is single-carrier, no filtering needed
-        
+
         # Analyze fleet utilization
         summary = util_engine.analyze_fleet_utilization(trucks_data, period_days=days)
-        
+
         if not summary:
-            return {"status": "error", "message": "No data available for optimization analysis"}
-        
+            return {
+                "status": "error",
+                "message": "No data available for optimization analysis",
+            }
+
         # Get optimization opportunities
         opportunities = util_engine.identify_fleet_optimization_opportunities(summary)
-        
+
         return {
             "status": "success",
             "period_days": days,
@@ -3385,7 +3399,7 @@ async def get_utilization_optimization(
             "target_utilization": 95,
             "data": opportunities,
         }
-        
+
     except Exception as e:
         logger.error(f"Utilization optimization error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
