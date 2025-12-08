@@ -743,14 +743,25 @@ async def api_status():
 @app.get("/fuelAnalytics/api/cache/stats", tags=["Health"])
 async def get_cache_stats():
     """
-    Get Redis cache statistics and performance metrics.
+    Get cache statistics and performance metrics.
 
     Returns cache availability, hit/miss rates, and memory usage.
+    🆕 v3.12.22: Now uses in-memory cache instead of Redis
     """
+    # Try memory cache first
+    try:
+        from memory_cache import get_cache_status
+
+        stats = get_cache_status()
+        return {"available": True, **stats}
+    except ImportError:
+        pass
+
+    # Fallback to Redis cache if available
     if not cache:
         return {
             "available": False,
-            "message": "Redis cache not configured (set REDIS_ENABLED=true)",
+            "message": "Cache not configured",
         }
 
     try:

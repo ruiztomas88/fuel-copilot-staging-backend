@@ -22,6 +22,26 @@ from sqlalchemy.pool import QueuePool
 
 logger = logging.getLogger(__name__)
 
+# 🆕 v3.12.22: Memory cache for performance optimization
+try:
+    from memory_cache import cached, cache, invalidate_fleet_cache
+
+    CACHE_ENABLED = True
+except ImportError:
+    CACHE_ENABLED = False
+    cache = None
+    invalidate_fleet_cache = lambda: 0
+
+    # Dummy decorator if cache not available
+    def cached(ttl_seconds=30, key_prefix=""):
+        def decorator(func):
+            return func
+
+        return decorator
+
+
+logger = logging.getLogger(__name__)
+
 # 🔧 FIX v3.9.2: Import centralized config
 # Add parent directory to path to import config from root
 sys.path.insert(
@@ -495,12 +515,14 @@ def get_refuel_history(
         return []
 
 
+@cached(ttl_seconds=30, key_prefix="get_fleet_summary")
 def get_fleet_summary() -> Dict[str, Any]:
     """
     Get fleet-wide statistics
     Replaces: get_fleet_summary() in database.py
 
     🔧 FIX v3.9.2: Now uses SQLAlchemy connection pooling
+    🆕 v3.12.22: Cached for 30 seconds
     """
     query = text(
         """
@@ -657,9 +679,11 @@ def get_fuel_rate_analysis(truck_id: str, hours_back: int = 48) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@cached(ttl_seconds=60, key_prefix="get_kpi_summary")
 def get_kpi_summary(days_back: int = 1) -> Dict[str, Any]:
     """
     🆕 v3.8.1: Optimized KPI calculation using single MySQL query
+    🆕 v3.12.22: Cached for 60 seconds
 
     Calculates fleet KPIs directly from MySQL for better performance:
     - Total fuel consumed (excluding OFFLINE status)
@@ -1128,9 +1152,11 @@ def _empty_loss_response(days: int, price: float) -> Dict[str, Any]:
 # =============================================================================
 
 
+@cached(ttl_seconds=60, key_prefix="get_driver_scorecard")
 def get_driver_scorecard(days_back: int = 7) -> Dict[str, Any]:
     """
     🆕 v3.10.0: Comprehensive Driver Scorecard System
+    🆕 v3.12.22: Cached for 60 seconds
 
     Calculates multi-dimensional driver scores based on:
     1. Speed Optimization (0-100): % time at optimal speed (55-65 mph)
@@ -1721,9 +1747,11 @@ def _empty_enhanced_kpis(days: int, price: float) -> Dict[str, Any]:
     }
 
 
+@cached(ttl_seconds=60, key_prefix="get_enhanced_loss_analysis")
 def get_enhanced_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
     """
     🆕 v3.10.0: Enhanced Loss Analysis with Root Cause Intelligence
+    🆕 v3.12.22: Cached for 60 seconds
 
     Provides detailed breakdown of fuel losses:
     1. EXCESSIVE IDLE (~50%): Detailed by time patterns, locations
