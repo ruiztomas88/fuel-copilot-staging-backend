@@ -560,15 +560,14 @@ if ROUTERS_AVAILABLE:
         logger.error(f"❌ Failed to include routers: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🆕 v5.2: CLEAN V5 ENDPOINTS (Fleet Analytics, Leaderboard, Predictive Maintenance)
+# 🆕 v5.2: CLEAN V5 ENDPOINTS (Fleet Analytics, Leaderboard ONLY)
+# 🚫 v5.2.1: PREDICTIVE MAINTENANCE REMOVED - crashes on startup
 # ═══════════════════════════════════════════════════════════════════════════════
 try:
     from v5_endpoints import register_v5_endpoints
 
     register_v5_endpoints(app)
-    logger.info(
-        "✅ V5 Clean Endpoints registered (Fleet Analytics, Leaderboard, Maintenance)"
-    )
+    logger.info("✅ V5 Clean Endpoints registered (Fleet Analytics, Leaderboard)")
 except Exception as e:
     logger.error(f"❌ Failed to register V5 endpoints: {e}")
 

@@ -1,20 +1,21 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                    V5 ENDPOINTS - CLEAN REBUILD                                ║
-║              Fleet Analytics, Leaderboard, Predictive Maintenance              ║
+║                    Fleet Analytics + Leaderboard ONLY                          ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
-║  v5.2 - December 2025                                                          ║
+║  v5.2.1 - December 2025                                                        ║
 ║  - No TruckHealthMonitor dependency                                            ║
 ║  - No UnifiedHealthEngine dependency                                           ║
+║  - No Predictive Maintenance (DISABLED - crashes backend)                      ║
 ║  - Direct SQL queries to fuel_metrics table                                    ║
 ║  - Always returns data (demo fallback if DB unavailable)                       ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Query, HTTPException
+from datetime import datetime, timezone
+from typing import Dict, Any, List
+from fastapi import APIRouter, Query
 
 logger = logging.getLogger(__name__)
 
@@ -149,44 +150,6 @@ DEMO_LEADERBOARD = [
     },
 ]
 
-DEMO_MAINTENANCE = [
-    {
-        "truck_id": "NQ6975",
-        "health_score": 85,
-        "status": "NORMAL",
-        "next_service_miles": 12500,
-        "issues": [],
-    },
-    {
-        "truck_id": "VD3579",
-        "health_score": 92,
-        "status": "NORMAL",
-        "next_service_miles": 18200,
-        "issues": [],
-    },
-    {
-        "truck_id": "VD2453",
-        "health_score": 68,
-        "status": "WARNING",
-        "next_service_miles": 3200,
-        "issues": ["Oil change due soon", "Tire pressure low"],
-    },
-    {
-        "truck_id": "NQ4533",
-        "health_score": 78,
-        "status": "WATCH",
-        "next_service_miles": 8500,
-        "issues": ["DEF level low"],
-    },
-    {
-        "truck_id": "VD5903",
-        "health_score": 88,
-        "status": "NORMAL",
-        "next_service_miles": 15000,
-        "issues": [],
-    },
-]
-
 
 # =============================================================================
 # FLEET ANALYTICS ENDPOINT
@@ -202,7 +165,6 @@ async def get_fleet_analytics(days: int = Query(7, ge=1, le=90)):
     if conn:
         try:
             with conn.cursor() as cursor:
-                # Get latest data per truck
                 cursor.execute(
                     """
                     SELECT 
@@ -234,10 +196,9 @@ async def get_fleet_analytics(days: int = Query(7, ge=1, le=90)):
 
                     for row in rows:
                         mpg = float(row.get("mpg_current") or 6.5)
-                        # Estimate daily values
-                        miles_today = 250  # Estimated daily average
+                        miles_today = 250
                         gallons_today = miles_today / mpg if mpg > 0 else 40
-                        cost_today = gallons_today * 3.50  # $3.50/gal average
+                        cost_today = gallons_today * 3.50
 
                         trucks.append(
                             {
@@ -319,7 +280,6 @@ async def get_driver_leaderboard(days: int = Query(7, ge=1, le=90)):
     if conn:
         try:
             with conn.cursor() as cursor:
-                # Get average MPG per truck over the period
                 cursor.execute(
                     """
                     SELECT 
@@ -342,12 +302,12 @@ async def get_driver_leaderboard(days: int = Query(7, ge=1, le=90)):
 
                 if rows:
                     leaderboard = []
-                    baseline_mpg = 6.5  # Fleet baseline
+                    baseline_mpg = 6.5
 
                     for rank, row in enumerate(rows, 1):
                         avg_mpg = float(row["avg_mpg"] or 6.5)
                         efficiency = min(100, int((avg_mpg / baseline_mpg) * 85))
-                        miles_driven = rank * 200 + 1500  # Estimated
+                        miles_driven = rank * 200 + 1500
                         fuel_saved = (
                             max(0, (avg_mpg - baseline_mpg) * (miles_driven / avg_mpg))
                             if avg_mpg > baseline_mpg
@@ -392,211 +352,9 @@ async def get_driver_leaderboard(days: int = Query(7, ge=1, le=90)):
 
 
 # =============================================================================
-# PREDICTIVE MAINTENANCE ENDPOINT
-# =============================================================================
-@router.get("/predictive-maintenance")
-async def get_predictive_maintenance():
-    """
-    Predictive Maintenance - Basic health scores from sensor data.
-    Returns real data from fuel_metrics or demo data as fallback.
-    """
-    conn = get_db_connection()
-
-    if conn:
-        try:
-            with conn.cursor() as cursor:
-                # Get latest sensor readings per truck
-                cursor.execute(
-                    """
-                    SELECT 
-                        t1.truck_id,
-                        t1.coolant_temp_f,
-                        t1.oil_press_psi,
-                        t1.def_level_pct,
-                        t1.battery_volts,
-                        t1.truck_status,
-                        t1.timestamp_utc
-                    FROM fuel_metrics t1
-                    INNER JOIN (
-                        SELECT truck_id, MAX(id) as max_id
-                        FROM fuel_metrics
-                        WHERE timestamp_utc >= NOW() - INTERVAL 1 DAY
-                        GROUP BY truck_id
-                    ) t2 ON t1.truck_id = t2.truck_id AND t1.id = t2.max_id
-                """
-                )
-
-                rows = cursor.fetchall()
-
-                if rows:
-                    trucks = []
-                    status_counts = {
-                        "NORMAL": 0,
-                        "WATCH": 0,
-                        "WARNING": 0,
-                        "CRITICAL": 0,
-                    }
-
-                    for row in rows:
-                        # Calculate health score from sensors
-                        issues = []
-                        score = 100
-
-                        # Coolant temp check (normal: 180-220°F)
-                        coolant = row.get("coolant_temp_f")
-                        if coolant:
-                            coolant = float(coolant)
-                            if coolant > 230:
-                                issues.append("Engine overheating")
-                                score -= 25
-                            elif coolant > 220:
-                                issues.append("Coolant temp high")
-                                score -= 10
-                            elif coolant < 160:
-                                issues.append("Engine running cold")
-                                score -= 5
-
-                        # Oil pressure check (normal: 25-65 PSI)
-                        oil_press = row.get("oil_press_psi")
-                        if oil_press:
-                            oil_press = float(oil_press)
-                            if oil_press < 20:
-                                issues.append("Low oil pressure - CRITICAL")
-                                score -= 30
-                            elif oil_press < 25:
-                                issues.append("Oil pressure low")
-                                score -= 15
-
-                        # DEF level check
-                        def_level = row.get("def_level_pct")
-                        if def_level:
-                            def_level = float(def_level)
-                            if def_level < 10:
-                                issues.append("DEF level critical")
-                                score -= 20
-                            elif def_level < 20:
-                                issues.append("DEF level low")
-                                score -= 10
-
-                        # Battery check (normal: 12.4-14.7V)
-                        battery = row.get("battery_volts")
-                        if battery:
-                            battery = float(battery)
-                            if battery < 12.0:
-                                issues.append("Battery voltage low")
-                                score -= 15
-                            elif battery < 12.4:
-                                issues.append("Battery needs attention")
-                                score -= 5
-
-                        # Determine status
-                        score = max(0, min(100, score))
-                        if score >= 80:
-                            status = "NORMAL"
-                        elif score >= 60:
-                            status = "WATCH"
-                        elif score >= 40:
-                            status = "WARNING"
-                        else:
-                            status = "CRITICAL"
-
-                        status_counts[status] += 1
-
-                        trucks.append(
-                            {
-                                "truck_id": row["truck_id"],
-                                "health_score": score,
-                                "status": status,
-                                "next_service_miles": 15000
-                                - (100 - score) * 100,  # Rough estimate
-                                "issues": issues,
-                                "sensors": {
-                                    "coolant_temp_f": coolant,
-                                    "oil_press_psi": oil_press,
-                                    "def_level_pct": def_level,
-                                    "battery_volts": battery,
-                                },
-                                "last_updated": (
-                                    row["timestamp_utc"].isoformat()
-                                    if row.get("timestamp_utc")
-                                    else None
-                                ),
-                            }
-                        )
-
-                    return {
-                        "success": True,
-                        "source": "database",
-                        "fleet_health": {
-                            "total_trucks": len(trucks),
-                            "average_health_score": round(
-                                sum(t["health_score"] for t in trucks) / len(trucks), 1
-                            ),
-                            "status_breakdown": status_counts,
-                        },
-                        "trucks": trucks,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-        except Exception as e:
-            logger.error(f"❌ Predictive maintenance query failed: {e}")
-        finally:
-            conn.close()
-
-    # Fallback to demo data
-    return {
-        "success": True,
-        "source": "demo",
-        "fleet_health": {
-            "total_trucks": len(DEMO_MAINTENANCE),
-            "average_health_score": 82,
-            "status_breakdown": {"NORMAL": 3, "WATCH": 1, "WARNING": 1, "CRITICAL": 0},
-        },
-        "trucks": DEMO_MAINTENANCE,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-# =============================================================================
-# FLEET HEALTH SUMMARY (compatible with existing frontend)
-# =============================================================================
-@router.get("/fleet-health")
-async def get_fleet_health():
-    """
-    Fleet Health Summary - Same format as /api/maintenance/fleet-health.
-    For frontend compatibility.
-    """
-    result = await get_predictive_maintenance()
-
-    # Transform to expected format
-    return {
-        "success": True,
-        "total_trucks": result["fleet_health"]["total_trucks"],
-        "healthy": result["fleet_health"]["status_breakdown"].get("NORMAL", 0),
-        "watch": result["fleet_health"]["status_breakdown"].get("WATCH", 0),
-        "warning": result["fleet_health"]["status_breakdown"].get("WARNING", 0),
-        "critical": result["fleet_health"]["status_breakdown"].get("CRITICAL", 0),
-        "average_score": result["fleet_health"]["average_health_score"],
-        "trucks": [
-            {
-                "truck_id": t["truck_id"],
-                "truck_name": t["truck_id"],
-                "overall_status": t["status"],
-                "health_score": t["health_score"],
-                "alerts": [
-                    {"message": issue, "severity": "WARNING"} for issue in t["issues"]
-                ],
-                "last_updated": t.get("last_updated"),
-            }
-            for t in result["trucks"]
-        ],
-        "timestamp": result["timestamp"],
-    }
-
-
-# =============================================================================
 # REGISTER ROUTER FUNCTION
 # =============================================================================
 def register_v5_endpoints(app):
     """Register v5 endpoints with the FastAPI app."""
     app.include_router(router)
-    logger.info("✅ V5 Clean Endpoints registered successfully")
+    logger.info("✅ V5 Endpoints registered (Fleet Analytics + Leaderboard)")
