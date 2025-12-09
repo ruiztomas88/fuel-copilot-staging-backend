@@ -1413,8 +1413,8 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
             SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.1 THEN consumption_gph ELSE 0 END) as idle_gph_sum,
             COUNT(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.1 THEN 1 END) as idle_count,
             
-            -- MPG analysis (ONLY from MOVING trucks - v4.1.1 fix)
-            AVG(CASE WHEN truck_status = 'MOVING' AND mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
+            -- MPG analysis
+            AVG(CASE WHEN mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
             
             -- Distance
             SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 10 THEN odom_delta_mi ELSE 0 END) as total_miles,
@@ -1470,11 +1470,6 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
 
             # MPG analysis
             avg_mpg = float(result[6] or BASELINE_MPG)
-
-            # 🔍 DEBUG v4.1.1: Log MPG calculation details
-            logger.info(
-                f"📊 MPG DEBUG: raw_avg={result[6]}, final_avg_mpg={avg_mpg}, moving_count={moving_count}, period={days_back}d"
-            )
 
             # 🔧 v3.15.2: Calculate total_miles from odometer OR from fuel/MPG
             # odom_delta_mi is often NULL/0 due to sensor issues
