@@ -9,7 +9,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import AsyncGenerator, Optional, Dict, Any
-from fastapi import APIRouter, Depends, Query, Request, HTTPException
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 

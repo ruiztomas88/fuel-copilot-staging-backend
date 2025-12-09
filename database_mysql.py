@@ -524,19 +524,17 @@ def get_fleet_summary() -> Dict[str, Any]:
 
     🔧 FIX v3.9.2: Now uses SQLAlchemy connection pooling
     🆕 v3.12.22: Cached for 30 seconds
-    🔧 FIX v4.1: MPG only from trucks currently MOVING (speed > 5)
-    🔧 FIX v4.2: Use correct column names (fuel_percent, consumption_gph)
     """
     query = text(
         """
         SELECT 
             COUNT(DISTINCT truck_id) as total_trucks,
-            SUM(CASE WHEN truck_status IN ('MOVING', 'STOPPED', 'IDLE') THEN 1 ELSE 0 END) as active_trucks,
-            SUM(CASE WHEN truck_status = 'OFFLINE' OR truck_status IS NULL THEN 1 ELSE 0 END) as offline_trucks,
-            AVG(fuel_percent) as avg_fuel_level,
-            AVG(CASE WHEN truck_status = 'MOVING' AND mpg_current > 0 THEN mpg_current END) as avg_mpg,
-            AVG(consumption_gph) as avg_consumption,
-            0 as trucks_with_drift
+            SUM(CASE WHEN truck_status != 'OFFLINE' THEN 1 ELSE 0 END) as active_trucks,
+            SUM(CASE WHEN truck_status = 'OFFLINE' THEN 1 ELSE 0 END) as offline_trucks,
+            AVG(estimated_pct) as avg_fuel_level,
+            AVG(mpg_current) as avg_mpg,
+            AVG(consumption_lph) as avg_consumption,
+            SUM(CASE WHEN drift_warning = 'YES' THEN 1 ELSE 0 END) as trucks_with_drift
         FROM (
             SELECT t1.*
             FROM fuel_metrics t1
@@ -2671,7 +2669,7 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                     continue  # Too fast = sensor glitch/alternation
 
                 # Minimum time for theft detection - need at least 2 minutes
-                if time_gap_min < 2 and fuel_drop_gal < 50:
+                if time_gap_min < 2 and unexplained_loss < 50:
                     continue  # Very fast drops need to be very large to flag
 
                 miles_driven = max(0, odometer - prev_odo) if prev_odo else 0

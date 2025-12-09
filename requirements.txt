@@ -35,7 +35,6 @@ pytz==2023.3
 requests==2.31.0
 tenacity==8.2.3  # Retry with exponential backoff
 twilio==8.10.0   # SMS and WhatsApp alerts
-APScheduler==3.10.4  # 🆕 v4.1: Predictive maintenance scheduler
 
 # ============================================================================
 # MONITORING & OBSERVABILITY (Required for metrics)
