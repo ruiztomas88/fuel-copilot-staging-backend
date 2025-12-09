@@ -942,6 +942,21 @@ class UnifiedHealthEngine:
 
         current_values = sanitized_values
 
+        # 🔧 FIX: Sanitize historical values to prevent crashes with string/None values
+        if historical_values:
+            sanitized_history = {}
+            for metric, values in historical_values.items():
+                clean_values = []
+                for ts, v in values:
+                    try:
+                        if v is not None:
+                            clean_values.append((ts, float(v)))
+                    except (ValueError, TypeError):
+                        continue
+                if clean_values:
+                    sanitized_history[metric] = clean_values
+            historical_values = sanitized_history
+
         all_alerts: List[UnifiedAlert] = []
         components: Dict[str, ComponentHealth] = {}
 
