@@ -3639,6 +3639,20 @@ async def get_utilization_optimization(
 # ============================================================================
 
 
+def get_fuel_db_connection():
+    """Get connection to Fuel Analytics DB for maintenance alerts"""
+    import pymysql
+    return pymysql.connect(
+        host=os.getenv("MYSQL_HOST", "localhost"),
+        port=int(os.getenv("MYSQL_PORT", "3306")),
+        user=os.getenv("MYSQL_USER", "root"),
+        password=os.getenv("MYSQL_PASSWORD", ""),
+        database=os.getenv("MYSQL_DATABASE", "fuel_analytics"),
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+
 @app.get("/fuelAnalytics/api/maintenance/fleet-health", tags=["Predictive Maintenance"])
 async def get_fleet_health(
     current_user: TokenData = Depends(require_auth),
@@ -3940,7 +3954,7 @@ async def get_maintenance_alerts(
     "/fuelAnalytics/api/maintenance/alerts/{alert_id}/acknowledge",
     tags=["Predictive Maintenance"],
 )
-async def acknowledge_alert(
+async def acknowledge_maintenance_alert(
     alert_id: int,
     current_user: TokenData = Depends(require_auth),
 ):
@@ -3983,7 +3997,7 @@ async def acknowledge_alert(
     "/fuelAnalytics/api/maintenance/alerts/{alert_id}/resolve",
     tags=["Predictive Maintenance"],
 )
-async def resolve_alert(
+async def resolve_maintenance_alert(
     alert_id: int,
     current_user: TokenData = Depends(require_auth),
 ):

@@ -483,14 +483,27 @@ class PredictiveMaintenanceEngine:
     # TREND ANALYSIS
     # ═══════════════════════════════════════════════════════════════════════════
 
+    # Minimum floor values per metric to avoid inflated trend percentages
+    # e.g., if first_avg is 0.5, pct_change would be huge and misleading
+    MIN_TREND_FLOORS = {
+        "oil_press": 10.0,  # psi - anything below 10 is already a problem
+        "cool_temp": 100.0,  # °F - below 100 engine is cold
+        "oil_temp": 100.0,  # °F
+        "pwr_ext": 10.0,  # V - below 10V battery is dead
+        "fuel_rate": 1.0,  # gal/h - idle consumption
+        "def_level": 5.0,  # % - low DEF is already critical
+        "rpm": 500.0,  # RPM - below 500 is idle/off
+    }
+
     def calculate_trend(
-        self, values: List[Tuple[datetime, float]], days: int = 7
+        self, values: List[Tuple[datetime, float]], metric: str = "", days: int = 7
     ) -> Optional[float]:
         """
         Calculate percentage change over time period
 
         Args:
             values: List of (timestamp, value) tuples, ordered by time
+            metric: Metric name for floor lookup (oil_press, cool_temp, etc.)
             days: Number of days to analyze
 
         Returns:
@@ -516,18 +529,9 @@ class PredictiveMaintenanceEngine:
         if first_avg == 0:
             return None
 
-        # Minimum floor to avoid inflated percentages on small values
-        # e.g., if first_avg is 0.5, pct_change would be huge
-        MIN_FLOORS = {
-            "oil_press": 10.0,  # psi - anything below 10 is already a problem
-            "cool_temp": 100.0,  # °F - below 100 engine is cold
-            "oil_temp": 100.0,  # °F
-            "pwr_ext": 10.0,  # V - below 10V battery is dead
-            "fuel_rate": 1.0,  # gal/h - idle consumption
-        }
-        # If first_avg is below the floor, trend is unreliable
-        # We don't have metric name here, so use a general floor of 5.0
-        if first_avg < 5.0:
+        # Use metric-specific floor, default to 5.0 for unknown metrics
+        min_floor = self.MIN_TREND_FLOORS.get(metric, 5.0)
+        if first_avg < min_floor:
             return None
 
         pct_change = ((last_avg - first_avg) / first_avg) * 100
@@ -545,7 +549,7 @@ class PredictiveMaintenanceEngine:
         if metric not in self.trend_thresholds:
             return alerts
 
-        trend_pct = self.calculate_trend(values)
+        trend_pct = self.calculate_trend(values, metric=metric)
         if trend_pct is None:
             return alerts
 
