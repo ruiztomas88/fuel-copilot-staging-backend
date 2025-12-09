@@ -1217,12 +1217,25 @@ async def get_all_refuels(
         List of refuel events sorted by timestamp (most recent first)
     """
     try:
+        # 🆕 v4.2: Add cache for faster response
+        cache_key = f"refuels:{truck_id or 'all'}:{days}d"
+        if MEMORY_CACHE_AVAILABLE and memory_cache:
+            cached_data = memory_cache.get(cache_key)
+            if cached_data:
+                logger.debug("⚡ Refuels from memory cache")
+                return cached_data
+
         # If truck_id specified, get refuels for that truck only
         if truck_id:
             refuels = db.get_refuel_history(truck_id, days)
         else:
             # Get refuels for all trucks
             refuels = db.get_all_refuels(days)
+
+        # Cache for 60 seconds
+        if MEMORY_CACHE_AVAILABLE and memory_cache:
+            memory_cache.set(cache_key, refuels, ttl=60)
+            logger.debug("💾 Refuels cached for 60s")
 
         return refuels
     except Exception as e:
@@ -3557,6 +3570,14 @@ async def get_driver_leaderboard(
         Leaderboard with all drivers ranked by performance
     """
     try:
+        # 🆕 v4.2: Add cache for faster response
+        cache_key = "gamification_leaderboard"
+        if MEMORY_CACHE_AVAILABLE and memory_cache:
+            cached_data = memory_cache.get(cache_key)
+            if cached_data:
+                logger.debug("⚡ Leaderboard from memory cache")
+                return cached_data
+
         from gamification_engine import GamificationEngine
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
@@ -3617,6 +3638,11 @@ async def get_driver_leaderboard(
                 )
 
         report = gam_engine.generate_gamification_report(drivers_data)
+
+        # Cache for 60 seconds
+        if MEMORY_CACHE_AVAILABLE and memory_cache:
+            memory_cache.set(cache_key, report, ttl=60)
+            logger.debug("💾 Leaderboard cached for 60s")
 
         return report
 
