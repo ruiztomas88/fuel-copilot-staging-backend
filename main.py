@@ -3062,19 +3062,20 @@ async def get_fleet_cost_per_mile(
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
 
-        # Get fleet data for the period
+        # Get fleet data for the period using odometer_mi to calculate miles driven
+        # 🔧 FIX v4.2: Use correct column names (odometer_mi, mpg_current, mileage_delta)
         query = """
             SELECT 
                 truck_id,
-                SUM(CASE WHEN daily_miles > 0 THEN daily_miles ELSE 0 END) as miles,
-                SUM(CASE WHEN mpg > 0 AND daily_miles > 0 THEN daily_miles / mpg ELSE 0 END) as gallons,
+                MAX(odometer_mi) - MIN(odometer_mi) as miles,
+                SUM(CASE WHEN mpg_current > 0 AND mileage_delta > 0 THEN mileage_delta / mpg_current ELSE 0 END) as gallons,
                 MAX(engine_hours) - MIN(engine_hours) as engine_hours,
-                AVG(CASE WHEN mpg > 0 THEN mpg END) as avg_mpg
+                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-                AND mpg > 0
+                AND mpg_current > 0
             GROUP BY truck_id
-            HAVING miles > 0
+            HAVING miles > 10
         """
 
         with engine.connect() as conn:
@@ -3085,21 +3086,25 @@ async def get_fleet_cost_per_mile(
             {
                 "truck_id": row[0],
                 "miles": float(row[1] or 0),
-                "gallons": float(row[2] or 0),
+                "gallons": (
+                    float(row[2] or 0)
+                    if float(row[2] or 0) > 0
+                    else float(row[1] or 0) / max(float(row[4] or 5.5), 1)
+                ),
                 "engine_hours": float(row[3] or 0),
                 "avg_mpg": float(row[4] or 0),
             }
             for row in rows
         ]
 
-        # Fallback: Use odometer-based calculation if no daily_miles data
+        # Fallback: Use odometer-based calculation if no mileage_delta data
         if not trucks_data:
-            logger.info("No daily_miles data, using odometer-based calculation")
+            logger.info("No mileage_delta data, using odometer-based calculation")
             fallback_query = """
                 SELECT 
                     truck_id,
-                    MAX(odometer) - MIN(odometer) as miles,
-                    AVG(CASE WHEN mpg > 0 THEN mpg END) as avg_mpg,
+                    MAX(odometer_mi) - MIN(odometer_mi) as miles,
+                    AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg,
                     MAX(engine_hours) - MIN(engine_hours) as engine_hours,
                     COUNT(*) as records
                 FROM fuel_metrics
@@ -3271,11 +3276,11 @@ async def get_fleet_utilization(
             SELECT 
                 truck_id,
                 SUM(CASE 
-                    WHEN speed > 5 THEN 0.0167  -- ~1 minute per reading when moving
+                    WHEN speed_mph > 5 THEN 0.0167  -- ~1 minute per reading when moving
                     ELSE 0 
                 END) as driving_hours,
                 SUM(CASE 
-                    WHEN speed <= 5 AND rpm > 400 THEN 0.0167  -- Idle
+                    WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167  -- Idle
                     ELSE 0 
                 END) as idle_hours,
                 COUNT(DISTINCT DATE(timestamp_utc)) as active_days,
@@ -3316,8 +3321,8 @@ async def get_fleet_utilization(
             fallback_query = """
                 SELECT 
                     truck_id,
-                    MAX(odometer) - MIN(odometer) as miles,
-                    AVG(speed) as avg_speed,
+                    MAX(odometer_mi) - MIN(odometer_mi) as miles,
+                    AVG(speed_mph) as avg_speed,
                     COUNT(*) as readings
                 FROM fuel_metrics
                 WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
@@ -3385,11 +3390,11 @@ async def get_truck_utilization(
         query = """
             SELECT 
                 SUM(CASE 
-                    WHEN speed > 5 THEN 0.0167
+                    WHEN speed_mph > 5 THEN 0.0167
                     ELSE 0 
                 END) as driving_hours,
                 SUM(CASE 
-                    WHEN speed <= 5 AND rpm > 400 THEN 0.0167
+                    WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167
                     ELSE 0 
                 END) as idle_hours
             FROM fuel_metrics
