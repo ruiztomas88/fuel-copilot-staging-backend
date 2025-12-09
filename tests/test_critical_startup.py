@@ -191,13 +191,13 @@ class TestDatabaseConnections:
     def test_database_manager_exists(self):
         """DatabaseManager class must exist"""
         from database import DatabaseManager
-        
+
         assert DatabaseManager is not None
 
     def test_database_manager_instantiates(self):
         """DatabaseManager must instantiate without crashing"""
         from database import DatabaseManager
-        
+
         # Should be able to create instance
         dm = DatabaseManager()
         assert dm is not None
@@ -211,6 +211,8 @@ class TestDatabaseConnections:
             pass
         except Exception as e:
             pytest.fail(f"database_pool.py crashed on import: {e}")
+
+
 class TestEstimatorCore:
     """Tests for the fuel estimator core functionality"""
 
@@ -224,7 +226,7 @@ class TestEstimatorCore:
     def test_estimator_instantiates(self):
         """Estimator must instantiate without DB"""
         from estimator import FuelEstimator
-        
+
         # Should be able to create instance without crashing
         # FuelEstimator requires truck_id, capacity_liters, and config
         test_config = {
@@ -234,11 +236,11 @@ class TestEstimatorCore:
             "max_gap_minutes": 30,
         }
         est = FuelEstimator(
-            truck_id="TEST-001",
-            capacity_liters=500.0,
-            config=test_config
+            truck_id="TEST-001", capacity_liters=500.0, config=test_config
         )
         assert est is not None
+
+
 class TestURLConsistency:
     """Tests that all URLs use consistent casing"""
 

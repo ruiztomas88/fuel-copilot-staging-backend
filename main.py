@@ -3076,16 +3076,19 @@ async def get_fleet_cost_per_mile(
         cpm_engine = CostPerMileEngine()
 
         # Get fleet data for the period
+        # 🔧 v4.3: Fixed column names - use mpg_current, calculate miles from odometer
         query = """
             SELECT 
                 truck_id,
-                SUM(CASE WHEN daily_miles > 0 THEN daily_miles ELSE 0 END) as miles,
-                SUM(CASE WHEN mpg > 0 AND daily_miles > 0 THEN daily_miles / mpg ELSE 0 END) as gallons,
+                (MAX(odometer_mi) - MIN(odometer_mi)) as miles,
+                SUM(CASE WHEN mpg_current > 0 THEN 
+                    (MAX(odometer_mi) - MIN(odometer_mi)) / mpg_current 
+                ELSE 0 END) / COUNT(*) as gallons_approx,
                 MAX(engine_hours) - MIN(engine_hours) as engine_hours,
-                AVG(CASE WHEN mpg > 0 THEN mpg END) as avg_mpg
+                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-                AND mpg > 0
+                AND mpg_current > 0
             GROUP BY truck_id
             HAVING miles > 0
         """
@@ -3140,16 +3143,17 @@ async def get_truck_cost_per_mile(
         cpm_engine = CostPerMileEngine()
 
         # Get truck data for the period
+        # 🔧 v4.3: Fixed column names - use mpg_current, calculate miles from odometer
         query = """
             SELECT 
-                SUM(CASE WHEN daily_miles > 0 THEN daily_miles ELSE 0 END) as miles,
-                SUM(CASE WHEN mpg > 0 AND daily_miles > 0 THEN daily_miles / mpg ELSE 0 END) as gallons,
+                (MAX(odometer_mi) - MIN(odometer_mi)) as miles,
+                (MAX(odometer_mi) - MIN(odometer_mi)) / NULLIF(AVG(CASE WHEN mpg_current > 0 THEN mpg_current END), 0) as gallons,
                 MAX(engine_hours) - MIN(engine_hours) as engine_hours,
-                AVG(CASE WHEN mpg > 0 THEN mpg END) as avg_mpg
+                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg
             FROM fuel_metrics
             WHERE truck_id = :truck_id
                 AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-                AND mpg > 0
+                AND mpg_current > 0
         """
 
         with engine.connect() as conn:
@@ -3249,15 +3253,16 @@ async def get_fleet_utilization(
 
         # Get activity data for the period
         # We'll estimate time breakdowns from speed and RPM patterns
+        # 🔧 v4.3: Fixed column name speed -> speed_mph
         query = """
             SELECT 
                 truck_id,
                 SUM(CASE 
-                    WHEN speed > 5 THEN 0.0167  -- ~1 minute per reading when moving
+                    WHEN speed_mph > 5 THEN 0.0167  -- ~1 minute per reading when moving
                     ELSE 0 
                 END) as driving_hours,
                 SUM(CASE 
-                    WHEN speed <= 5 AND rpm > 400 THEN 0.0167  -- Idle
+                    WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167  -- Idle
                     ELSE 0 
                 END) as idle_hours,
                 COUNT(DISTINCT DATE(timestamp_utc)) as active_days,
@@ -3325,14 +3330,15 @@ async def get_truck_utilization(
         engine = get_sqlalchemy_engine()
         util_engine = FleetUtilizationEngine()
 
+        # 🔧 v4.3: Fixed column name speed -> speed_mph
         query = """
             SELECT 
                 SUM(CASE 
-                    WHEN speed > 5 THEN 0.0167
+                    WHEN speed_mph > 5 THEN 0.0167
                     ELSE 0 
                 END) as driving_hours,
                 SUM(CASE 
-                    WHEN speed <= 5 AND rpm > 400 THEN 0.0167
+                    WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167
                     ELSE 0 
                 END) as idle_hours
             FROM fuel_metrics
@@ -3406,15 +3412,16 @@ async def get_utilization_optimization(
         util_engine = FleetUtilizationEngine()
 
         # Get utilization data (same as fleet endpoint)
+        # 🔧 v4.3: Fixed column name speed -> speed_mph
         query = """
             SELECT 
                 truck_id,
                 SUM(CASE 
-                    WHEN speed > 5 THEN 0.0167
+                    WHEN speed_mph > 5 THEN 0.0167
                     ELSE 0 
                 END) as driving_hours,
                 SUM(CASE 
-                    WHEN speed <= 5 AND rpm > 400 THEN 0.0167
+                    WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167
                     ELSE 0 
                 END) as idle_hours
             FROM fuel_metrics
@@ -3503,12 +3510,13 @@ async def get_driver_leaderboard(
         gam_engine = GamificationEngine()
 
         # Get driver performance data from last 7 days
+        # 🔧 v4.3: Fixed column name mpg -> mpg_current, speed -> speed_mph
         query = """
             SELECT 
                 fm.truck_id,
-                AVG(CASE WHEN fm.mpg > 0 THEN fm.mpg END) as mpg,
+                AVG(CASE WHEN fm.mpg_current > 0 THEN fm.mpg_current END) as mpg,
                 AVG(CASE 
-                    WHEN fm.speed <= 5 AND fm.rpm > 400 THEN 1.0
+                    WHEN fm.speed_mph <= 5 AND fm.rpm > 400 THEN 1.0
                     ELSE 0.0
                 END) * 100 as idle_pct,
                 COUNT(DISTINCT DATE(fm.timestamp_utc)) as active_days
@@ -3565,12 +3573,13 @@ async def get_driver_badges(
         gam_engine = GamificationEngine()
 
         # Get driver's historical data for badge calculation
+        # 🔧 v4.3: Fixed column names mpg -> mpg_current, speed -> speed_mph
         query = """
             SELECT 
                 DATE(timestamp_utc) as date,
-                AVG(CASE WHEN mpg > 0 THEN mpg END) as mpg,
+                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as mpg,
                 AVG(CASE 
-                    WHEN speed <= 5 AND rpm > 400 THEN 1.0
+                    WHEN speed_mph <= 5 AND rpm > 400 THEN 1.0
                     ELSE 0.0
                 END) * 100 as idle_pct
             FROM fuel_metrics
@@ -3593,8 +3602,9 @@ async def get_driver_badges(
         idle_history = [float(row[2] or 12.0) for row in rows]
 
         # Get fleet average MPG
+        # 🔧 v4.3: Fixed column name mpg -> mpg_current
         avg_query = """
-            SELECT AVG(CASE WHEN mpg > 0 THEN mpg END) as fleet_avg
+            SELECT AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as fleet_avg
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
         """
