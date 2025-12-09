@@ -559,6 +559,19 @@ if ROUTERS_AVAILABLE:
     except Exception as e:
         logger.error(f"❌ Failed to include routers: {e}")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.2: CLEAN V5 ENDPOINTS (Fleet Analytics, Leaderboard, Predictive Maintenance)
+# ═══════════════════════════════════════════════════════════════════════════════
+try:
+    from v5_endpoints import register_v5_endpoints
+
+    register_v5_endpoints(app)
+    logger.info(
+        "✅ V5 Clean Endpoints registered (Fleet Analytics, Leaderboard, Maintenance)"
+    )
+except Exception as e:
+    logger.error(f"❌ Failed to register V5 endpoints: {e}")
+
 
 # ============================================================================
 # 🆕 v3.10.8: AUTHENTICATION ENDPOINTS
@@ -1693,35 +1706,37 @@ async def get_fleet_sensor_health():
 # Statistical analysis for predictive maintenance
 # ============================================================================
 
-# Import health monitor
-import sys
+# ============================================================================
+# 🚫 DISABLED v5.2: TruckHealthMonitor causes startup crashes
+# Using new v5 endpoints with direct DB queries instead
+# ============================================================================
+# import sys
+# sys.path.insert(0, str(Path(__file__).parent))
+# try:
+#     from truck_health_monitor import (
+#         TruckHealthMonitor,
+#         SensorType,
+#         AlertSeverity,
+#         integrate_with_truck_data,
+#     )
+#     HEALTH_MONITOR_AVAILABLE = True
+#     try:
+#         _health_monitor = TruckHealthMonitor(
+#             data_dir=str(Path(__file__).parent / "data" / "health_stats")
+#         )
+#         logger.info("🏥 Truck Health Monitor initialized successfully")
+#     except Exception as e:
+#         logger.error(f"❌ Failed to initialize TruckHealthMonitor: {e}")
+#         _health_monitor = None
+#         HEALTH_MONITOR_AVAILABLE = False
+# except ImportError as e:
+#     HEALTH_MONITOR_AVAILABLE = False
+#     _health_monitor = None
+#     logger.warning(f"⚠️ Truck Health Monitor not available: {e}")
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-try:
-    from truck_health_monitor import (
-        TruckHealthMonitor,
-        SensorType,
-        AlertSeverity,
-        integrate_with_truck_data,
-    )
-
-    HEALTH_MONITOR_AVAILABLE = True
-    # Create singleton health monitor instance
-    try:
-        _health_monitor = TruckHealthMonitor(
-            data_dir=str(Path(__file__).parent / "data" / "health_stats")
-        )
-        logger.info("🏥 Truck Health Monitor initialized successfully")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize TruckHealthMonitor: {e}")
-        _health_monitor = None
-        HEALTH_MONITOR_AVAILABLE = False
-
-except ImportError as e:
-    HEALTH_MONITOR_AVAILABLE = False
-    _health_monitor = None
-    logger.warning(f"⚠️ Truck Health Monitor not available: {e}")
+HEALTH_MONITOR_AVAILABLE = False
+_health_monitor = None
+logger.info("🚀 v5.2: Using new lightweight v5 endpoints (TruckHealthMonitor disabled)")
 
 
 # NOTE: Fleet summary must be defined BEFORE /truck/{truck_id} to avoid route capture
