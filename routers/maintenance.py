@@ -61,8 +61,13 @@ def get_wialon_connection():
 
 def fetch_sensor_data() -> list:
     """Fetch latest sensor readings from Wialon"""
-    conn = get_wialon_connection()
     trucks_data = []
+
+    try:
+        conn = get_wialon_connection()
+    except Exception as e:
+        logger.warning(f"Cannot connect to Wialon DB: {e}")
+        return []  # Return empty list, endpoint will use demo data
 
     try:
         with conn.cursor() as cursor:
@@ -122,8 +127,13 @@ def fetch_sensor_data() -> list:
 
 def fetch_historical_data(truck_id: str, unit_id: int, days: int = 7) -> Dict:
     """Fetch historical sensor data for trend analysis"""
-    conn = get_wialon_connection()
     historical = {}
+
+    try:
+        conn = get_wialon_connection()
+    except Exception as e:
+        logger.warning(f"Cannot connect to Wialon DB for history: {e}")
+        return {}  # Return empty dict
 
     try:
         with conn.cursor() as cursor:
@@ -268,34 +278,46 @@ async def get_truck_health(truck_id: str):
         from unified_health_engine import UnifiedHealthEngine
 
         engine = UnifiedHealthEngine()
-        conn = get_wialon_connection()
 
         truck_data = {"truck_id": truck_id}
         unit_id = None
 
+        # Try to get Wialon data, but don't crash if unavailable
         try:
-            with conn.cursor() as cursor:
-                # Get unit_id and latest values
-                query = """
-                    SELECT unit, p as param, value
-                    FROM sensors
-                    WHERE n LIKE %s
-                      AND m >= UNIX_TIMESTAMP() - 7200
-                    ORDER BY m DESC
-                """
-                cursor.execute(query, (f"%{truck_id}%",))
-                rows = cursor.fetchall()
+            conn = get_wialon_connection()
+            try:
+                with conn.cursor() as cursor:
+                    # Get unit_id and latest values
+                    query = """
+                        SELECT unit, p as param, value
+                        FROM sensors
+                        WHERE n LIKE %s
+                          AND m >= UNIX_TIMESTAMP() - 7200
+                        ORDER BY m DESC
+                    """
+                    cursor.execute(query, (f"%{truck_id}%",))
+                    rows = cursor.fetchall()
 
-                seen_params = set()
-                for row in rows:
-                    if unit_id is None:
-                        unit_id = row.get("unit")
-                    param = row["param"]
-                    if param not in seen_params:
-                        seen_params.add(param)
-                        truck_data[param] = row["value"]
-        finally:
-            conn.close()
+                    seen_params = set()
+                    for row in rows:
+                        if unit_id is None:
+                            unit_id = row.get("unit")
+                        param = row["param"]
+                        if param not in seen_params:
+                            seen_params.add(param)
+                            truck_data[param] = row["value"]
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(f"Cannot fetch Wialon data for {truck_id}: {e}")
+            # Use demo data
+            truck_data = {
+                "truck_id": truck_id,
+                "oil_press": 45,
+                "cool_temp": 195,
+                "pwr_ext": 14.1,
+                "rpm": 1400,
+            }
 
         # Build current values
         current_values = {
