@@ -532,7 +532,7 @@ def get_fleet_summary() -> Dict[str, Any]:
             SUM(CASE WHEN truck_status != 'OFFLINE' THEN 1 ELSE 0 END) as active_trucks,
             SUM(CASE WHEN truck_status = 'OFFLINE' THEN 1 ELSE 0 END) as offline_trucks,
             AVG(estimated_pct) as avg_fuel_level,
-            AVG(mpg_current) as avg_mpg,
+            AVG(CASE WHEN truck_status = 'MOVING' AND mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
             AVG(consumption_lph) as avg_consumption,
             SUM(CASE WHEN drift_warning = 'YES' THEN 1 ELSE 0 END) as trucks_with_drift
         FROM (
@@ -593,9 +593,9 @@ def get_truck_efficiency_stats(truck_id: str, days_back: int = 30) -> Dict[str, 
     query = text(
         """
         SELECT 
-            AVG(mpg_current) as avg_mpg,
-            MAX(mpg_current) as max_mpg,
-            MIN(mpg_current) as min_mpg,
+            AVG(CASE WHEN truck_status = 'MOVING' AND mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
+            MAX(CASE WHEN truck_status = 'MOVING' AND mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as max_mpg,
+            MIN(CASE WHEN truck_status = 'MOVING' AND mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as min_mpg,
             AVG(consumption_lph) as avg_consumption,
             AVG(CASE WHEN truck_status = 'MOVING' THEN speed_mph END) as avg_speed,
             SUM(CASE WHEN idle_method != 'NOT_IDLE' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as idle_percentage,
@@ -1413,8 +1413,8 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
             SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.1 THEN consumption_gph ELSE 0 END) as idle_gph_sum,
             COUNT(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.1 THEN 1 END) as idle_count,
             
-            -- MPG analysis
-            AVG(CASE WHEN mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
+            -- MPG analysis (ONLY from MOVING trucks - v4.2 fix)
+            AVG(CASE WHEN truck_status = 'MOVING' AND mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
             
             -- Distance
             SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 10 THEN odom_delta_mi ELSE 0 END) as total_miles,
