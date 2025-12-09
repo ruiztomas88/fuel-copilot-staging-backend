@@ -20,7 +20,7 @@ import pymysql
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/fuelanalytics/api/analytics",
+    prefix="/fuelAnalytics/api/analytics",
     tags=["Analytics"],
 )
 

@@ -173,6 +173,19 @@ except Exception as e:
     logger.warning(f"⚠️  Memory cache unavailable: {e}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v4.2: MODULAR ROUTERS
+# ═══════════════════════════════════════════════════════════════════════════════
+try:
+    from routers import include_all_routers
+
+    ROUTERS_AVAILABLE = True
+    logger.info("✅ Routers module loaded")
+except ImportError as e:
+    ROUTERS_AVAILABLE = False
+    logger.warning(f"⚠️ Routers not available: {e}")
+
+
 # 🔧 FIX v3.9.3: Lifespan context manager (replaces deprecated @app.on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -526,6 +539,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v4.2: INCLUDE MODULAR ROUTERS
+# ═══════════════════════════════════════════════════════════════════════════════
+if ROUTERS_AVAILABLE:
+    try:
+        include_all_routers(app, auth_dependency=require_auth)
+        logger.info("✅ All routers included successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to include routers: {e}")
 
 
 # ============================================================================
