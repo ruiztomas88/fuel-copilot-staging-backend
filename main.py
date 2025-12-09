@@ -3565,12 +3565,13 @@ async def get_driver_leaderboard(
         gam_engine = GamificationEngine()
 
         # Get driver performance data from last 7 days - filter speed > 5 for accurate MPG
+        # 🔧 FIX v4.2: Use correct column names (speed_mph, mpg_current)
         query = """
             SELECT 
                 fm.truck_id,
-                AVG(CASE WHEN fm.speed > 5 AND fm.mpg > 0 THEN fm.mpg END) as mpg,
+                AVG(CASE WHEN fm.speed_mph > 5 AND fm.mpg_current > 0 THEN fm.mpg_current END) as mpg,
                 AVG(CASE 
-                    WHEN fm.speed <= 5 AND fm.rpm > 400 THEN 1.0
+                    WHEN fm.speed_mph <= 5 AND fm.rpm > 400 THEN 1.0
                     ELSE 0.0
                 END) * 100 as idle_pct,
                 COUNT(DISTINCT DATE(fm.timestamp_utc)) as active_days
@@ -3644,12 +3645,13 @@ async def get_driver_badges(
         gam_engine = GamificationEngine()
 
         # Get driver's historical data for badge calculation
+        # 🔧 FIX v4.2: Use correct column names (speed_mph, mpg_current)
         query = """
             SELECT 
                 DATE(timestamp_utc) as date,
-                AVG(CASE WHEN mpg > 0 THEN mpg END) as mpg,
+                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as mpg,
                 AVG(CASE 
-                    WHEN speed <= 5 AND rpm > 400 THEN 1.0
+                    WHEN speed_mph <= 5 AND rpm > 400 THEN 1.0
                     ELSE 0.0
                 END) * 100 as idle_pct
             FROM fuel_metrics
@@ -3672,8 +3674,9 @@ async def get_driver_badges(
         idle_history = [float(row[2] or 12.0) for row in rows]
 
         # Get fleet average MPG
+        # 🔧 FIX v4.2: Use correct column name (mpg_current)
         avg_query = """
-            SELECT AVG(CASE WHEN mpg > 0 THEN mpg END) as fleet_avg
+            SELECT AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as fleet_avg
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
         """
