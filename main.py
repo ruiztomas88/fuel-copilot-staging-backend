@@ -272,11 +272,11 @@ All responses follow this structure:
 ## 🔗 Related Links
 
 - [GitHub Repository](https://github.com/fleetbooster/Fuel-Analytics-Backend)
-- [API Changelog](/fuelAnalytics/api/docs#changelog)
+- [API Changelog](/fuelanalytics/api/docs#changelog)
 """,
     version="3.12.21",
-    docs_url="/fuelAnalytics/api/docs",
-    redoc_url="/fuelAnalytics/api/redoc",
+    docs_url="/fuelanalytics/api/docs",
+    redoc_url="/fuelanalytics/api/redoc",
     openapi_tags=[
         {
             "name": "Fleet",
@@ -462,7 +462,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request, call_next):
         # Skip rate limiting for health checks and metrics
-        if request.url.path in ["/health", "/metrics", "/fuelAnalytics/api/health"]:
+        if request.url.path in ["/health", "/metrics", "/fuelanalytics/api/health"]:
             return await call_next(request)
 
         # Get client identifier
@@ -548,7 +548,7 @@ if ROUTERS_AVAILABLE:
 
 
 @app.post(
-    "/fuelAnalytics/api/auth/login", response_model=Token, tags=["Authentication"]
+    "/fuelanalytics/api/auth/login", response_model=Token, tags=["Authentication"]
 )
 async def login(credentials: UserLogin):
     """
@@ -589,7 +589,7 @@ async def login(credentials: UserLogin):
     )
 
 
-@app.get("/fuelAnalytics/api/auth/me", tags=["Authentication"])
+@app.get("/fuelanalytics/api/auth/me", tags=["Authentication"])
 async def get_current_user_info(current_user: TokenData = Depends(require_auth)):
     """Get current authenticated user info."""
     user_data = USERS_DB.get(current_user.username, {})
@@ -608,7 +608,7 @@ async def get_current_user_info(current_user: TokenData = Depends(require_auth))
 
 
 @app.post(
-    "/fuelAnalytics/api/auth/refresh", response_model=Token, tags=["Authentication"]
+    "/fuelanalytics/api/auth/refresh", response_model=Token, tags=["Authentication"]
 )
 async def refresh_token(current_user: TokenData = Depends(require_auth)):
     """Refresh JWT token before it expires."""
@@ -643,7 +643,7 @@ async def refresh_token(current_user: TokenData = Depends(require_auth)):
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/admin/carriers", tags=["Admin"])
+@app.get("/fuelanalytics/api/admin/carriers", tags=["Admin"])
 async def list_carriers(current_user: TokenData = Depends(require_super_admin)):
     """
     List all carriers (super_admin only).
@@ -687,7 +687,7 @@ async def list_carriers(current_user: TokenData = Depends(require_super_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/admin/users", tags=["Admin"])
+@app.get("/fuelanalytics/api/admin/users", tags=["Admin"])
 async def list_users(current_user: TokenData = Depends(require_super_admin)):
     """List all users (super_admin only)."""
     users = []
@@ -705,7 +705,7 @@ async def list_users(current_user: TokenData = Depends(require_super_admin)):
     return {"users": users, "total": len(users)}
 
 
-@app.get("/fuelAnalytics/api/admin/stats", tags=["Admin"])
+@app.get("/fuelanalytics/api/admin/stats", tags=["Admin"])
 async def get_admin_stats(current_user: TokenData = Depends(require_super_admin)):
     """
     Get system-wide statistics (super_admin only).
@@ -759,7 +759,7 @@ async def get_admin_stats(current_user: TokenData = Depends(require_super_admin)
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/status", response_model=HealthCheck, tags=["Health"])
+@app.get("/fuelanalytics/api/status", response_model=HealthCheck, tags=["Health"])
 async def api_status():
     """Quick API status check. Returns basic health info."""
     trucks = db.get_all_trucks()
@@ -771,7 +771,7 @@ async def api_status():
     }
 
 
-@app.get("/fuelAnalytics/api/cache/stats", tags=["Health"])
+@app.get("/fuelanalytics/api/cache/stats", tags=["Health"])
 async def get_cache_stats():
     """
     Get cache statistics and performance metrics.
@@ -802,7 +802,7 @@ async def get_cache_stats():
         return {"available": False, "error": str(e)}
 
 
-@app.get("/fuelAnalytics/api/health", response_model=HealthCheck, tags=["Health"])
+@app.get("/fuelanalytics/api/health", response_model=HealthCheck, tags=["Health"])
 async def health_check():
     """
     Comprehensive system health check.
@@ -863,7 +863,7 @@ async def health_check():
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/fleet", response_model=FleetSummary, tags=["Fleet"])
+@app.get("/fuelanalytics/api/fleet", response_model=FleetSummary, tags=["Fleet"])
 async def get_fleet_summary():
     """
     Get fleet-wide summary statistics.
@@ -903,7 +903,7 @@ async def get_fleet_summary():
         )
 
 
-@app.get("/fuelAnalytics/api/trucks", response_model=List[str], tags=["Trucks"])
+@app.get("/fuelanalytics/api/trucks", response_model=List[str], tags=["Trucks"])
 async def get_all_trucks():
     """
     Get list of all available truck IDs.
@@ -922,7 +922,7 @@ async def get_all_trucks():
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/trucks/{truck_id}", tags=["Trucks"])
+@app.get("/fuelanalytics/api/trucks/{truck_id}", tags=["Trucks"])
 async def get_truck_detail(truck_id: str):
     """
     Get  detailed information for a specific truck.
@@ -1032,7 +1032,7 @@ async def get_truck_detail(truck_id: str):
 
 
 @app.get(
-    "/fuelAnalytics/api/trucks/{truck_id}/refuels",
+    "/fuelanalytics/api/trucks/{truck_id}/refuels",
     response_model=List[RefuelEvent],
     tags=["Trucks"],
 )
@@ -1085,7 +1085,7 @@ def sanitize_nan(value):
 
 
 @app.get(
-    "/fuelAnalytics/api/trucks/{truck_id}/history",
+    "/fuelanalytics/api/trucks/{truck_id}/history",
     response_model=List[HistoricalRecord],
 )
 async def get_truck_history(
@@ -1144,7 +1144,7 @@ async def get_truck_history(
 
 
 @app.get(
-    "/fuelAnalytics/api/efficiency",
+    "/fuelanalytics/api/efficiency",
     response_model=List[EfficiencyRanking],
     tags=["Efficiency"],
 )
@@ -1213,7 +1213,7 @@ async def get_efficiency_rankings():
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/refuels", response_model=List[RefuelEvent])
+@app.get("/fuelanalytics/api/refuels", response_model=List[RefuelEvent])
 async def get_all_refuels(
     days: int = Query(
         7, ge=1, le=30, description="Days of refuel history to fetch (1-30)"
@@ -1256,7 +1256,7 @@ async def get_all_refuels(
         raise HTTPException(status_code=500, detail=f"Error fetching refuels: {str(e)}")
 
 
-@app.get("/fuelAnalytics/api/refuels/analytics", tags=["Refuels"])
+@app.get("/fuelanalytics/api/refuels/analytics", tags=["Refuels"])
 async def get_refuel_analytics(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze")
 ):
@@ -1285,7 +1285,7 @@ async def get_refuel_analytics(
         )
 
 
-@app.get("/fuelAnalytics/api/theft-analysis", tags=["Security"])
+@app.get("/fuelanalytics/api/theft-analysis", tags=["Security"])
 async def get_theft_analysis(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze")
 ):
@@ -1320,7 +1320,7 @@ async def get_theft_analysis(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/alerts", response_model=List[Alert], tags=["Alerts"])
+@app.get("/fuelanalytics/api/alerts", response_model=List[Alert], tags=["Alerts"])
 async def get_alerts(
     severity: Optional[str] = Query(
         None, description="Filter by severity (critical, warning, info)"
@@ -1353,7 +1353,7 @@ async def get_alerts(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/kpis", tags=["KPIs"])
+@app.get("/fuelanalytics/api/kpis", tags=["KPIs"])
 async def get_kpis(
     days: int = Query(1, ge=1, le=90, description="Number of days to analyze")
 ):
@@ -1433,7 +1433,7 @@ async def get_kpis(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/loss-analysis")
+@app.get("/fuelanalytics/api/loss-analysis")
 async def get_loss_analysis(days: int = 1):
     """
     🆕 v3.9.0: Fuel Loss Analysis by Root Cause
@@ -1471,7 +1471,7 @@ async def get_loss_analysis(days: int = 1):
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/analytics/driver-scorecard")
+@app.get("/fuelanalytics/api/analytics/driver-scorecard")
 async def get_driver_scorecard_endpoint(
     days: int = Query(default=7, ge=1, le=30, description="Days to analyze")
 ):
@@ -1501,7 +1501,7 @@ async def get_driver_scorecard_endpoint(
         )
 
 
-@app.get("/fuelAnalytics/api/analytics/enhanced-kpis")
+@app.get("/fuelanalytics/api/analytics/enhanced-kpis")
 async def get_enhanced_kpis_endpoint(
     days: int = Query(default=1, ge=1, le=30, description="Days to analyze")
 ):
@@ -1529,7 +1529,7 @@ async def get_enhanced_kpis_endpoint(
         raise HTTPException(status_code=500, detail=f"Error in enhanced KPIs: {str(e)}")
 
 
-@app.get("/fuelAnalytics/api/analytics/enhanced-loss-analysis")
+@app.get("/fuelanalytics/api/analytics/enhanced-loss-analysis")
 async def get_enhanced_loss_analysis_endpoint(
     days: int = Query(default=1, ge=1, le=30, description="Days to analyze")
 ):
@@ -1594,14 +1594,14 @@ if FRONTEND_DIR.exists():
     print(f"📦 Serving frontend from: {FRONTEND_DIR}")
 
 
-# Root route - serve frontend (lower priority than /fuelAnalytics/api/health)
+# Root route - serve frontend (lower priority than /fuelanalytics/api/health)
 @app.get("/", include_in_schema=False)
 async def root():
     """Serve React frontend at root"""
     index_file = FRONTEND_DIR / "index.html"
     if index_file.exists():
         return FileResponse(index_file)
-    return {"message": "Fuel Copilot API v3.1.0", "docs": "/fuelAnalytics/api/docs"}
+    return {"message": "Fuel Copilot API v3.1.0", "docs": "/fuelanalytics/api/docs"}
 
 
 # NOTE: Catch-all moved to end of file to avoid capturing API routes
@@ -1613,7 +1613,7 @@ async def root():
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/trucks/{truck_id}/sensor-history")
+@app.get("/fuelanalytics/api/trucks/{truck_id}/sensor-history")
 async def get_truck_sensor_history(
     truck_id: str,
     hours: int = Query(default=48, ge=1, le=168),
@@ -1647,7 +1647,7 @@ async def get_truck_sensor_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/trucks/{truck_id}/fuel-trend")
+@app.get("/fuelanalytics/api/trucks/{truck_id}/fuel-trend")
 async def get_truck_fuel_trend(
     truck_id: str,
     hours: int = Query(default=48, ge=1, le=168),
@@ -1664,7 +1664,7 @@ async def get_truck_fuel_trend(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/fleet/sensor-health")
+@app.get("/fuelanalytics/api/fleet/sensor-health")
 async def get_fleet_sensor_health():
     """
     Check sensor health status for entire fleet
@@ -1719,7 +1719,7 @@ except ImportError as e:
 
 
 # NOTE: Fleet summary must be defined BEFORE /truck/{truck_id} to avoid route capture
-@app.get("/fuelAnalytics/api/health/fleet/summary", tags=["Health Monitoring"])
+@app.get("/fuelanalytics/api/health/fleet/summary", tags=["Health Monitoring"])
 async def get_fleet_health_summary():
     """
     Get health summary for entire fleet.
@@ -1915,7 +1915,7 @@ async def get_fleet_health_summary():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/health/truck/{truck_id}", tags=["Health Monitoring"])
+@app.get("/fuelanalytics/api/health/truck/{truck_id}", tags=["Health Monitoring"])
 async def get_truck_health_report(truck_id: str):
     """
     Get comprehensive health report for a specific truck.
@@ -1957,7 +1957,7 @@ async def get_truck_health_report(truck_id: str):
 
 
 @app.get(
-    "/fuelAnalytics/api/health/truck/{truck_id}/alerts", tags=["Health Monitoring"]
+    "/fuelanalytics/api/health/truck/{truck_id}/alerts", tags=["Health Monitoring"]
 )
 async def get_truck_health_alerts(
     truck_id: str,
@@ -1988,7 +1988,7 @@ async def get_truck_health_alerts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/fuelAnalytics/api/health/record", tags=["Health Monitoring"])
+@app.post("/fuelanalytics/api/health/record", tags=["Health Monitoring"])
 async def record_health_data(
     truck_id: str,
     coolant_temp: Optional[float] = None,
@@ -2033,7 +2033,7 @@ async def record_health_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/health/sensors", tags=["Health Monitoring"])
+@app.get("/fuelanalytics/api/health/sensors", tags=["Health Monitoring"])
 async def get_monitored_sensors():
     """
     Get list of monitored sensors and their configurations.
@@ -2079,7 +2079,7 @@ async def get_monitored_sensors():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@app.get("/fuelAnalytics/api/analytics/route-efficiency")
+@app.get("/fuelanalytics/api/analytics/route-efficiency")
 async def get_route_efficiency(
     truck_id: Optional[str] = Query(None, description="Specific truck ID to analyze"),
     days: int = Query(7, ge=1, le=90, description="Days of history to analyze"),
@@ -2105,7 +2105,7 @@ async def get_route_efficiency(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/analytics/cost-attribution")
+@app.get("/fuelanalytics/api/analytics/cost-attribution")
 async def get_cost_attribution(
     days: int = Query(30, ge=1, le=365, description="Days of history to analyze"),
 ):
@@ -2131,7 +2131,7 @@ async def get_cost_attribution(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/analytics/inefficiency-causes")
+@app.get("/fuelanalytics/api/analytics/inefficiency-causes")
 async def get_inefficiency_causes_endpoint(
     truck_id: str = Query("fleet", description="Truck ID or 'fleet' for all"),
     days: int = Query(30, ge=1, le=365, description="Days of history to analyze"),
@@ -2157,7 +2157,7 @@ async def get_inefficiency_causes_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/analytics/inefficiency-by-truck")
+@app.get("/fuelanalytics/api/analytics/inefficiency-by-truck")
 async def get_inefficiency_by_truck_endpoint(
     days: int = Query(30, ge=1, le=365, description="Days of history to analyze"),
     sort_by: str = Query(
@@ -2193,7 +2193,7 @@ async def get_inefficiency_by_truck_endpoint(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@app.get("/fuelAnalytics/api/geofence/events")
+@app.get("/fuelanalytics/api/geofence/events")
 async def get_geofence_events_endpoint(
     truck_id: Optional[str] = Query(None, description="Specific truck ID"),
     hours: int = Query(24, ge=1, le=168, description="Hours of history"),
@@ -2218,7 +2218,7 @@ async def get_geofence_events_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/geofence/location-history/{truck_id}")
+@app.get("/fuelanalytics/api/geofence/location-history/{truck_id}")
 async def get_location_history(
     truck_id: str,
     hours: int = Query(24, ge=1, le=168, description="Hours of history"),
@@ -2240,7 +2240,7 @@ async def get_location_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/geofence/zones")
+@app.get("/fuelanalytics/api/geofence/zones")
 async def get_geofence_zones():
     """
     Get list of defined geofence zones.
@@ -2281,7 +2281,7 @@ async def get_geofence_zones():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@app.get("/fuelAnalytics/api/alerts/predictive")
+@app.get("/fuelanalytics/api/alerts/predictive")
 async def get_predictive_alerts(
     hours: int = Query(24, ge=1, le=168, description="Hours of alert history"),
 ):
@@ -2389,7 +2389,7 @@ async def get_predictive_alerts(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/analytics/next-refuel-prediction")
+@app.get("/fuelanalytics/api/analytics/next-refuel-prediction")
 async def get_next_refuel_prediction(
     truck_id: Optional[str] = Query(
         default=None, description="Specific truck or None for all"
@@ -2564,7 +2564,7 @@ async def get_next_refuel_prediction(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/export/fleet-report")
+@app.get("/fuelanalytics/api/export/fleet-report")
 async def export_fleet_report(
     format: str = Query(default="csv", description="Export format: csv or excel"),
     days: int = Query(default=7, ge=1, le=90, description="Days to include"),
@@ -2659,7 +2659,7 @@ async def export_fleet_report(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/analytics/historical-comparison", tags=["Analytics"])
+@app.get("/fuelanalytics/api/analytics/historical-comparison", tags=["Analytics"])
 async def get_historical_comparison(
     period1_start: str = Query(..., description="Start date for period 1 (YYYY-MM-DD)"),
     period1_end: str = Query(..., description="End date for period 1 (YYYY-MM-DD)"),
@@ -2793,7 +2793,7 @@ async def get_historical_comparison(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/analytics/trends", tags=["Analytics"])
+@app.get("/fuelanalytics/api/analytics/trends", tags=["Analytics"])
 async def get_fleet_trends(
     days: int = Query(30, ge=7, le=365, description="Days of history"),
     metric: str = Query(
@@ -2873,7 +2873,7 @@ async def get_fleet_trends(
 _scheduled_reports: Dict[str, Dict] = {}
 
 
-@app.get("/fuelAnalytics/api/reports/schedules", tags=["Reports"])
+@app.get("/fuelanalytics/api/reports/schedules", tags=["Reports"])
 async def get_report_schedules():
     """
     🆕 v3.12.21: Get all scheduled reports.
@@ -2884,7 +2884,7 @@ async def get_report_schedules():
     }
 
 
-@app.post("/fuelAnalytics/api/reports/schedules", tags=["Reports"])
+@app.post("/fuelanalytics/api/reports/schedules", tags=["Reports"])
 async def create_report_schedule(
     name: str = Query(..., description="Report name"),
     report_type: str = Query(
@@ -2929,7 +2929,7 @@ async def create_report_schedule(
     }
 
 
-@app.delete("/fuelAnalytics/api/reports/schedules/{schedule_id}", tags=["Reports"])
+@app.delete("/fuelanalytics/api/reports/schedules/{schedule_id}", tags=["Reports"])
 async def delete_report_schedule(schedule_id: str):
     """
     🆕 v3.12.21: Delete a scheduled report.
@@ -2945,7 +2945,7 @@ async def delete_report_schedule(schedule_id: str):
     }
 
 
-@app.post("/fuelAnalytics/api/reports/generate", tags=["Reports"])
+@app.post("/fuelanalytics/api/reports/generate", tags=["Reports"])
 async def generate_report_now(
     report_type: str = Query(
         ..., description="Type: daily_summary, weekly_kpis, theft_analysis"
@@ -3064,7 +3064,7 @@ async def generate_report_now(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/cost/per-mile", tags=["Cost Analysis"])
+@app.get("/fuelanalytics/api/cost/per-mile", tags=["Cost Analysis"])
 async def get_fleet_cost_per_mile(
     days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
     current_user: TokenData = Depends(require_auth),
@@ -3219,7 +3219,7 @@ async def get_fleet_cost_per_mile(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/cost/per-mile/{truck_id}", tags=["Cost Analysis"])
+@app.get("/fuelanalytics/api/cost/per-mile/{truck_id}", tags=["Cost Analysis"])
 async def get_truck_cost_per_mile(
     truck_id: str,
     days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
@@ -3288,7 +3288,7 @@ async def get_truck_cost_per_mile(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/cost/speed-impact", tags=["Cost Analysis"])
+@app.get("/fuelanalytics/api/cost/speed-impact", tags=["Cost Analysis"])
 async def get_speed_cost_impact(
     avg_speed_mph: float = Query(65, ge=40, le=90, description="Average highway speed"),
     monthly_miles: float = Query(8000, ge=1000, le=50000, description="Monthly miles"),
@@ -3325,7 +3325,7 @@ async def get_speed_cost_impact(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/utilization/fleet", tags=["Fleet Utilization"])
+@app.get("/fuelanalytics/api/utilization/fleet", tags=["Fleet Utilization"])
 async def get_fleet_utilization(
     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
     current_user: TokenData = Depends(require_auth),
@@ -3478,7 +3478,7 @@ async def get_fleet_utilization(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/utilization/{truck_id}", tags=["Fleet Utilization"])
+@app.get("/fuelanalytics/api/utilization/{truck_id}", tags=["Fleet Utilization"])
 async def get_truck_utilization(
     truck_id: str,
     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
@@ -3556,7 +3556,7 @@ async def get_truck_utilization(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/utilization/optimization", tags=["Fleet Utilization"])
+@app.get("/fuelanalytics/api/utilization/optimization", tags=["Fleet Utilization"])
 async def get_utilization_optimization(
     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
     current_user: TokenData = Depends(require_auth),
@@ -3668,7 +3668,7 @@ def get_fuel_db_connection():
     )
 
 
-@app.get("/fuelAnalytics/api/maintenance/fleet-health", tags=["Predictive Maintenance"])
+@app.get("/fuelanalytics/api/maintenance/fleet-health", tags=["Predictive Maintenance"])
 async def get_fleet_health(
     current_user: TokenData = Depends(require_auth),
 ):
@@ -3803,7 +3803,7 @@ async def get_fleet_health(
 
 
 @app.get(
-    "/fuelAnalytics/api/maintenance/truck/{truck_id}", tags=["Predictive Maintenance"]
+    "/fuelanalytics/api/maintenance/truck/{truck_id}", tags=["Predictive Maintenance"]
 )
 async def get_truck_health(
     truck_id: str,
@@ -3881,7 +3881,7 @@ async def get_truck_health(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/maintenance/alerts", tags=["Predictive Maintenance"])
+@app.get("/fuelanalytics/api/maintenance/alerts", tags=["Predictive Maintenance"])
 async def get_maintenance_alerts(
     severity: Optional[str] = None,
     truck_id: Optional[str] = None,
@@ -3966,7 +3966,7 @@ async def get_maintenance_alerts(
 
 
 @app.post(
-    "/fuelAnalytics/api/maintenance/alerts/{alert_id}/acknowledge",
+    "/fuelanalytics/api/maintenance/alerts/{alert_id}/acknowledge",
     tags=["Predictive Maintenance"],
 )
 async def acknowledge_maintenance_alert(
@@ -4009,7 +4009,7 @@ async def acknowledge_maintenance_alert(
 
 
 @app.post(
-    "/fuelAnalytics/api/maintenance/alerts/{alert_id}/resolve",
+    "/fuelanalytics/api/maintenance/alerts/{alert_id}/resolve",
     tags=["Predictive Maintenance"],
 )
 async def resolve_maintenance_alert(
@@ -4052,7 +4052,7 @@ async def resolve_maintenance_alert(
 
 
 @app.get(
-    "/fuelAnalytics/api/maintenance/alerts/summary", tags=["Predictive Maintenance"]
+    "/fuelanalytics/api/maintenance/alerts/summary", tags=["Predictive Maintenance"]
 )
 async def get_alerts_summary(
     current_user: TokenData = Depends(require_auth),
@@ -4133,7 +4133,7 @@ async def get_alerts_summary(
 
 
 @app.get(
-    "/fuelAnalytics/api/maintenance/health-history/{truck_id}",
+    "/fuelanalytics/api/maintenance/health-history/{truck_id}",
     tags=["Predictive Maintenance"],
 )
 async def get_health_history(
@@ -4217,7 +4217,7 @@ async def get_health_history(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/gamification/leaderboard", tags=["Gamification"])
+@app.get("/fuelanalytics/api/gamification/leaderboard", tags=["Gamification"])
 async def get_driver_leaderboard(
     current_user: TokenData = Depends(require_auth),
 ):
@@ -4328,7 +4328,7 @@ async def get_driver_leaderboard(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/gamification/badges/{truck_id}", tags=["Gamification"])
+@app.get("/fuelanalytics/api/gamification/badges/{truck_id}", tags=["Gamification"])
 async def get_driver_badges(
     truck_id: str,
     current_user: TokenData = Depends(require_auth),
@@ -4413,7 +4413,7 @@ async def get_driver_badges(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/alerts/settings", tags=["Alerts"])
+@app.get("/fuelanalytics/api/alerts/settings", tags=["Alerts"])
 async def get_alert_settings():
     """
     🆕 v3.12.21: Get current alert notification settings
@@ -4452,7 +4452,7 @@ async def get_alert_settings():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/fuelAnalytics/api/alerts/test", tags=["Alerts"])
+@app.post("/fuelanalytics/api/alerts/test", tags=["Alerts"])
 async def send_test_alert(
     alert_type: str = Query(
         default="low_fuel", description="Type: low_fuel, theft, refuel"
@@ -4511,7 +4511,7 @@ async def send_test_alert(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/export/refuels")
+@app.get("/fuelanalytics/api/export/refuels")
 async def export_refuels_report(
     format: str = Query(default="csv", description="Export format: csv or excel"),
     days: int = Query(default=30, ge=1, le=365, description="Days to include"),
@@ -4603,7 +4603,7 @@ _user_preferences: Dict[str, Dict] = {}
 _scheduled_reports: Dict[str, Dict] = {}
 
 
-@app.get("/fuelAnalytics/api/dashboard/widgets/available", tags=["Dashboard"])
+@app.get("/fuelanalytics/api/dashboard/widgets/available", tags=["Dashboard"])
 async def get_available_widgets():
     """
     🆕 v3.12.21: Get list of available widget types for dashboard customization.
@@ -4704,7 +4704,7 @@ async def get_available_widgets():
     return {"widgets": widgets, "total": len(widgets)}
 
 
-@app.get("/fuelAnalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
+@app.get("/fuelanalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
 async def get_dashboard_layout(user_id: str):
     """
     🆕 v3.12.21: Get user's dashboard layout configuration.
@@ -4765,7 +4765,7 @@ async def get_dashboard_layout(user_id: str):
     return default_layout
 
 
-@app.post("/fuelAnalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
+@app.post("/fuelanalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
 async def save_dashboard_layout(user_id: str, layout: Dict[str, Any]):
     """
     🆕 v3.12.21: Save user's dashboard layout configuration.
@@ -4788,7 +4788,7 @@ async def save_dashboard_layout(user_id: str, layout: Dict[str, Any]):
 
 
 @app.put(
-    "/fuelAnalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
+    "/fuelanalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
 )
 async def update_widget(user_id: str, widget_id: str, widget_config: Dict[str, Any]):
     """
@@ -4815,7 +4815,7 @@ async def update_widget(user_id: str, widget_id: str, widget_config: Dict[str, A
 
 
 @app.delete(
-    "/fuelAnalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
+    "/fuelanalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
 )
 async def delete_widget(user_id: str, widget_id: str):
     """
@@ -4839,7 +4839,7 @@ async def delete_widget(user_id: str, widget_id: str):
     return {"status": "deleted", "widget_id": widget_id}
 
 
-@app.get("/fuelAnalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
+@app.get("/fuelanalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
 async def get_user_preferences(user_id: str):
     """
     🆕 v3.12.21: Get user preferences.
@@ -4866,7 +4866,7 @@ async def get_user_preferences(user_id: str):
     }
 
 
-@app.put("/fuelAnalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
+@app.put("/fuelanalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
 async def update_user_preferences(user_id: str, preferences: Dict[str, Any]):
     """
     🆕 v3.12.21: Update user preferences.
@@ -4884,7 +4884,7 @@ async def update_user_preferences(user_id: str, preferences: Dict[str, Any]):
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/reports/scheduled/{user_id}", tags=["Reports"])
+@app.get("/fuelanalytics/api/reports/scheduled/{user_id}", tags=["Reports"])
 async def get_scheduled_reports(user_id: str):
     """
     🆕 v3.12.21: Get user's scheduled reports.
@@ -4896,7 +4896,7 @@ async def get_scheduled_reports(user_id: str):
     return {"reports": user_reports, "total": len(user_reports)}
 
 
-@app.post("/fuelAnalytics/api/reports/schedule", tags=["Reports"])
+@app.post("/fuelanalytics/api/reports/schedule", tags=["Reports"])
 async def create_scheduled_report(report: Dict[str, Any]):
     """
     🆕 v3.12.21: Create a new scheduled report.
@@ -4937,7 +4937,7 @@ async def create_scheduled_report(report: Dict[str, Any]):
     return {"status": "created", "report": report}
 
 
-@app.put("/fuelAnalytics/api/reports/schedule/{report_id}", tags=["Reports"])
+@app.put("/fuelanalytics/api/reports/schedule/{report_id}", tags=["Reports"])
 async def update_scheduled_report(report_id: str, updates: Dict[str, Any]):
     """
     🆕 v3.12.21: Update a scheduled report.
@@ -4952,7 +4952,7 @@ async def update_scheduled_report(report_id: str, updates: Dict[str, Any]):
     return {"status": "updated", "report": report}
 
 
-@app.delete("/fuelAnalytics/api/reports/schedule/{report_id}", tags=["Reports"])
+@app.delete("/fuelanalytics/api/reports/schedule/{report_id}", tags=["Reports"])
 async def delete_scheduled_report(report_id: str):
     """
     🆕 v3.12.21: Delete a scheduled report.
@@ -4967,7 +4967,7 @@ async def delete_scheduled_report(report_id: str):
     return {"status": "deleted", "report_id": report_id}
 
 
-@app.post("/fuelAnalytics/api/reports/run/{report_id}", tags=["Reports"])
+@app.post("/fuelanalytics/api/reports/run/{report_id}", tags=["Reports"])
 async def run_report_now(report_id: str):
     """
     🆕 v3.12.21: Run a scheduled report immediately.
@@ -5012,7 +5012,7 @@ _gps_tracking_data: Dict[str, Dict] = {}
 _geofences: Dict[str, Dict] = {}
 
 
-@app.get("/fuelAnalytics/api/gps/trucks", tags=["GPS"])
+@app.get("/fuelanalytics/api/gps/trucks", tags=["GPS"])
 async def get_gps_truck_positions():
     """
     🆕 v3.12.21: Get real-time GPS positions for all trucks.
@@ -5048,7 +5048,7 @@ async def get_gps_truck_positions():
         return {"trucks": [], "total": 0, "error": str(e)}
 
 
-@app.get("/fuelAnalytics/api/gps/truck/{truck_id}/history", tags=["GPS"])
+@app.get("/fuelanalytics/api/gps/truck/{truck_id}/history", tags=["GPS"])
 async def get_truck_route_history(
     truck_id: str,
     hours: int = Query(24, ge=1, le=168, description="Hours of history to retrieve"),
@@ -5072,7 +5072,7 @@ async def get_truck_route_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/gps/geofences", tags=["GPS"])
+@app.get("/fuelanalytics/api/gps/geofences", tags=["GPS"])
 async def get_geofences():
     """
     🆕 v3.12.21: Get all configured geofences.
@@ -5080,7 +5080,7 @@ async def get_geofences():
     return {"geofences": list(_geofences.values()), "total": len(_geofences)}
 
 
-@app.post("/fuelAnalytics/api/gps/geofence", tags=["GPS"])
+@app.post("/fuelanalytics/api/gps/geofence", tags=["GPS"])
 async def create_geofence(geofence: Dict[str, Any]):
     """
     🆕 v3.12.21: Create a new geofence zone.
@@ -5101,7 +5101,7 @@ async def create_geofence(geofence: Dict[str, Any]):
     return {"status": "created", "geofence": geofence}
 
 
-@app.delete("/fuelAnalytics/api/gps/geofence/{geofence_id}", tags=["GPS"])
+@app.delete("/fuelanalytics/api/gps/geofence/{geofence_id}", tags=["GPS"])
 async def delete_geofence(geofence_id: str):
     """
     🆕 v3.12.21: Delete a geofence.
@@ -5113,7 +5113,7 @@ async def delete_geofence(geofence_id: str):
     return {"status": "deleted", "geofence_id": geofence_id}
 
 
-@app.get("/fuelAnalytics/api/gps/geofence/{geofence_id}/events", tags=["GPS"])
+@app.get("/fuelanalytics/api/gps/geofence/{geofence_id}/events", tags=["GPS"])
 async def get_geofence_events(
     geofence_id: str,
     hours: int = Query(24, ge=1, le=168),
@@ -5143,7 +5143,7 @@ _push_subscriptions: Dict[str, Dict] = {}
 _notification_queue: List[Dict] = []
 
 
-@app.post("/fuelAnalytics/api/notifications/subscribe", tags=["Notifications"])
+@app.post("/fuelanalytics/api/notifications/subscribe", tags=["Notifications"])
 async def subscribe_to_push(subscription: Dict[str, Any]):
     """
     🆕 v3.12.21: Subscribe a device to push notifications.
@@ -5163,7 +5163,7 @@ async def subscribe_to_push(subscription: Dict[str, Any]):
 
 
 @app.delete(
-    "/fuelAnalytics/api/notifications/unsubscribe/{user_id}", tags=["Notifications"]
+    "/fuelanalytics/api/notifications/unsubscribe/{user_id}", tags=["Notifications"]
 )
 async def unsubscribe_from_push(user_id: str):
     """
@@ -5175,7 +5175,7 @@ async def unsubscribe_from_push(user_id: str):
     return {"status": "unsubscribed", "user_id": user_id}
 
 
-@app.get("/fuelAnalytics/api/notifications/{user_id}", tags=["Notifications"])
+@app.get("/fuelanalytics/api/notifications/{user_id}", tags=["Notifications"])
 async def get_user_notifications(
     user_id: str,
     limit: int = Query(20, ge=1, le=100),
@@ -5203,7 +5203,7 @@ async def get_user_notifications(
     }
 
 
-@app.post("/fuelAnalytics/api/notifications/send", tags=["Notifications"])
+@app.post("/fuelanalytics/api/notifications/send", tags=["Notifications"])
 async def send_notification(notification: Dict[str, Any]):
     """
     🆕 v3.12.21: Send a push notification.
@@ -5232,7 +5232,7 @@ async def send_notification(notification: Dict[str, Any]):
 
 
 @app.put(
-    "/fuelAnalytics/api/notifications/{notification_id}/read", tags=["Notifications"]
+    "/fuelanalytics/api/notifications/{notification_id}/read", tags=["Notifications"]
 )
 async def mark_notification_read(notification_id: str):
     """
@@ -5247,7 +5247,7 @@ async def mark_notification_read(notification_id: str):
     raise HTTPException(status_code=404, detail="Notification not found")
 
 
-@app.post("/fuelAnalytics/api/notifications/{user_id}/read-all", tags=["Notifications"])
+@app.post("/fuelanalytics/api/notifications/{user_id}/read-all", tags=["Notifications"])
 async def mark_all_notifications_read(user_id: str):
     """
     🆕 v3.12.21: Mark all notifications as read for a user.
@@ -5270,7 +5270,7 @@ async def mark_all_notifications_read(user_id: str):
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/engine-health/fleet-summary", tags=["Engine Health"])
+@app.get("/fuelanalytics/api/engine-health/fleet-summary", tags=["Engine Health"])
 async def get_engine_health_fleet_summary():
     """
     🆕 v3.13.0: Get fleet-wide engine health summary.
@@ -5343,7 +5343,7 @@ async def get_engine_health_fleet_summary():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/engine-health/trucks/{truck_id}", tags=["Engine Health"])
+@app.get("/fuelanalytics/api/engine-health/trucks/{truck_id}", tags=["Engine Health"])
 async def get_truck_health_detail(
     truck_id: str,
     include_history: bool = Query(True, description="Include 7-day history for trends"),
@@ -5478,7 +5478,7 @@ async def get_truck_health_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/engine-health/alerts", tags=["Engine Health"])
+@app.get("/fuelanalytics/api/engine-health/alerts", tags=["Engine Health"])
 async def get_health_alerts(
     severity: Optional[str] = Query(
         None, description="Filter by severity: critical, warning, watch"
@@ -5567,7 +5567,7 @@ async def get_health_alerts(
 
 
 @app.post(
-    "/fuelAnalytics/api/engine-health/alerts/{alert_id}/acknowledge",
+    "/fuelanalytics/api/engine-health/alerts/{alert_id}/acknowledge",
     tags=["Engine Health"],
 )
 async def acknowledge_alert(
@@ -5609,7 +5609,7 @@ async def acknowledge_alert(
 
 
 @app.post(
-    "/fuelAnalytics/api/engine-health/alerts/{alert_id}/resolve", tags=["Engine Health"]
+    "/fuelanalytics/api/engine-health/alerts/{alert_id}/resolve", tags=["Engine Health"]
 )
 async def resolve_alert(
     alert_id: int,
@@ -5650,7 +5650,7 @@ async def resolve_alert(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/engine-health/thresholds", tags=["Engine Health"])
+@app.get("/fuelanalytics/api/engine-health/thresholds", tags=["Engine Health"])
 async def get_health_thresholds():
     """
     🆕 v3.13.0: Get current engine health thresholds.
@@ -5667,7 +5667,7 @@ async def get_health_thresholds():
 
 
 @app.get(
-    "/fuelAnalytics/api/engine-health/maintenance-predictions", tags=["Engine Health"]
+    "/fuelanalytics/api/engine-health/maintenance-predictions", tags=["Engine Health"]
 )
 async def get_maintenance_predictions(
     truck_id: Optional[str] = Query(None, description="Filter by truck"),
@@ -5752,7 +5752,7 @@ async def get_maintenance_predictions(
 
 
 @app.get(
-    "/fuelAnalytics/api/engine-health/sensor-history/{truck_id}/{sensor}",
+    "/fuelanalytics/api/engine-health/sensor-history/{truck_id}/{sensor}",
     tags=["Engine Health"],
 )
 async def get_sensor_history(
@@ -5841,7 +5841,7 @@ async def get_sensor_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/fuelAnalytics/api/engine-health/analyze-now", tags=["Engine Health"])
+@app.post("/fuelanalytics/api/engine-health/analyze-now", tags=["Engine Health"])
 async def trigger_health_analysis():
     """
     🆕 v3.13.0: Trigger immediate health analysis for all trucks.
@@ -5948,7 +5948,7 @@ async def catch_all_routes(full_path: str):
     # Don't interfere with API routes
     if (
         full_path.startswith("api/")
-        or full_path.startswith("fuelAnalytics/")
+        or full_path.startswith("fuelanalytics/")
         or full_path.startswith("ws/")
         or full_path.startswith("assets/")
     ):

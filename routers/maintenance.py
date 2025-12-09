@@ -23,7 +23,7 @@ import pymysql
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/fuelAnalytics/api/maintenance",
+    prefix="/fuelanalytics/api/maintenance",
     tags=["Predictive Maintenance"],
 )
 

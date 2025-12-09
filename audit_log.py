@@ -142,9 +142,9 @@ class AuditLogger:
 
     # Paths to exclude from automatic logging
     EXCLUDED_PATHS = {
-        "/fuelAnalytics/api/docs",
-        "/fuelAnalytics/api/redoc",
-        "/fuelAnalytics/api/openapi.json",
+        "/fuelanalytics/api/docs",
+        "/fuelanalytics/api/redoc",
+        "/fuelanalytics/api/openapi.json",
         "/metrics",
         "/health",
         "/favicon.ico",
@@ -369,7 +369,7 @@ class AuditLogger:
         parts = path.strip("/").split("/")
 
         # Skip api prefix
-        if parts and parts[0] == "fuelAnalytics":
+        if parts and parts[0] == "fuelanalytics":
             parts = parts[1:]
         if parts and parts[0] == "api":
             parts = parts[1:]

@@ -19,7 +19,7 @@ import pymysql
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/fuelAnalytics/api",
+    prefix="/fuelanalytics/api",
     tags=["System Health"],
 )
 
