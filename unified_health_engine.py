@@ -923,6 +923,25 @@ class UnifiedHealthEngine:
         Complete health analysis for a single truck.
         Combines all 6 layers of analysis.
         """
+        # 🔧 FIX: Sanitize inputs to prevent crashes with string values
+        sanitized_values = {}
+        for k, v in current_values.items():
+            # Skip non-sensor fields
+            if k in ["truck_id", "unit_id", "truck_name"]:
+                sanitized_values[k] = v
+                continue
+
+            try:
+                if v is not None:
+                    sanitized_values[k] = float(v)
+                else:
+                    sanitized_values[k] = None
+            except (ValueError, TypeError):
+                # If conversion fails, treat as None
+                sanitized_values[k] = None
+
+        current_values = sanitized_values
+
         all_alerts: List[UnifiedAlert] = []
         components: Dict[str, ComponentHealth] = {}
 

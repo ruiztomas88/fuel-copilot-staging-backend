@@ -3878,7 +3878,9 @@ async def get_fleet_health(
         return demo_response
 
 
-@app.get("/fuelAnalytics/api/maintenance/truck/{truck_id}", tags=["Predictive Maintenance"])
+@app.get(
+    "/fuelAnalytics/api/maintenance/truck/{truck_id}", tags=["Predictive Maintenance"]
+)
 async def get_truck_health(
     truck_id: str,
     days: int = Query(7, ge=1, le=30, description="History days"),
@@ -3892,11 +3894,13 @@ async def get_truck_health(
         from routers.maintenance import fetch_sensor_data, fetch_historical_data
 
         engine = UnifiedHealthEngine()
-        
+
         # Get current data
         trucks_data = fetch_sensor_data()
-        current_data = next((t for t in trucks_data if t.get("truck_id") == truck_id), None)
-        
+        current_data = next(
+            (t for t in trucks_data if t.get("truck_id") == truck_id), None
+        )
+
         if not current_data:
             # Return demo data if truck not found
             return {
@@ -3917,15 +3921,10 @@ async def get_truck_health(
         history = fetch_historical_data(truck_id, unit_id, days) if unit_id else {}
 
         analysis = engine.analyze_truck(
-            truck_id=truck_id,
-            current_values=current_data,
-            historical_values=history
+            truck_id=truck_id, current_values=current_data, historical_values=history
         )
 
-        return {
-            "status": "success",
-            "data": analysis.to_dict()
-        }
+        return {"status": "success", "data": analysis.to_dict()}
 
     except Exception as e:
         logger.error(f"Truck health error: {e}")
