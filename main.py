@@ -130,6 +130,15 @@ except ImportError:
         USERS_DB,
     )
 
+# 🆕 v5.0: Import modular routers (breaking down 5,954-line monolith)
+try:
+    from routers import include_all_routers
+
+    ROUTERS_AVAILABLE = True
+except ImportError as e:
+    ROUTERS_AVAILABLE = False
+    logging.warning(f"⚠️ Routers package not available: {e}")
+
 # Redis Cache setup (optional)
 try:
     import sys
@@ -526,6 +535,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 🆕 v5.0: Include modular routers (unified health engine, fleet, analytics)
+if ROUTERS_AVAILABLE:
+    include_all_routers(app, auth_dependency=require_auth)
+    logger.info("✅ Modular routers included (maintenance, fleet, analytics)")
 
 
 # ============================================================================
