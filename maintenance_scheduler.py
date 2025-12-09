@@ -261,7 +261,9 @@ class MaintenanceScheduler:
             logger.error(f"Failed to fetch Wialon data: {e}")
             return []
 
-    def fetch_historical_data(self, truck_id: str, unit_id: Optional[int] = None, days: int = 7) -> Dict[str, List]:
+    def fetch_historical_data(
+        self, truck_id: str, unit_id: Optional[int] = None, days: int = 7
+    ) -> Dict[str, List]:
         """
         Fetch historical sensor data for trend analysis
 
@@ -509,15 +511,15 @@ class MaintenanceScheduler:
                     message=message,
                     severity="critical",
                 )
-                
+
                 # Mark notification as sent to prevent re-sends
                 if alert.get("id"):
                     with conn.cursor() as cursor:
                         cursor.execute(
                             "UPDATE maintenance_alerts SET notification_sent_at = NOW() WHERE id = %s",
-                            (alert["id"],)
+                            (alert["id"],),
                         )
-                
+
                 sent += 1
                 logger.info(f"[SMS] Notification sent for {alert['truck_id']}")
 
@@ -552,10 +554,25 @@ class MaintenanceScheduler:
                 logger.warning("No truck data available - skipping analysis")
                 return
 
-            # 2. Run predictive analysis
+            # 2. Enrich with historical data for trend analysis
+            logger.info(
+                "[HISTORY] Fetching 7-day historical data for trend analysis..."
+            )
+            for truck in trucks_data:
+                historical = self.fetch_historical_data(
+                    truck_id=truck["truck_id"],
+                    unit_id=truck.get("unit_id"),
+                    days=7,
+                )
+                truck["historical"] = historical
+            logger.info(
+                f"[HISTORY] Enriched {len(trucks_data)} trucks with historical data"
+            )
+
+            # 3. Run predictive analysis (now with historical context)
             report = self.engine.generate_fleet_health_report(trucks_data)
 
-            # 3. Log summary
+            # 4. Log summary
             summary = report.get("fleet_summary", {})
             alert_summary = report.get("alert_summary", {})
 

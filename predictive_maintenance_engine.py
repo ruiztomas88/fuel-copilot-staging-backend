@@ -480,6 +480,215 @@ class PredictiveMaintenanceEngine:
         return alerts
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # ADVANCED ANALYSIS - Correlations & Rate of Change
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def check_engine_load(
+        self,
+        truck_id: str,
+        current: float,
+        historical: Optional[List[Tuple[datetime, float]]] = None,
+    ) -> List[HealthAlert]:
+        """
+        Check engine load for overload conditions.
+        Sustained high load accelerates wear on all components.
+        """
+        alerts = []
+        t = self.thresholds.get("engine_load", {})
+
+        # Immediate overload alert
+        if current >= t.get("critical_high", 100):
+            alerts.append(
+                HealthAlert(
+                    truck_id=truck_id,
+                    category=AlertCategory.ENGINE,
+                    severity=AlertSeverity.HIGH,
+                    title="Engine Overloaded",
+                    message=f"Engine load at {current:.0f}% - reduce load immediately",
+                    metric="engine_load",
+                    current_value=current,
+                    threshold=100,
+                    recommendation="Reduce speed on grades. Check if overweight.",
+                    estimated_days_to_failure=7,
+                )
+            )
+        elif current >= t.get("warning_high", 95):
+            alerts.append(
+                HealthAlert(
+                    truck_id=truck_id,
+                    category=AlertCategory.ENGINE,
+                    severity=AlertSeverity.MEDIUM,
+                    title="High Engine Load",
+                    message=f"Engine load at {current:.0f}% - high stress",
+                    metric="engine_load",
+                    current_value=current,
+                    threshold=95,
+                    recommendation="Monitor closely. Consider reducing load.",
+                    estimated_days_to_failure=14,
+                )
+            )
+
+        # Trend: Sustained high load over 7 days = accelerated wear
+        if historical and len(historical) > 50:
+            try:
+                avg_load = statistics.mean([v for _, v in historical])
+                if avg_load > 80:
+                    alerts.append(
+                        HealthAlert(
+                            truck_id=truck_id,
+                            category=AlertCategory.ENGINE,
+                            severity=AlertSeverity.MEDIUM,
+                            title="Sustained High Load Pattern",
+                            message=f"Avg engine load {avg_load:.0f}% over 7 days - accelerated wear",
+                            metric="engine_load",
+                            current_value=current,
+                            threshold=80,
+                            trend_pct=avg_load,
+                            recommendation="Review routes for excessive grades. Check for dragging brakes.",
+                            estimated_days_to_failure=30,
+                        )
+                    )
+            except (ValueError, statistics.StatisticsError):
+                pass
+
+        return alerts
+
+    def check_cooling_system_correlation(
+        self, truck_id: str, cool_temp: float, oil_temp: float
+    ) -> List[HealthAlert]:
+        """
+        Correlate coolant and oil temperature to confirm cooling issues.
+        
+        - BOTH high = confirmed cooling system problem
+        - Only coolant high = possible sensor issue or thermostat
+        
+        This reduces false positives significantly.
+        """
+        alerts = []
+
+        coolant_high = cool_temp > 215
+        oil_high = oil_temp > 240
+
+        if coolant_high and oil_high:
+            # BOTH sensors confirm overheating - this is a real problem
+            alerts.append(
+                HealthAlert(
+                    truck_id=truck_id,
+                    category=AlertCategory.COOLING,
+                    severity=AlertSeverity.CRITICAL,
+                    title="Cooling System Failure Confirmed",
+                    message=f"Coolant {cool_temp:.0f}°F AND Oil {oil_temp:.0f}°F both elevated - confirmed cooling issue",
+                    metric="cool_temp",
+                    current_value=cool_temp,
+                    threshold=215,
+                    recommendation="STOP TRUCK. Cooling system failure confirmed by multiple sensors. Check radiator, water pump, thermostat.",
+                    estimated_days_to_failure=0,
+                )
+            )
+        elif coolant_high and not oil_high:
+            # Only coolant high - could be sensor issue
+            alerts.append(
+                HealthAlert(
+                    truck_id=truck_id,
+                    category=AlertCategory.COOLING,
+                    severity=AlertSeverity.MEDIUM,
+                    title="Coolant Sensor Check Needed",
+                    message=f"Coolant {cool_temp:.0f}°F high but oil temp {oil_temp:.0f}°F normal - verify sensor",
+                    metric="cool_temp",
+                    current_value=cool_temp,
+                    threshold=215,
+                    recommendation="Check coolant sensor and thermostat. May be false positive.",
+                    estimated_days_to_failure=7,
+                )
+            )
+
+        return alerts
+
+    def check_rapid_change(
+        self,
+        truck_id: str,
+        metric: str,
+        values: List[Tuple[datetime, float]],
+    ) -> List[HealthAlert]:
+        """
+        Detect rapid changes that indicate imminent failure.
+        
+        A RAPID change is more dangerous than a high stable value.
+        Example: Oil pressure dropping 10 psi in 5 minutes = pump failing
+        """
+        alerts = []
+
+        if len(values) < 20:
+            return alerts
+
+        # Get timestamps
+        now = datetime.now(timezone.utc)
+        
+        # Last 10 minutes vs previous 10 minutes
+        recent = [v for ts, v in values if ts >= now - timedelta(minutes=10)]
+        previous = [v for ts, v in values if now - timedelta(minutes=20) <= ts < now - timedelta(minutes=10)]
+
+        if len(recent) < 3 or len(previous) < 3:
+            return alerts
+
+        try:
+            recent_avg = statistics.mean(recent)
+            previous_avg = statistics.mean(previous)
+        except (ValueError, statistics.StatisticsError):
+            return alerts
+
+        change = recent_avg - previous_avg
+
+        # Thresholds for rapid change by metric
+        rapid_thresholds = {
+            "oil_press": {"drop": -8, "severity": AlertSeverity.CRITICAL, "days": 0},
+            "cool_temp": {"rise": 15, "severity": AlertSeverity.HIGH, "days": 1},
+            "oil_temp": {"rise": 20, "severity": AlertSeverity.HIGH, "days": 1},
+            "pwr_ext": {"drop": -1.5, "severity": AlertSeverity.HIGH, "days": 1},
+        }
+
+        if metric not in rapid_thresholds:
+            return alerts
+
+        config = rapid_thresholds[metric]
+
+        # Check for rapid drop
+        if "drop" in config and change <= config["drop"]:
+            alerts.append(
+                HealthAlert(
+                    truck_id=truck_id,
+                    category=AlertCategory.ENGINE if metric == "oil_press" else AlertCategory.ELECTRICAL,
+                    severity=config["severity"],
+                    title=f"Rapid {metric.replace('_', ' ').title()} Drop",
+                    message=f"{metric} dropped {abs(change):.1f} in last 10 minutes - active failure",
+                    metric=metric,
+                    current_value=recent_avg,
+                    threshold=config["drop"],
+                    recommendation="IMMEDIATE inspection required. Rapid change indicates active failure.",
+                    estimated_days_to_failure=config["days"],
+                )
+            )
+
+        # Check for rapid rise
+        if "rise" in config and change >= config["rise"]:
+            alerts.append(
+                HealthAlert(
+                    truck_id=truck_id,
+                    category=AlertCategory.COOLING if "temp" in metric else AlertCategory.ENGINE,
+                    severity=config["severity"],
+                    title=f"Rapid {metric.replace('_', ' ').title()} Rise",
+                    message=f"{metric} rose {change:.1f} in last 10 minutes - investigate immediately",
+                    metric=metric,
+                    current_value=recent_avg,
+                    threshold=config["rise"],
+                    recommendation="Rapid temperature rise indicates cooling or load issue. Reduce load and monitor.",
+                    estimated_days_to_failure=config["days"],
+                )
+            )
+
+        return alerts
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # TREND ANALYSIS
     # ═══════════════════════════════════════════════════════════════════════════
 
@@ -698,11 +907,20 @@ class PredictiveMaintenanceEngine:
 
         if engine_load is not None:
             engine_metrics["engine_load_pct"] = engine_load
+            # 🆕 Check engine load with historical data
+            engine_load_history = historical_values.get("engine_load") if historical_values else None
+            engine_alerts.extend(
+                self.check_engine_load(truck_id, engine_load, engine_load_history)
+            )
 
         # Trend analysis for oil pressure
         if historical_values and "oil_press" in historical_values:
             engine_alerts.extend(
                 self.check_trends(truck_id, "oil_press", historical_values["oil_press"])
+            )
+            # 🆕 Rate of change detection
+            engine_alerts.extend(
+                self.check_rapid_change(truck_id, "oil_press", historical_values["oil_press"])
             )
 
         components["engine"] = self.calculate_component_score(
@@ -722,10 +940,21 @@ class PredictiveMaintenanceEngine:
             )
             cooling_metrics["coolant_temp_f"] = cool_temp
 
+            # 🆕 Sensor correlation: If both cool_temp and oil_temp are available,
+            # use correlation to confirm cooling issues and reduce false positives
+            if oil_temp is not None:
+                cooling_alerts.extend(
+                    self.check_cooling_system_correlation(truck_id, cool_temp, oil_temp)
+                )
+
         # Trend analysis
         if historical_values and "cool_temp" in historical_values:
             cooling_alerts.extend(
                 self.check_trends(truck_id, "cool_temp", historical_values["cool_temp"])
+            )
+            # 🆕 Rate of change - rapid temperature rise is dangerous
+            cooling_alerts.extend(
+                self.check_rapid_change(truck_id, "cool_temp", historical_values["cool_temp"])
             )
 
         components["cooling"] = self.calculate_component_score(
@@ -749,6 +978,10 @@ class PredictiveMaintenanceEngine:
         if historical_values and "pwr_ext" in historical_values:
             electrical_alerts.extend(
                 self.check_trends(truck_id, "pwr_ext", historical_values["pwr_ext"])
+            )
+            # 🆕 Rapid voltage drop = alternator or battery failure
+            electrical_alerts.extend(
+                self.check_rapid_change(truck_id, "pwr_ext", historical_values["pwr_ext"])
             )
 
         components["electrical"] = self.calculate_component_score(

@@ -3642,6 +3642,7 @@ async def get_utilization_optimization(
 def get_fuel_db_connection():
     """Get connection to Fuel Analytics DB for maintenance alerts"""
     import pymysql
+
     return pymysql.connect(
         host=os.getenv("MYSQL_HOST", "localhost"),
         port=int(os.getenv("MYSQL_PORT", "3306")),
