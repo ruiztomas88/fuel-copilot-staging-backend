@@ -3,26 +3,31 @@
 ║                         ROUTERS PACKAGE                                        ║
 ║         Modular API routing (from 5,954-line main.py monolith)                 ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
-║  Routers:                                                                      ║
-║  - health_router: System health checks (/health, /status)                      ║
-║  - maintenance_router: DISABLED - was causing crashes                          ║
-║  - fleet_router: Fleet management (/trucks, /fleet-summary)                    ║
-║  - analytics_router: Fuel analytics (/analytics/*)                             ║
+║  STATUS: ALL ROUTERS DISABLED TO PREVENT DUPLICATE ENDPOINTS                   ║
+║                                                                                ║
+║  The main.py already has these endpoints. Enabling routers causes duplicates:  ║
+║  - /health, /status, /cache/stats (health_router)                              ║
+║  - /trucks (fleet_router)                                                      ║
+║  - maintenance_router: Also crashed backend with Wialon DB                     ║
+║                                                                                ║
+║  TODO: Properly migrate endpoints from main.py to routers                      ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
-from .health import router as health_router
+# 🔧 ALL ROUTERS DISABLED - main.py already has these endpoints
+# Enabling causes "duplicate endpoint" errors in tests and runtime conflicts
 
-# 🔧 DISABLED: maintenance_router was crashing the backend
+# from .health import router as health_router
 # from .maintenance import router as maintenance_router
-from .fleet import router as fleet_router
-from .analytics import router as analytics_router
+# from .fleet import router as fleet_router
+# from .analytics import router as analytics_router
 
 __all__ = [
-    "health_router",
-    # "maintenance_router",  # DISABLED
-    "fleet_router",
-    "analytics_router",
+    # All routers disabled until main.py endpoints are removed
+    # "health_router",
+    # "maintenance_router",
+    # "fleet_router",
+    # "analytics_router",
 ]
 
 
@@ -30,15 +35,12 @@ def include_all_routers(app, auth_dependency=None):
     """
     Include all routers in the FastAPI app.
 
-    NOTE: maintenance_router is DISABLED until properly tested.
+    NOTE: ALL ROUTERS DISABLED until we properly migrate from main.py
+    The endpoints already exist in main.py - enabling routers creates duplicates.
     """
-    # 🔧 DISABLED: maintenance router was causing crashes
-    # if auth_dependency:
-    #     from .maintenance import set_auth_dependency
-    #     set_auth_dependency(auth_dependency)
-
-    # Include routers (maintenance DISABLED)
-    app.include_router(health_router)
-    # app.include_router(maintenance_router)  # DISABLED
-    app.include_router(fleet_router)
-    app.include_router(analytics_router)
+    # 🔧 ALL DISABLED - main.py has these endpoints already
+    # app.include_router(health_router)
+    # app.include_router(maintenance_router)
+    # app.include_router(fleet_router)
+    # app.include_router(analytics_router)
+    pass  # No-op until migration is complete
