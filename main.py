@@ -3635,6 +3635,555 @@ async def get_utilization_optimization(
 
 
 # ============================================================================
+# 🆕 v4.1: PREDICTIVE MAINTENANCE ENDPOINTS
+# ============================================================================
+
+
+@app.get("/fuelAnalytics/api/maintenance/fleet-health", tags=["Predictive Maintenance"])
+async def get_fleet_health(
+    current_user: TokenData = Depends(require_auth),
+):
+    """
+    🆕 v4.1: Get fleet-wide engine health report with predictive alerts.
+
+    Features:
+    - Real-time health scores for each truck (0-100)
+    - Component breakdown (Engine, Cooling, Electrical, Fuel, Emissions)
+    - Threshold-based alerts (immediate issues)
+    - Trend-based alerts (developing problems over 7 days)
+    - Actionable recommendations
+
+    This is Phase 1 of our Predictive Maintenance system:
+    - Rules + Thresholds + 7-day Trends
+    - No ML required (yet) - simple but effective
+    - Builds labeled data for future ML models
+
+    Returns:
+        Fleet health report with alerts and truck-by-truck breakdown
+    """
+    try:
+        from predictive_maintenance_engine import PredictiveMaintenanceEngine
+        import pymysql
+        from datetime import datetime, timezone
+
+        pm_engine = PredictiveMaintenanceEngine()
+
+        # Connect to Wialon directly to get fresh sensor data
+        conn = pymysql.connect(
+            host=os.getenv("WIALON_DB_HOST", "localhost"),
+            port=int(os.getenv("WIALON_DB_PORT", "3306")),
+            user=os.getenv("WIALON_DB_USER", ""),
+            password=os.getenv("WIALON_DB_PASS", ""),
+            database=os.getenv("WIALON_DB_NAME", "wialon_collect"),
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+
+        trucks_data = []
+
+        with conn.cursor() as cursor:
+            # Get latest readings for each truck (last 2 hours)
+            query = """
+                SELECT 
+                    s.unit,
+                    s.n as truck_name,
+                    s.p as param,
+                    s.value,
+                    s.m as epoch
+                FROM sensors s
+                INNER JOIN (
+                    SELECT unit, p, MAX(m) as max_epoch
+                    FROM sensors
+                    WHERE m >= UNIX_TIMESTAMP() - 7200
+                    GROUP BY unit, p
+                ) latest ON s.unit = latest.unit AND s.p = latest.p AND s.m = latest.max_epoch
+                WHERE s.m >= UNIX_TIMESTAMP() - 7200
+            """
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+            # Group by unit
+            unit_data = {}
+            for row in rows:
+                unit_id = row["unit"]
+                if unit_id not in unit_data:
+                    unit_data[unit_id] = {
+                        "truck_id": row["truck_name"] or str(unit_id),
+                        "unit_id": unit_id,
+                    }
+
+                param = row["param"]
+                value = row["value"]
+
+                # Map Wialon params to our standard names
+                param_mapping = {
+                    "oil_press": "oil_press",
+                    "cool_temp": "cool_temp",
+                    "oil_temp": "oil_temp",
+                    "pwr_ext": "pwr_ext",
+                    "def_level": "def_level",
+                    "rpm": "rpm",
+                    "engine_load": "engine_load",
+                    "fuel_rate": "fuel_rate",
+                    "fuel_lvl": "fuel_lvl",
+                }
+
+                if param in param_mapping:
+                    unit_data[unit_id][param_mapping[param]] = value
+
+            trucks_data = list(unit_data.values())
+
+        conn.close()
+
+        # Generate health report
+        if trucks_data:
+            report = pm_engine.generate_fleet_health_report(trucks_data)
+        else:
+            # Fallback with sample data for demo
+            logger.warning("No Wialon data, using sample data for demo")
+            sample_trucks = [
+                {
+                    "truck_id": "T101",
+                    "oil_press": 45,
+                    "cool_temp": 195,
+                    "pwr_ext": 14.1,
+                    "rpm": 1400,
+                },
+                {
+                    "truck_id": "T102",
+                    "oil_press": 38,
+                    "cool_temp": 202,
+                    "pwr_ext": 13.8,
+                    "rpm": 1200,
+                },
+                {
+                    "truck_id": "T103",
+                    "oil_press": 52,
+                    "cool_temp": 188,
+                    "pwr_ext": 14.3,
+                    "rpm": 1600,
+                },
+            ]
+            report = pm_engine.generate_fleet_health_report(sample_trucks)
+
+        return report
+
+    except Exception as e:
+        logger.error(f"Fleet health error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/fuelAnalytics/api/maintenance/truck/{truck_id}", tags=["Predictive Maintenance"]
+)
+async def get_truck_health(
+    truck_id: str,
+    current_user: TokenData = Depends(require_auth),
+):
+    """
+    🆕 v4.1: Get detailed health analysis for a specific truck.
+
+    Returns:
+        Detailed health report with component scores and alerts
+    """
+    try:
+        from predictive_maintenance_engine import PredictiveMaintenanceEngine
+        import pymysql
+
+        pm_engine = PredictiveMaintenanceEngine()
+
+        conn = pymysql.connect(
+            host=os.getenv("WIALON_DB_HOST", "localhost"),
+            port=int(os.getenv("WIALON_DB_PORT", "3306")),
+            user=os.getenv("WIALON_DB_USER", ""),
+            password=os.getenv("WIALON_DB_PASS", ""),
+            database=os.getenv("WIALON_DB_NAME", "wialon_collect"),
+            charset="utf8mb4",
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+
+        truck_data = {"truck_id": truck_id}
+
+        with conn.cursor() as cursor:
+            # Get latest values for this truck
+            query = """
+                SELECT p as param, value
+                FROM sensors
+                WHERE n LIKE %s
+                    AND m >= UNIX_TIMESTAMP() - 7200
+                ORDER BY m DESC
+            """
+            cursor.execute(query, (f"%{truck_id}%",))
+            rows = cursor.fetchall()
+
+            seen_params = set()
+            for row in rows:
+                param = row["param"]
+                if param not in seen_params:
+                    seen_params.add(param)
+                    truck_data[param] = row["value"]
+
+        conn.close()
+
+        # Build current values dict, filtering None values
+        raw_values = {
+            "oil_press": truck_data.get("oil_press"),
+            "cool_temp": truck_data.get("cool_temp"),
+            "oil_temp": truck_data.get("oil_temp"),
+            "pwr_ext": truck_data.get("pwr_ext"),
+            "def_level": truck_data.get("def_level"),
+            "rpm": truck_data.get("rpm"),
+            "engine_load": truck_data.get("engine_load"),
+            "fuel_rate": truck_data.get("fuel_rate"),
+            "fuel_lvl": truck_data.get("fuel_lvl"),
+        }
+        current_values = {k: float(v) for k, v in raw_values.items() if v is not None}
+
+        # Analyze truck
+        health = pm_engine.analyze_truck(truck_id, current_values)
+
+        return {
+            "status": "success",
+            "data": health.to_dict(),
+        }
+
+    except Exception as e:
+        logger.error(f"Truck health error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/maintenance/alerts", tags=["Predictive Maintenance"])
+async def get_maintenance_alerts(
+    severity: Optional[str] = None,
+    truck_id: Optional[str] = None,
+    unresolved_only: bool = True,
+    limit: int = 50,
+    current_user: TokenData = Depends(require_auth),
+):
+    """
+    🆕 v4.1: Get persisted maintenance alerts.
+
+    Query params:
+        severity: Filter by severity (critical, high, medium, low)
+        truck_id: Filter by truck
+        unresolved_only: Only show unresolved alerts (default: true)
+        limit: Max number of alerts (default: 50)
+
+    Returns:
+        List of maintenance alerts with resolution status
+    """
+    try:
+        conn = get_fuel_db_connection()
+
+        query = """
+            SELECT 
+                id, truck_id, category, severity, title, message,
+                metric, current_value, threshold, trend_pct,
+                recommendation, estimated_days_to_failure,
+                created_at, acknowledged_at, acknowledged_by,
+                resolved_at, resolved_by
+            FROM maintenance_alerts
+            WHERE 1=1
+        """
+        params: Dict[str, Any] = {}
+
+        if severity:
+            query += " AND severity = %(severity)s"
+            params["severity"] = severity
+
+        if truck_id:
+            query += " AND truck_id = %(truck_id)s"
+            params["truck_id"] = truck_id
+
+        if unresolved_only:
+            query += " AND resolved_at IS NULL"
+
+        query += " ORDER BY FIELD(severity, 'critical', 'high', 'medium', 'low'), created_at DESC"
+        query += f" LIMIT {limit}"
+
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+        conn.close()
+
+        return {
+            "status": "success",
+            "count": len(rows),
+            "alerts": [
+                {
+                    **row,
+                    "created_at": (
+                        row["created_at"].isoformat() if row.get("created_at") else None
+                    ),
+                    "acknowledged_at": (
+                        row["acknowledged_at"].isoformat()
+                        if row.get("acknowledged_at")
+                        else None
+                    ),
+                    "resolved_at": (
+                        row["resolved_at"].isoformat()
+                        if row.get("resolved_at")
+                        else None
+                    ),
+                }
+                for row in rows
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Get alerts error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/fuelAnalytics/api/maintenance/alerts/{alert_id}/acknowledge",
+    tags=["Predictive Maintenance"],
+)
+async def acknowledge_alert(
+    alert_id: int,
+    current_user: TokenData = Depends(require_auth),
+):
+    """
+    🆕 v4.1: Acknowledge a maintenance alert.
+
+    Marks the alert as seen/acknowledged by the current user.
+    """
+    try:
+        conn = get_fuel_db_connection()
+
+        with conn.cursor() as cursor:
+            query = """
+                UPDATE maintenance_alerts
+                SET acknowledged_at = NOW(),
+                    acknowledged_by = %s
+                WHERE id = %s AND acknowledged_at IS NULL
+            """
+            cursor.execute(query, (current_user.username, alert_id))
+            affected = cursor.rowcount
+
+        conn.commit()
+        conn.close()
+
+        if affected == 0:
+            raise HTTPException(
+                status_code=404, detail="Alert not found or already acknowledged"
+            )
+
+        return {"status": "success", "message": f"Alert {alert_id} acknowledged"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Acknowledge alert error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/fuelAnalytics/api/maintenance/alerts/{alert_id}/resolve",
+    tags=["Predictive Maintenance"],
+)
+async def resolve_alert(
+    alert_id: int,
+    current_user: TokenData = Depends(require_auth),
+):
+    """
+    🆕 v4.1: Resolve/close a maintenance alert.
+
+    Marks the alert as resolved (issue fixed or false positive).
+    """
+    try:
+        conn = get_fuel_db_connection()
+
+        with conn.cursor() as cursor:
+            query = """
+                UPDATE maintenance_alerts
+                SET resolved_at = NOW(),
+                    resolved_by = %s
+                WHERE id = %s AND resolved_at IS NULL
+            """
+            cursor.execute(query, (current_user.username, alert_id))
+            affected = cursor.rowcount
+
+        conn.commit()
+        conn.close()
+
+        if affected == 0:
+            raise HTTPException(
+                status_code=404, detail="Alert not found or already resolved"
+            )
+
+        return {"status": "success", "message": f"Alert {alert_id} resolved"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Resolve alert error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/fuelAnalytics/api/maintenance/alerts/summary", tags=["Predictive Maintenance"]
+)
+async def get_alerts_summary(
+    current_user: TokenData = Depends(require_auth),
+):
+    """
+    🆕 v4.1: Get summary of unresolved alerts by severity and truck.
+
+    Returns:
+        Summary with counts by severity and top affected trucks
+    """
+    try:
+        conn = get_fuel_db_connection()
+
+        with conn.cursor() as cursor:
+            # Count by severity
+            cursor.execute(
+                """
+                SELECT severity, COUNT(*) as count
+                FROM maintenance_alerts
+                WHERE resolved_at IS NULL
+                GROUP BY severity
+            """
+            )
+            by_severity = {row["severity"]: row["count"] for row in cursor.fetchall()}
+
+            # Count by truck (top 10)
+            cursor.execute(
+                """
+                SELECT truck_id, COUNT(*) as count,
+                       SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) as critical_count
+                FROM maintenance_alerts
+                WHERE resolved_at IS NULL
+                GROUP BY truck_id
+                ORDER BY critical_count DESC, count DESC
+                LIMIT 10
+            """
+            )
+            by_truck = list(cursor.fetchall())
+
+            # Recent 24h vs previous 24h
+            cursor.execute(
+                """
+                SELECT 
+                    SUM(CASE WHEN created_at >= NOW() - INTERVAL 24 HOUR THEN 1 ELSE 0 END) as last_24h,
+                    SUM(CASE WHEN created_at >= NOW() - INTERVAL 48 HOUR 
+                             AND created_at < NOW() - INTERVAL 24 HOUR THEN 1 ELSE 0 END) as prev_24h
+                FROM maintenance_alerts
+                WHERE resolved_at IS NULL
+            """
+            )
+            trend = cursor.fetchone()
+
+        conn.close()
+
+        total_unresolved = sum(by_severity.values())
+
+        return {
+            "status": "success",
+            "summary": {
+                "total_unresolved": total_unresolved,
+                "by_severity": {
+                    "critical": by_severity.get("critical", 0),
+                    "high": by_severity.get("high", 0),
+                    "medium": by_severity.get("medium", 0),
+                    "low": by_severity.get("low", 0),
+                },
+                "top_affected_trucks": by_truck,
+                "trend": {
+                    "last_24h": trend["last_24h"] or 0 if trend else 0,
+                    "prev_24h": trend["prev_24h"] or 0 if trend else 0,
+                },
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Alerts summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/fuelAnalytics/api/maintenance/health-history/{truck_id}",
+    tags=["Predictive Maintenance"],
+)
+async def get_health_history(
+    truck_id: str,
+    days: int = 30,
+    current_user: TokenData = Depends(require_auth),
+):
+    """
+    🆕 v4.1: Get health score history for a truck.
+
+    Useful for seeing if a truck's health is improving or declining over time.
+
+    Returns:
+        Daily health scores for the specified period
+    """
+    try:
+        conn = get_fuel_db_connection()
+
+        with conn.cursor() as cursor:
+            query = """
+                SELECT 
+                    DATE(recorded_at) as date,
+                    AVG(overall_score) as avg_score,
+                    MIN(overall_score) as min_score,
+                    MAX(overall_score) as max_score,
+                    AVG(engine_score) as engine,
+                    AVG(cooling_score) as cooling,
+                    AVG(electrical_score) as electrical,
+                    AVG(fuel_score) as fuel,
+                    SUM(alert_count) as total_alerts
+                FROM truck_health_history
+                WHERE truck_id = %s
+                  AND recorded_at >= NOW() - INTERVAL %s DAY
+                GROUP BY DATE(recorded_at)
+                ORDER BY date ASC
+            """
+            cursor.execute(query, (truck_id, days))
+            rows = cursor.fetchall()
+
+        conn.close()
+
+        return {
+            "status": "success",
+            "truck_id": truck_id,
+            "days": days,
+            "history": [
+                {
+                    "date": row["date"].isoformat() if row.get("date") else None,
+                    "avg_score": (
+                        round(row["avg_score"], 1) if row.get("avg_score") else None
+                    ),
+                    "min_score": row["min_score"],
+                    "max_score": row["max_score"],
+                    "components": {
+                        "engine": (
+                            round(row["engine"], 1) if row.get("engine") else None
+                        ),
+                        "cooling": (
+                            round(row["cooling"], 1) if row.get("cooling") else None
+                        ),
+                        "electrical": (
+                            round(row["electrical"], 1)
+                            if row.get("electrical")
+                            else None
+                        ),
+                        "fuel": round(row["fuel"], 1) if row.get("fuel") else None,
+                    },
+                    "alert_count": row["total_alerts"] or 0,
+                }
+                for row in rows
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Health history error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # 🆕 v4.0: GAMIFICATION ENDPOINTS
 # ============================================================================
 

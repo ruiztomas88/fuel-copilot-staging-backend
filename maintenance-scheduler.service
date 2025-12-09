@@ -1,0 +1,24 @@
+[Unit]
+Description=Fuel Copilot Predictive Maintenance Scheduler
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/fuel-copilot
+Environment="PATH=/opt/fuel-copilot/venv/bin"
+ExecStart=/opt/fuel-copilot/venv/bin/python maintenance_scheduler.py
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/fuel-copilot/logs
+
+[Install]
+WantedBy=multi-user.target
