@@ -3135,7 +3135,7 @@ async def get_fleet_cost_per_mile(
                 for tid in all_trucks[:20]:
                     truck_data = db.get_truck_latest_record(tid)
                     if truck_data:
-                        mpg = truck_data.get("mpg", 5.5) or 5.5
+                        mpg = truck_data.get("mpg_current", 5.5) or 5.5
                         if mpg < 3 or mpg > 12:
                             mpg = 5.5
                         miles = 8000  # Default monthly miles estimate
@@ -3654,7 +3654,7 @@ async def get_driver_leaderboard():
                 for tid in all_trucks[:20]:
                     truck_data = db.get_truck_latest_record(tid)
                     if truck_data:
-                        mpg = truck_data.get("mpg", 5.5) or 5.5
+                        mpg = truck_data.get("mpg_current", 5.5) or 5.5
                         if mpg < 3 or mpg > 12:
                             mpg = 5.5
                         drivers_data.append(
@@ -3861,41 +3861,10 @@ async def get_fleet_health(
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    try:
-        # Try to use real engine
-        from unified_health_engine import UnifiedHealthEngine
-        from routers.maintenance import fetch_sensor_data
-
-        engine = UnifiedHealthEngine()
-
-        # Get sensor data (will return [] if Wialon unavailable)
-        trucks_data = fetch_sensor_data()
-
-        if not trucks_data:
-            logger.info("No sensor data available, returning demo response")
-            return demo_response
-
-        # Generate real report
-        report = engine.generate_fleet_report(
-            trucks_data,
-            include_trends=include_trends,
-            include_anomalies=include_anomalies,
-        )
-
-        if report:
-            report["data_source"] = "live"
-            return report
-        else:
-            return demo_response
-
-    except ImportError as e:
-        logger.warning(f"UnifiedHealthEngine not available: {e}")
-        return demo_response
-    except Exception as e:
-        logger.error(f"Fleet health error: {e}", exc_info=True)
-        # Return demo data instead of crashing
-        demo_response["error_info"] = str(e)
-        return demo_response
+    # 🔧 v5.1: TEMPORALMENTE usar solo demo data para evitar crashes
+    # El import de routers.maintenance causaba crashes al conectar a Wialon
+    logger.info("Predictive Maintenance: Using demo data (Wialon integration disabled)")
+    return demo_response
 
 
 @app.get(
@@ -3907,48 +3876,20 @@ async def get_truck_health(
 ):
     """
     🆕 v5.0: Get detailed health analysis for a specific truck.
-    🔧 v4.3.2: Removed auth requirement.
+    🔧 v5.1: Returns demo data (Wialon integration disabled).
     """
-    try:
-        from unified_health_engine import UnifiedHealthEngine
-        from routers.maintenance import fetch_sensor_data, fetch_historical_data
-
-        engine = UnifiedHealthEngine()
-
-        # Get current data
-        trucks_data = fetch_sensor_data()
-        current_data = next(
-            (t for t in trucks_data if t.get("truck_id") == truck_id), None
-        )
-
-        if not current_data:
-            # Return demo data if truck not found
-            return {
-                "status": "success",
-                "data_source": "demo",
-                "truck_id": truck_id,
-                "overall_score": 85,
-                "status": "healthy",
-                "current_values": {"oil_press": 45, "cool_temp": 195, "pwr_ext": 14.1},
-                "alerts": [],
-                "trends": {},
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-            }
-
-        # Get historical data
-        # Note: unit_id is needed for history, get it from current_data
-        unit_id = current_data.get("unit_id")
-        history = fetch_historical_data(truck_id, unit_id, days) if unit_id else {}
-
-        analysis = engine.analyze_truck(
-            truck_id=truck_id, current_values=current_data, historical_values=history
-        )
-
-        return {"status": "success", "data": analysis.to_dict()}
-
-    except Exception as e:
-        logger.error(f"Truck health error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # 🔧 v5.1: Return demo data to avoid crashes
+    return {
+        "status": "success",
+        "data_source": "demo",
+        "truck_id": truck_id,
+        "overall_score": 85,
+        "status": "healthy",
+        "current_values": {"oil_press": 45, "cool_temp": 195, "pwr_ext": 14.1},
+        "alerts": [],
+        "trends": {},
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.post("/fuelAnalytics/api/alerts/test", tags=["Alerts"])
