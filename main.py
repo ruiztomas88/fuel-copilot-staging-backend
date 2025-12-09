@@ -198,7 +198,15 @@ async def lifespan(app: FastAPI):
     # Startup - using logger to avoid Unicode encoding issues in PowerShell
     logger = logging.getLogger(__name__)
     logger.info("Fuel Copilot API v3.12.0 starting...")
-    logger.info(f"Available trucks: {len(db.get_all_trucks())}")
+    
+    # 🔧 FIX: Run DB query in threadpool to avoid blocking async loop
+    try:
+        loop = asyncio.get_running_loop()
+        truck_count = await loop.run_in_executor(None, lambda: len(db.get_all_trucks()))
+        logger.info(f"Available trucks: {truck_count}")
+    except Exception as e:
+        logger.warning(f"Could not count trucks on startup: {e}")
+        
     logger.info("MySQL enhanced features: enabled")
     logger.info("API ready for connections")
 
@@ -813,7 +821,7 @@ async def get_cache_stats():
 
 
 @app.get("/fuelAnalytics/api/health", response_model=HealthCheck, tags=["Health"])
-async def health_check():
+def health_check():
     """
     Comprehensive system health check.
 
@@ -825,7 +833,13 @@ async def health_check():
     - WebSocket connections
     - Redis cache status
     """
-    trucks = db.get_all_trucks()
+    # 🔧 FIX: Use synchronous def to run in threadpool (avoids blocking event loop)
+    try:
+        trucks = db.get_all_trucks()
+    except Exception as e:
+        logger.error(f"Health check DB error: {e}")
+        trucks = []
+        
     mysql_status = "connected" if db.mysql_available else "unavailable"
     cache_status = "available" if (cache and cache._available) else "unavailable"
 
