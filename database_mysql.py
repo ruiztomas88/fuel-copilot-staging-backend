@@ -1471,6 +1471,11 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
             # MPG analysis
             avg_mpg = float(result[6] or BASELINE_MPG)
 
+            # 🔍 DEBUG v4.1.1: Log MPG calculation details
+            logger.info(
+                f"📊 MPG DEBUG: raw_avg={result[6]}, final_avg_mpg={avg_mpg}, moving_count={moving_count}, period={days_back}d"
+            )
+
             # 🔧 v3.15.2: Calculate total_miles from odometer OR from fuel/MPG
             # odom_delta_mi is often NULL/0 due to sensor issues
             odom_miles = float(result[7] or 0)
