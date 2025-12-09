@@ -1708,10 +1708,16 @@ try:
 
     HEALTH_MONITOR_AVAILABLE = True
     # Create singleton health monitor instance
-    _health_monitor = TruckHealthMonitor(
-        data_dir=str(Path(__file__).parent / "data" / "health_stats")
-    )
-    logger.info("🏥 Truck Health Monitor initialized successfully")
+    try:
+        _health_monitor = TruckHealthMonitor(
+            data_dir=str(Path(__file__).parent / "data" / "health_stats")
+        )
+        logger.info("🏥 Truck Health Monitor initialized successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize TruckHealthMonitor: {e}")
+        _health_monitor = None
+        HEALTH_MONITOR_AVAILABLE = False
+
 except ImportError as e:
     HEALTH_MONITOR_AVAILABLE = False
     _health_monitor = None
