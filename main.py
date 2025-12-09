@@ -3053,10 +3053,10 @@ async def generate_report_now(
 @app.get("/fuelAnalytics/api/cost/per-mile", tags=["Cost Analysis"])
 async def get_fleet_cost_per_mile(
     days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
-    current_user: TokenData = Depends(require_auth),
 ):
     """
     🆕 v4.0: Get cost per mile analysis for entire fleet.
+    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
 
     Returns:
         Fleet-wide cost analysis with individual truck breakdowns
@@ -3164,10 +3164,10 @@ async def get_fleet_cost_per_mile(
 async def get_truck_cost_per_mile(
     truck_id: str,
     days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
-    current_user: TokenData = Depends(require_auth),
 ):
     """
     🆕 v4.0: Get cost per mile analysis for a specific truck.
+    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
 
     Returns:
         Detailed cost breakdown and comparison for the specified truck
@@ -3234,12 +3234,12 @@ async def get_truck_cost_per_mile(
 async def get_speed_cost_impact(
     avg_speed_mph: float = Query(65, ge=40, le=90, description="Average highway speed"),
     monthly_miles: float = Query(8000, ge=1000, le=50000, description="Monthly miles"),
-    current_user: TokenData = Depends(require_auth),
 ):
     """
     🆕 v4.0: Calculate cost impact of speeding.
+    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
 
-    Based on Geotab research: "Every 5 mph over 60 reduces fuel efficiency by ~0.7 MPG"
+    Based on DOE research: "Every 5 mph over 60 reduces fuel efficiency by ~0.7 MPG"
 
     Returns:
         Cost impact analysis showing potential savings from speed reduction
@@ -3270,12 +3270,12 @@ async def get_speed_cost_impact(
 @app.get("/fuelAnalytics/api/utilization/fleet", tags=["Fleet Utilization"])
 async def get_fleet_utilization(
     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
-    current_user: TokenData = Depends(require_auth),
 ):
     """
     🆕 v4.0: Get fleet utilization analysis.
+    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
 
-    Calculates utilization rate (Geotab target: 95%) based on:
+    Calculates utilization rate (target: 95%) based on:
     - Driving time vs Available time
     - Productive idle (loading/unloading) vs Non-productive idle
     - Engine off time
@@ -3392,10 +3392,10 @@ async def get_fleet_utilization(
 async def get_truck_utilization(
     truck_id: str,
     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
-    current_user: TokenData = Depends(require_auth),
 ):
     """
     🆕 v4.0: Get utilization analysis for a specific truck.
+    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
 
     Returns:
         Detailed utilization metrics and recommendations for the specified truck
@@ -3470,10 +3470,10 @@ async def get_truck_utilization(
 @app.get("/fuelAnalytics/api/utilization/optimization", tags=["Fleet Utilization"])
 async def get_utilization_optimization(
     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
-    current_user: TokenData = Depends(require_auth),
 ):
     """
     🆕 v4.0: Get fleet optimization recommendations based on utilization.
+    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
 
     Identifies:
     - Underutilized trucks (candidates for reassignment)
@@ -3566,11 +3566,10 @@ async def get_utilization_optimization(
 
 
 @app.get("/fuelAnalytics/api/gamification/leaderboard", tags=["Gamification"])
-async def get_driver_leaderboard(
-    current_user: TokenData = Depends(require_auth),
-):
+async def get_driver_leaderboard():
     """
     🆕 v4.0: Get driver leaderboard with rankings, scores, and badges.
+    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
 
     Features:
     - Overall score based on MPG, idle, consistency, and improvement
@@ -3679,10 +3678,10 @@ async def get_driver_leaderboard(
 @app.get("/fuelAnalytics/api/gamification/badges/{truck_id}", tags=["Gamification"])
 async def get_driver_badges(
     truck_id: str,
-    current_user: TokenData = Depends(require_auth),
 ):
     """
     🆕 v4.0: Get badges for a specific driver/truck.
+    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
 
     Returns:
         List of earned and in-progress badges with progress percentages
