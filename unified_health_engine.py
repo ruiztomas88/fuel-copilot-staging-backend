@@ -1236,9 +1236,9 @@ class UnifiedHealthEngine:
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "fleet_summary": {
                 "total_trucks": total,
-                "trucks_ok": trucks_ok,
-                "trucks_warning": trucks_warning,
-                "trucks_critical": trucks_critical,
+                "healthy_count": trucks_ok,
+                "warning_count": trucks_warning,
+                "critical_count": trucks_critical,
                 "fleet_health_score": fleet_score,
             },
             "alert_summary": alert_summary,
