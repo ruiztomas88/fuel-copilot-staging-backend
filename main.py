@@ -3076,54 +3076,61 @@ async def get_fleet_cost_per_mile(
         cpm_engine = CostPerMileEngine()
 
         # Get fleet data for the period using odometer_mi to calculate miles driven
-        # 🔧 FIX v4.2: Use correct column names (odometer_mi, mpg_current, mileage_delta)
+        # 🔧 FIX v4.3: Filter anomalous odometer readings (exclude min < 100 or diff > 10000)
+        # Some trucks have corrupted readings where min_odo = 1.24 miles
         query = """
             SELECT 
                 truck_id,
                 MAX(odometer_mi) - MIN(odometer_mi) as miles,
-                SUM(CASE WHEN mpg_current > 0 AND mileage_delta > 0 THEN mileage_delta / mpg_current ELSE 0 END) as gallons,
+                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg,
                 MAX(engine_hours) - MIN(engine_hours) as engine_hours,
-                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg
+                MIN(odometer_mi) as min_odo,
+                MAX(odometer_mi) as max_odo
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
                 AND mpg_current > 0
+                AND odometer_mi > 100  -- Filter out corrupted readings (1.24 miles, etc)
             GROUP BY truck_id
-            HAVING miles > 10
+            HAVING miles > 10 
+                AND miles < 10000  -- Max ~1400 miles/day reasonable for 7 days
+                AND min_odo > 100  -- Ensure no corrupted minimum readings
         """
 
         with engine.connect() as conn:
             result = conn.execute(text(query), {"days": days})
             rows = result.fetchall()
 
+        # Process results: row = (truck_id, miles, avg_mpg, engine_hours, min_odo, max_odo)
         trucks_data = [
             {
                 "truck_id": row[0],
                 "miles": float(row[1] or 0),
-                "gallons": (
-                    float(row[2] or 0)
-                    if float(row[2] or 0) > 0
-                    else float(row[1] or 0) / max(float(row[4] or 5.5), 1)
-                ),
+                "gallons": float(row[1] or 0)
+                / max(float(row[2] or 5.5), 1),  # miles / mpg
                 "engine_hours": float(row[3] or 0),
-                "avg_mpg": float(row[4] or 0),
+                "avg_mpg": float(row[2] or 5.5),
             }
             for row in rows
+            if row[1] and float(row[1]) > 10  # Extra safety check
         ]
 
-        # Fallback: Use odometer-based calculation if no mileage_delta data
+        logger.info(f"Cost per mile: Found {len(trucks_data)} trucks with valid data")
+
+        # Fallback: Use odometer-based calculation if no valid data
         if not trucks_data:
-            logger.info("No mileage_delta data, using odometer-based calculation")
+            logger.info("No valid odometer data, using fallback calculation")
             fallback_query = """
                 SELECT 
                     truck_id,
                     MAX(odometer_mi) - MIN(odometer_mi) as miles,
                     AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg,
                     MAX(engine_hours) - MIN(engine_hours) as engine_hours,
-                    COUNT(*) as records
+                    MIN(odometer_mi) as min_odo
                 FROM fuel_metrics
                 WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                    AND odometer_mi > 100
                 GROUP BY truck_id
-                HAVING miles > 10
+                HAVING miles > 10 AND miles < 10000 AND min_odo > 100
             """
             with engine.connect() as conn:
                 result = conn.execute(text(fallback_query), {"days": days})
@@ -3139,6 +3146,7 @@ async def get_fleet_cost_per_mile(
                     "avg_mpg": float(row[2] or 5.5),
                 }
                 for row in rows
+                if row[1] and float(row[1]) > 10
             ]
 
         # 🆕 v4.2: Final fallback - use current truck data if no historical data
@@ -3398,14 +3406,16 @@ async def get_fleet_utilization(
                 productive_idle = idle * 0.3
                 non_productive_idle = idle * 0.7
                 engine_off = max(0, total_hours - driving - idle)
-                
-                trucks_data.append({
-                    "truck_id": tid,
-                    "driving_hours": driving * days,
-                    "productive_idle_hours": productive_idle * days,
-                    "non_productive_idle_hours": non_productive_idle * days,
-                    "engine_off_hours": engine_off,
-                })
+
+                trucks_data.append(
+                    {
+                        "truck_id": tid,
+                        "driving_hours": driving * days,
+                        "productive_idle_hours": productive_idle * days,
+                        "non_productive_idle_hours": non_productive_idle * days,
+                        "engine_off_hours": engine_off,
+                    }
+                )
 
         # Note: Currently fleet is single-carrier, no filtering needed
 
