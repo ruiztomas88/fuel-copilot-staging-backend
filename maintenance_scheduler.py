@@ -30,6 +30,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 # Load .env file for credentials
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Local imports
@@ -79,7 +80,8 @@ FUEL_DB_CONFIG = {
 DEDUP_WINDOW_HOURS = 24
 
 # Minimum severity to persist (skip LOW alerts)
-MIN_PERSIST_SEVERITY = AlertSeverity.MEDIUM
+# Options: "critical", "high", "medium", "low"
+MIN_PERSIST_SEVERITY = "medium"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -259,12 +261,13 @@ class MaintenanceScheduler:
             logger.error(f"Failed to fetch Wialon data: {e}")
             return []
 
-    def fetch_historical_data(self, truck_id: str, days: int = 7) -> Dict[str, List]:
+    def fetch_historical_data(self, truck_id: str, unit_id: Optional[int] = None, days: int = 7) -> Dict[str, List]:
         """
         Fetch historical sensor data for trend analysis
 
         Args:
-            truck_id: Truck identifier
+            truck_id: Truck name (for fallback)
+            unit_id: Wialon unit ID (preferred)
             days: Number of days of history
 
         Returns:
@@ -279,13 +282,23 @@ class MaintenanceScheduler:
                     (datetime.now(timezone.utc) - timedelta(days=days)).timestamp()
                 )
 
-                query = """
-                    SELECT p as param, m as epoch, value
-                    FROM sensors
-                    WHERE n = %s AND m >= %s
-                    ORDER BY m ASC
-                """
-                cursor.execute(query, (truck_id, cutoff))
+                # Prefer unit_id (numeric) over truck name (string)
+                if unit_id:
+                    query = """
+                        SELECT p as param, m as epoch, value
+                        FROM sensors
+                        WHERE unit = %s AND m >= %s
+                        ORDER BY m ASC
+                    """
+                    cursor.execute(query, (unit_id, cutoff))
+                else:
+                    query = """
+                        SELECT p as param, m as epoch, value
+                        FROM sensors
+                        WHERE n = %s AND m >= %s
+                        ORDER BY m ASC
+                    """
+                    cursor.execute(query, (truck_id, cutoff))
                 rows = cursor.fetchall()
 
                 for row in rows:
@@ -358,7 +371,7 @@ class MaintenanceScheduler:
             for alert in alerts:
                 # Skip low severity alerts
                 if severity_order.get(alert["severity"], 3) > severity_order.get(
-                    MIN_PERSIST_SEVERITY.value, 2
+                    MIN_PERSIST_SEVERITY, 2
                 ):
                     continue
 
@@ -449,7 +462,9 @@ class MaintenanceScheduler:
 
             conn.commit()
             conn.close()
-            logger.info(f"[HISTORY] Saved health history for {len(trucks_health)} trucks")
+            logger.info(
+                f"[HISTORY] Saved health history for {len(trucks_health)} trucks"
+            )
 
         except Exception as e:
             logger.error(f"Failed to persist health history: {e}")
@@ -477,6 +492,7 @@ class MaintenanceScheduler:
             from alert_service import AlertService
 
             alert_service = AlertService()
+            conn = self._get_fuel_connection()
 
             for alert in critical_alerts:
                 message = (
@@ -493,8 +509,20 @@ class MaintenanceScheduler:
                     message=message,
                     severity="critical",
                 )
+                
+                # Mark notification as sent to prevent re-sends
+                if alert.get("id"):
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE maintenance_alerts SET notification_sent_at = NOW() WHERE id = %s",
+                            (alert["id"],)
+                        )
+                
                 sent += 1
                 logger.info(f"[SMS] Notification sent for {alert['truck_id']}")
+
+            conn.commit()
+            conn.close()
 
         except ImportError:
             logger.warning("AlertService not available - notifications disabled")
