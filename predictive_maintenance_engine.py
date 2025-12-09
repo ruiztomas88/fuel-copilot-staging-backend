@@ -558,10 +558,10 @@ class PredictiveMaintenanceEngine:
     ) -> List[HealthAlert]:
         """
         Correlate coolant and oil temperature to confirm cooling issues.
-        
+
         - BOTH high = confirmed cooling system problem
         - Only coolant high = possible sensor issue or thermostat
-        
+
         This reduces false positives significantly.
         """
         alerts = []
@@ -612,7 +612,7 @@ class PredictiveMaintenanceEngine:
     ) -> List[HealthAlert]:
         """
         Detect rapid changes that indicate imminent failure.
-        
+
         A RAPID change is more dangerous than a high stable value.
         Example: Oil pressure dropping 10 psi in 5 minutes = pump failing
         """
@@ -623,10 +623,14 @@ class PredictiveMaintenanceEngine:
 
         # Get timestamps
         now = datetime.now(timezone.utc)
-        
+
         # Last 10 minutes vs previous 10 minutes
         recent = [v for ts, v in values if ts >= now - timedelta(minutes=10)]
-        previous = [v for ts, v in values if now - timedelta(minutes=20) <= ts < now - timedelta(minutes=10)]
+        previous = [
+            v
+            for ts, v in values
+            if now - timedelta(minutes=20) <= ts < now - timedelta(minutes=10)
+        ]
 
         if len(recent) < 3 or len(previous) < 3:
             return alerts
@@ -657,7 +661,11 @@ class PredictiveMaintenanceEngine:
             alerts.append(
                 HealthAlert(
                     truck_id=truck_id,
-                    category=AlertCategory.ENGINE if metric == "oil_press" else AlertCategory.ELECTRICAL,
+                    category=(
+                        AlertCategory.ENGINE
+                        if metric == "oil_press"
+                        else AlertCategory.ELECTRICAL
+                    ),
                     severity=config["severity"],
                     title=f"Rapid {metric.replace('_', ' ').title()} Drop",
                     message=f"{metric} dropped {abs(change):.1f} in last 10 minutes - active failure",
@@ -674,7 +682,11 @@ class PredictiveMaintenanceEngine:
             alerts.append(
                 HealthAlert(
                     truck_id=truck_id,
-                    category=AlertCategory.COOLING if "temp" in metric else AlertCategory.ENGINE,
+                    category=(
+                        AlertCategory.COOLING
+                        if "temp" in metric
+                        else AlertCategory.ENGINE
+                    ),
                     severity=config["severity"],
                     title=f"Rapid {metric.replace('_', ' ').title()} Rise",
                     message=f"{metric} rose {change:.1f} in last 10 minutes - investigate immediately",
@@ -683,6 +695,180 @@ class PredictiveMaintenanceEngine:
                     threshold=config["rise"],
                     recommendation="Rapid temperature rise indicates cooling or load issue. Reduce load and monitor.",
                     estimated_days_to_failure=config["days"],
+                )
+            )
+
+        return alerts
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # OPERATIONAL CONTEXT - Our competitive advantage vs Geotab/Samsara
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def is_mountain_grade(
+        self, speed: Optional[float], engine_load: Optional[float], rpm: Optional[float]
+    ) -> bool:
+        """
+        Detect if truck is climbing a mountain grade.
+
+        High load + low speed + mid RPM = grade climbing
+        This context lets us adjust thresholds intelligently.
+
+        Geotab/Samsara don't know this - they alert on coolant 210°F
+        even when it's normal for grade climbing.
+        """
+        return (
+            engine_load is not None
+            and speed is not None
+            and rpm is not None
+            and engine_load > 70
+            and speed < 45
+            and 1400 < rpm < 1800
+        )
+
+    def is_heavy_haul(
+        self, engine_load: Optional[float], fuel_rate: Optional[float]
+    ) -> bool:
+        """
+        Detect if truck is hauling heavy load.
+
+        Sustained high load + high fuel consumption = heavy load
+        Adjust expectations accordingly.
+        """
+        return (
+            engine_load is not None
+            and fuel_rate is not None
+            and engine_load > 75
+            and fuel_rate > 12
+        )
+
+    def get_operational_context(
+        self,
+        speed: Optional[float],
+        engine_load: Optional[float],
+        rpm: Optional[float],
+        fuel_rate: Optional[float],
+    ) -> Dict[str, Any]:
+        """
+        Determine current operational context for intelligent threshold adjustment.
+
+        Returns dict with:
+        - mode: 'grade_climbing', 'heavy_haul', 'highway', 'idle', 'normal'
+        - coolant_threshold_adjustment: °F to add to warning threshold
+        - message: Human-readable context
+        """
+        # Idle detection
+        if rpm is not None and rpm < 900:
+            return {
+                "mode": "idle",
+                "coolant_threshold_adjustment": 0,
+                "oil_press_threshold_adjustment": -10,  # Lower threshold for idle
+                "message": "Engine idling",
+            }
+
+        # Grade climbing
+        if self.is_mountain_grade(speed, engine_load, rpm):
+            return {
+                "mode": "grade_climbing",
+                "coolant_threshold_adjustment": 10,  # Allow 10°F higher
+                "oil_press_threshold_adjustment": 0,
+                "message": "Climbing grade - elevated temps expected",
+            }
+
+        # Heavy haul
+        if self.is_heavy_haul(engine_load, fuel_rate):
+            return {
+                "mode": "heavy_haul",
+                "coolant_threshold_adjustment": 5,  # Allow 5°F higher
+                "oil_press_threshold_adjustment": 0,
+                "message": "Heavy load - higher temps expected",
+            }
+
+        # Highway cruising
+        if (
+            speed is not None
+            and speed > 55
+            and engine_load is not None
+            and engine_load < 60
+        ):
+            return {
+                "mode": "highway",
+                "coolant_threshold_adjustment": 0,
+                "oil_press_threshold_adjustment": 0,
+                "message": "Highway cruising",
+            }
+
+        return {
+            "mode": "normal",
+            "coolant_threshold_adjustment": 0,
+            "oil_press_threshold_adjustment": 0,
+            "message": "Normal operation",
+        }
+
+    def check_coolant_with_context(
+        self,
+        truck_id: str,
+        cool_temp: float,
+        speed: Optional[float],
+        engine_load: Optional[float],
+        rpm: Optional[float],
+        fuel_rate: Optional[float],
+    ) -> List[HealthAlert]:
+        """
+        Check coolant temperature WITH operational context.
+
+        This is our competitive advantage:
+        - Coolant 218°F on highway = WARNING
+        - Coolant 218°F climbing Tehachapi Pass = NORMAL
+        """
+        alerts = []
+        t = self.thresholds["cool_temp"]
+
+        context = self.get_operational_context(speed, engine_load, rpm, fuel_rate)
+
+        # Adjust thresholds based on context
+        warning_high = t["warning_high"] + context["coolant_threshold_adjustment"]
+        critical_high = t["critical_high"] + context["coolant_threshold_adjustment"]
+
+        if cool_temp >= critical_high:
+            alerts.append(
+                HealthAlert(
+                    truck_id=truck_id,
+                    category=AlertCategory.COOLING,
+                    severity=AlertSeverity.CRITICAL,
+                    title="Engine Overheating",
+                    message=f"Coolant at {cool_temp:.0f}°F ({context['message']}) - CRITICAL even for current conditions",
+                    metric="cool_temp",
+                    current_value=cool_temp,
+                    threshold=critical_high,
+                    recommendation="Stop truck immediately. Overheating beyond safe limits even accounting for conditions.",
+                    estimated_days_to_failure=0,
+                )
+            )
+        elif cool_temp >= warning_high:
+            # If climbing grade, this might be acceptable - lower severity
+            severity = (
+                AlertSeverity.MEDIUM
+                if context["mode"] in ("grade_climbing", "heavy_haul")
+                else AlertSeverity.HIGH
+            )
+            alerts.append(
+                HealthAlert(
+                    truck_id=truck_id,
+                    category=AlertCategory.COOLING,
+                    severity=severity,
+                    title="Elevated Coolant Temperature",
+                    message=f"Coolant at {cool_temp:.0f}°F - {context['message']}",
+                    metric="cool_temp",
+                    current_value=cool_temp,
+                    threshold=warning_high,
+                    recommendation=(
+                        "Monitor closely. Temperature elevated but may be acceptable for current conditions."
+                        if context["mode"] in ("grade_climbing", "heavy_haul")
+                        else "Reduce load, check cooling system."
+                    ),
+                    estimated_days_to_failure=(
+                        3 if severity == AlertSeverity.HIGH else 7
+                    ),
                 )
             )
 
@@ -885,8 +1071,13 @@ class PredictiveMaintenanceEngine:
         def_level = current_values.get("def_level")
         rpm = current_values.get("rpm")
         engine_load = current_values.get("engine_load")
+        speed = current_values.get("speed")  # 🆕 For operational context
+        fuel_rate = current_values.get("fuel_rate")  # 🆕 For operational context
 
         engine_running = rpm is not None and rpm > 400
+
+        # 🆕 Get operational context (grade climbing, heavy haul, etc.)
+        context = self.get_operational_context(speed, engine_load, rpm, fuel_rate)
 
         # ─────────────────────────────────────────────────────────────────────
         # ENGINE HEALTH
@@ -908,7 +1099,9 @@ class PredictiveMaintenanceEngine:
         if engine_load is not None:
             engine_metrics["engine_load_pct"] = engine_load
             # 🆕 Check engine load with historical data
-            engine_load_history = historical_values.get("engine_load") if historical_values else None
+            engine_load_history = (
+                historical_values.get("engine_load") if historical_values else None
+            )
             engine_alerts.extend(
                 self.check_engine_load(truck_id, engine_load, engine_load_history)
             )
@@ -920,7 +1113,9 @@ class PredictiveMaintenanceEngine:
             )
             # 🆕 Rate of change detection
             engine_alerts.extend(
-                self.check_rapid_change(truck_id, "oil_press", historical_values["oil_press"])
+                self.check_rapid_change(
+                    truck_id, "oil_press", historical_values["oil_press"]
+                )
             )
 
         components["engine"] = self.calculate_component_score(
@@ -935,10 +1130,21 @@ class PredictiveMaintenanceEngine:
         cooling_metrics = {}
 
         if cool_temp is not None:
-            cooling_alerts.extend(
-                self.check_coolant_temp(truck_id, cool_temp, engine_running)
-            )
+            # 🆕 Use context-aware cooling check for intelligent threshold adjustment
+            # This is our competitive advantage over Geotab/Samsara
+            if speed is not None or engine_load is not None:
+                cooling_alerts.extend(
+                    self.check_coolant_with_context(
+                        truck_id, cool_temp, speed, engine_load, rpm, fuel_rate
+                    )
+                )
+            else:
+                # Fallback to basic check if no context available
+                cooling_alerts.extend(
+                    self.check_coolant_temp(truck_id, cool_temp, engine_running)
+                )
             cooling_metrics["coolant_temp_f"] = cool_temp
+            cooling_metrics["operational_mode"] = context["mode"]
 
             # 🆕 Sensor correlation: If both cool_temp and oil_temp are available,
             # use correlation to confirm cooling issues and reduce false positives
@@ -954,7 +1160,9 @@ class PredictiveMaintenanceEngine:
             )
             # 🆕 Rate of change - rapid temperature rise is dangerous
             cooling_alerts.extend(
-                self.check_rapid_change(truck_id, "cool_temp", historical_values["cool_temp"])
+                self.check_rapid_change(
+                    truck_id, "cool_temp", historical_values["cool_temp"]
+                )
             )
 
         components["cooling"] = self.calculate_component_score(
@@ -981,7 +1189,9 @@ class PredictiveMaintenanceEngine:
             )
             # 🆕 Rapid voltage drop = alternator or battery failure
             electrical_alerts.extend(
-                self.check_rapid_change(truck_id, "pwr_ext", historical_values["pwr_ext"])
+                self.check_rapid_change(
+                    truck_id, "pwr_ext", historical_values["pwr_ext"]
+                )
             )
 
         components["electrical"] = self.calculate_component_score(

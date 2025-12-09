@@ -246,6 +246,7 @@ class MaintenanceScheduler:
                         "engine_load": "engine_load",
                         "fuel_rate": "fuel_rate",
                         "fuel_lvl": "fuel_lvl",
+                        "speed": "speed",  # 🆕 For operational context detection
                     }
 
                     if param in param_mapping:
