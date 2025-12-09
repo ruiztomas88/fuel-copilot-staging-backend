@@ -28,6 +28,10 @@ import pymysql
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+# Load .env file for credentials
+from dotenv import load_dotenv
+load_dotenv()
+
 # Local imports
 from predictive_maintenance_engine import (
     PredictiveMaintenanceEngine,
@@ -35,13 +39,13 @@ from predictive_maintenance_engine import (
     AlertSeverity,
 )
 
-# Configure logging
+# Configure logging (ASCII-safe for Windows)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("maintenance_scheduler.log"),
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("maintenance_scheduler.log", encoding="utf-8"),
     ],
 )
 logger = logging.getLogger("maintenance_scheduler")
@@ -174,7 +178,7 @@ class MaintenanceScheduler:
                 cursor.execute(CREATE_HEALTH_HISTORY_TABLE)
             conn.commit()
             conn.close()
-            logger.info("✅ Database tables verified")
+            logger.info("[OK] Database tables verified")
         except Exception as e:
             logger.error(f"Failed to create tables: {e}")
 
@@ -248,7 +252,7 @@ class MaintenanceScheduler:
                 trucks_data = list(unit_data.values())
 
             conn.close()
-            logger.info(f"📊 Fetched sensor data for {len(trucks_data)} trucks")
+            logger.info(f"[DATA] Fetched sensor data for {len(trucks_data)} trucks")
             return trucks_data
 
         except Exception as e:
@@ -395,7 +399,7 @@ class MaintenanceScheduler:
                     )
                     inserted += 1
                     logger.info(
-                        f"🚨 New alert: [{alert['severity'].upper()}] "
+                        f"[ALERT] New alert: [{alert['severity'].upper()}] "
                         f"{alert['truck_id']} - {alert['title']}"
                     )
 
@@ -445,7 +449,7 @@ class MaintenanceScheduler:
 
             conn.commit()
             conn.close()
-            logger.info(f"📈 Saved health history for {len(trucks_health)} trucks")
+            logger.info(f"[HISTORY] Saved health history for {len(trucks_health)} trucks")
 
         except Exception as e:
             logger.error(f"Failed to persist health history: {e}")
@@ -476,7 +480,7 @@ class MaintenanceScheduler:
 
             for alert in critical_alerts:
                 message = (
-                    f"🚨 CRITICAL: {alert['truck_id']}\n"
+                    f"CRITICAL: {alert['truck_id']}\n"
                     f"{alert['title']}\n"
                     f"{alert['message']}\n"
                     f"Action: {alert.get('recommendation', 'Check immediately')}"
@@ -490,7 +494,7 @@ class MaintenanceScheduler:
                     severity="critical",
                 )
                 sent += 1
-                logger.info(f"📱 Notification sent for {alert['truck_id']}")
+                logger.info(f"[SMS] Notification sent for {alert['truck_id']}")
 
         except ImportError:
             logger.warning("AlertService not available - notifications disabled")
@@ -511,7 +515,7 @@ class MaintenanceScheduler:
         """
         start_time = datetime.now(timezone.utc)
         logger.info("=" * 60)
-        logger.info("🔧 Starting scheduled health check...")
+        logger.info("[START] Starting scheduled health check...")
 
         try:
             # 1. Fetch sensor data
@@ -528,13 +532,13 @@ class MaintenanceScheduler:
             alert_summary = report.get("alert_summary", {})
 
             logger.info(
-                f"📊 Fleet Health: {summary.get('fleet_health_score', 'N/A')}% | "
+                f"[HEALTH] Fleet Health: {summary.get('fleet_health_score', 'N/A')}% | "
                 f"OK: {summary.get('trucks_ok', 0)} | "
                 f"Warning: {summary.get('trucks_warning', 0)} | "
                 f"Critical: {summary.get('trucks_critical', 0)}"
             )
             logger.info(
-                f"🚨 Alerts: {alert_summary.get('total_alerts', 0)} total | "
+                f"[ALERTS] Alerts: {alert_summary.get('total_alerts', 0)} total | "
                 f"Critical: {alert_summary.get('critical', 0)} | "
                 f"High: {alert_summary.get('high', 0)} | "
                 f"Medium: {alert_summary.get('medium', 0)}"
@@ -543,7 +547,7 @@ class MaintenanceScheduler:
             # 4. Persist alerts (with deduplication)
             alerts = report.get("alerts", [])
             new_alerts = self.persist_alerts(alerts)
-            logger.info(f"💾 Persisted {new_alerts} new alerts")
+            logger.info(f"[DB] Persisted {new_alerts} new alerts")
 
             # 5. Save health history
             trucks_health = report.get("trucks", [])
@@ -552,14 +556,14 @@ class MaintenanceScheduler:
             # 6. Send notifications for critical alerts
             notifications = self.send_critical_notifications(alerts)
             if notifications > 0:
-                logger.info(f"📱 Sent {notifications} critical notifications")
+                logger.info(f"[SMS] Sent {notifications} critical notifications")
 
             # 7. Done
             elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-            logger.info(f"✅ Health check completed in {elapsed:.1f}s")
+            logger.info(f"[DONE] Health check completed in {elapsed:.1f}s")
 
         except Exception as e:
-            logger.error(f"❌ Health check failed: {e}", exc_info=True)
+            logger.error(f"[ERROR] Health check failed: {e}", exc_info=True)
 
         logger.info("=" * 60)
 
@@ -594,7 +598,7 @@ def main():
         return
 
     # Daemon mode with APScheduler
-    logger.info("🚀 Starting Maintenance Scheduler daemon")
+    logger.info("[DAEMON] Starting Maintenance Scheduler daemon")
     logger.info(f"   Interval: every {args.interval} minutes")
 
     scheduler = BlockingScheduler()
