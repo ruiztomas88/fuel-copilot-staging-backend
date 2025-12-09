@@ -1,0 +1,23 @@
+[flake8]
+# Exclude virtual environment and other non-source directories
+exclude =
+    venv,
+    .venv,
+    __pycache__,
+    .git,
+    build,
+    dist,
+    *.egg-info,
+    .eggs
+
+# Max line length (same as Black default)
+max-line-length = 127
+
+# Ignore some warnings that are too strict
+# E501: Line too long (handled by max-line-length)
+# W503: Line break before binary operator (conflicts with Black)
+# F824: global is unused (legacy code pattern, not a real error)
+extend-ignore = E501, W503, F824
+
+# Max complexity
+max-complexity = 10

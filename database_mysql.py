@@ -2671,7 +2671,7 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                     continue  # Too fast = sensor glitch/alternation
 
                 # Minimum time for theft detection - need at least 2 minutes
-                if time_gap_min < 2 and unexplained_loss < 50:
+                if time_gap_min < 2 and fuel_drop_gal < 50:
                     continue  # Very fast drops need to be very large to flag
 
                 miles_driven = max(0, odometer - prev_odo) if prev_odo else 0
