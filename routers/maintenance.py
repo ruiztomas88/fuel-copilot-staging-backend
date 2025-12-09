@@ -194,7 +194,7 @@ async def get_fleet_health(
 ):
     """
     🆕 v5.0: Unified fleet health endpoint.
-    
+
     Returns fleet health report with demo data if real data unavailable.
     """
     # Default demo response - always works
@@ -225,7 +225,7 @@ async def get_fleet_health(
                 "last_updated": datetime.now(timezone.utc).isoformat(),
             },
             {
-                "truck_id": "T102", 
+                "truck_id": "T102",
                 "overall_score": 72,
                 "status": "warning",
                 "current_values": {"oil_press": 28, "cool_temp": 215, "pwr_ext": 13.2},
@@ -238,7 +238,7 @@ async def get_fleet_health(
                         "metric": "oil_press",
                         "current_value": 28,
                         "threshold": 30,
-                        "recommendation": "Check oil level and pressure sensor"
+                        "recommendation": "Check oil level and pressure sensor",
                     }
                 ],
                 "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -246,7 +246,7 @@ async def get_fleet_health(
             {
                 "truck_id": "T103",
                 "overall_score": 88,
-                "status": "healthy", 
+                "status": "healthy",
                 "current_values": {"oil_press": 52, "cool_temp": 188, "pwr_ext": 14.3},
                 "alerts": [],
                 "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -264,15 +264,16 @@ async def get_fleet_health(
         ],
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
-    
+
     try:
         # Try to use real engine
         from unified_health_engine import UnifiedHealthEngine
+
         engine = UnifiedHealthEngine()
-        
+
         # Get sensor data (will return [] if Wialon unavailable)
         trucks_data = fetch_sensor_data()
-        
+
         if not trucks_data:
             logger.info("No sensor data available, returning demo response")
             return demo_response
@@ -283,7 +284,7 @@ async def get_fleet_health(
             include_trends=include_trends,
             include_anomalies=include_anomalies,
         )
-        
+
         if report:
             report["data_source"] = "live"
             return report
