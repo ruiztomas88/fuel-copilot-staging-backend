@@ -71,30 +71,6 @@ DEMO_TRUCKS = [
         "gallons_today": 43.3,
         "cost_today": 151.6,
     },
-    {
-        "truck_id": "VD2453",
-        "truck_name": "VD2453",
-        "mpg_current": 6.5,
-        "miles_today": 198,
-        "gallons_today": 30.5,
-        "cost_today": 106.8,
-    },
-    {
-        "truck_id": "NQ4533",
-        "truck_name": "NQ4533",
-        "mpg_current": 7.1,
-        "miles_today": 275,
-        "gallons_today": 38.7,
-        "cost_today": 135.5,
-    },
-    {
-        "truck_id": "VD5903",
-        "truck_name": "VD5903",
-        "mpg_current": 6.9,
-        "miles_today": 221,
-        "gallons_today": 32.0,
-        "cost_today": 112.0,
-    },
 ]
 
 DEMO_LEADERBOARD = [

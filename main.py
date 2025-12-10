@@ -205,7 +205,8 @@ async def lifespan(app: FastAPI):
         truck_count = await loop.run_in_executor(None, lambda: len(db.get_all_trucks()))
         logger.info(f"Available trucks: {truck_count}")
     except Exception as e:
-        logger.warning(f"Could not count trucks on startup: {e}")
+        logger.warning(f"Could not count trucks on startup (non-critical): {e}")
+        logger.info("API starting without truck count - will work normally")
 
     logger.info("MySQL enhanced features: enabled")
     logger.info("API ready for connections")
