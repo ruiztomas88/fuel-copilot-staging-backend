@@ -844,12 +844,25 @@ def fetch_current_sensors_from_wialon() -> Dict[str, Dict[str, float]]:
 def fetch_current_sensors_from_fuel_db() -> Dict[str, Dict[str, float]]:
     """
     Fallback: fetch sensor data from fuel_metrics table.
+    🔧 v5.3.6: Enhanced to include all available sensors, not just fuel_level/speed
     """
     query = """
         SELECT 
             t1.truck_id,
             t1.sensor_pct as fuel_level,
             t1.speed_mph as speed,
+            t1.rpm,
+            t1.coolant_temp_f as cool_temp,
+            t1.consumption_gph as fuel_rate,
+            t1.altitude_ft as altitude,
+            t1.oil_pressure_psi as oil_press,
+            t1.battery_voltage as pwr_ext,
+            t1.def_level_pct as def_level,
+            t1.engine_load_pct as engine_load,
+            t1.oil_temp_f as oil_temp,
+            t1.intake_air_temp_f as intake_air_temp,
+            t1.ambient_temp_f as air_temp,
+            t1.truck_status,
             t1.timestamp_utc
         FROM fuel_metrics t1
         INNER JOIN (
@@ -868,12 +881,29 @@ def fetch_current_sensors_from_fuel_db() -> Dict[str, Dict[str, float]]:
     for row in rows:
         truck_id = row.get("truck_id")
         if truck_id:
-            trucks[truck_id] = {
-                "fuel_level": (
-                    float(row["fuel_level"]) if row.get("fuel_level") else None
-                ),
-                "speed": float(row["speed"]) if row.get("speed") else None,
-            }
+            # Include all non-null sensor values
+            sensors = {}
+            sensor_mappings = [
+                ("fuel_level", "fuel_level"),
+                ("speed", "speed"),
+                ("rpm", "rpm"),
+                ("cool_temp", "cool_temp"),
+                ("fuel_rate", "fuel_rate"),
+                ("altitude", "altitude"),
+                ("oil_press", "oil_press"),
+                ("pwr_ext", "pwr_ext"),
+                ("def_level", "def_level"),
+                ("engine_load", "engine_load"),
+                ("oil_temp", "oil_temp"),
+                ("intake_air_temp", "intake_air_temp"),
+                ("air_temp", "air_temp"),
+            ]
+            for db_key, sensor_key in sensor_mappings:
+                val = row.get(db_key)
+                if val is not None:
+                    sensors[sensor_key] = float(val)
+
+            trucks[truck_id] = sensors
 
     logger.info(f"[V3] Fetched sensors for {len(trucks)} trucks from fuel_metrics")
     return trucks
@@ -1172,31 +1202,66 @@ def analyze_trends(
     return alerts
 
 
-def calculate_health_score(sensors: Dict[str, float], alerts: List[Alert]) -> int:
+def calculate_health_score(
+    sensors: Dict[str, float], alerts: List[Alert]
+) -> Tuple[int, str]:
     """
-    Calculate overall health score (0-100).
+    Calculate overall health score (0-100) with explanation.
+    🔧 v5.3.6: Returns (score, explanation) for UI display
+
+    Scoring breakdown:
+    - Base: 100 points
+    - Critical alert: -30 each
+    - High alert: -15 each
+    - Medium alert: -5 each
+    - Low alert: -2 each
+    - Missing critical sensors: -3 each (reduced from -5)
     """
     score = 100
+    deductions = []
 
+    # Deduct for alerts
     for alert in alerts:
         if alert.severity == Severity.CRITICAL.value:
             score -= 30
+            deductions.append(f"Critical: {alert.message[:50]}")
         elif alert.severity == Severity.HIGH.value:
             score -= 15
+            deductions.append(f"High: {alert.message[:50]}")
         elif alert.severity == Severity.MEDIUM.value:
             score -= 5
+            deductions.append(f"Medium: {alert.message[:50]}")
         elif alert.severity == Severity.LOW.value:
             score -= 2
 
-    # Bonus for having complete sensor data
+    # Check for important sensors (reduced penalty)
     important_sensors = ["oil_press", "cool_temp", "pwr_ext"]
-    sensors_present = sum(
-        1 for s in important_sensors if s in sensors and sensors[s] is not None
-    )
-    if sensors_present < len(important_sensors):
-        score -= (len(important_sensors) - sensors_present) * 5
+    missing_sensors = []
+    for s in important_sensors:
+        if s not in sensors or sensors[s] is None:
+            missing_sensors.append(s)
+            score -= 3  # Reduced from -5
 
-    return max(0, min(100, score))
+    if missing_sensors:
+        sensor_names = {
+            "oil_press": "Oil Pressure",
+            "cool_temp": "Coolant Temp",
+            "pwr_ext": "Battery",
+        }
+        missing_names = [sensor_names.get(s, s) for s in missing_sensors]
+        deductions.append(f"Missing sensors: {', '.join(missing_names)}")
+
+    final_score = max(0, min(100, score))
+
+    # Build explanation
+    if not deductions:
+        explanation = "All systems operating normally"
+    else:
+        explanation = "; ".join(deductions[:3])  # Top 3 issues
+        if len(deductions) > 3:
+            explanation += f" (+{len(deductions)-3} more)"
+
+    return final_score, explanation
 
 
 def get_status_from_score(score: int) -> str:
@@ -1325,14 +1390,15 @@ def analyze_fleet_health(
             if savings > 0:
                 total_potential_savings += savings
 
-        # Calculate health score
-        health_score = calculate_health_score(sensors, truck_alerts)
+        # Calculate health score (returns tuple: score, explanation)
+        health_score, health_explanation = calculate_health_score(sensors, truck_alerts)
         status = get_status_from_score(health_score)
 
         # Build truck health object
         truck_data = {
             "truck_id": truck_id,
             "health_score": health_score,
+            "health_explanation": health_explanation,  # 🆕 v5.3.6: Why this score?
             "status": status,
             "sensors": sensors,
             "alerts": [a.to_dict() for a in truck_alerts],
@@ -1589,11 +1655,12 @@ def analyze_single_truck(
             maintenance_items = calculate_maintenance_schedule(odometer, engine_hours)
 
     all_alerts = threshold_alerts + trend_alerts
-    health_score = calculate_health_score(sensors, all_alerts)
+    health_score, health_explanation = calculate_health_score(sensors, all_alerts)
 
     return {
         "truck_id": truck_id,
         "health_score": health_score,
+        "health_explanation": health_explanation,
         "status": get_status_from_score(health_score),
         "sensors": sensors,
         "alerts": [a.to_dict() for a in all_alerts],

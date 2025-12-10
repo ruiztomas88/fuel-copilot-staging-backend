@@ -352,10 +352,6 @@ def determine_truck_status(
 
     # No GPS data and no engine indicators = truly offline
     if speed is None and not engine_running:
-        # 🔧 v5.3.5: If data is fresh but no sensors, show PARKED not OFFLINE
-        # This handles trucks that don't report speed/rpm but are connected
-        if data_age_min < 5:
-            return "PARKED"  # Connected but no motion data
         return "OFFLINE"
 
     # Engine OFF checks
