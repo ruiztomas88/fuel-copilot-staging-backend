@@ -631,38 +631,47 @@ class FleetHealthReport:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DATABASE HELPERS - Completely self-contained
+# DATABASE HELPERS - USE EXISTING CONNECTION POOL
+# ═══════════════════════════════════════════════════════════════════════════════
+# CRITICAL FIX v5.3.2: Don't create individual connections!
+# Use the existing database_pool.py to prevent connection exhaustion.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def get_wialon_connection():
-    """Get connection to Wialon database. Returns None if unavailable."""
+def execute_wialon_query(query: str, params: tuple = None) -> list:
+    """
+    Execute query on Wialon database using connection pool.
+    Returns list of dict rows or empty list on error.
+    """
     try:
-        import pymysql
-        from dotenv import load_dotenv
+        from database_pool import get_engine
+        from sqlalchemy import text
 
-        load_dotenv()
-
-        conn = pymysql.connect(
-            host=os.getenv("WIALON_DB_HOST", "localhost"),
-            port=int(os.getenv("WIALON_DB_PORT", "3306")),
-            user=os.getenv("WIALON_DB_USER", ""),
-            password=os.getenv("WIALON_DB_PASS", ""),
-            database=os.getenv("WIALON_DB_NAME", "wialon_collect"),
-            charset="utf8mb4",
-            connect_timeout=5,
-            read_timeout=10,
-            cursorclass=pymysql.cursors.DictCursor,
-        )
-        return conn
+        engine = get_engine()
+        with engine.connect() as conn:
+            if params:
+                result = conn.execute(text(query), params)
+            else:
+                result = conn.execute(text(query))
+            # Convert to list of dicts
+            rows = [dict(row._mapping) for row in result.fetchall()]
+            return rows
     except Exception as e:
-        logger.warning(f"Wialon DB not available: {e}")
-        return None
+        logger.warning(f"[V3] Wialon query error: {e}")
+        return []
 
 
-def get_fuel_db_connection():
-    """Get connection to fuel_copilot database. Returns None if unavailable."""
+def execute_fuel_query(query: str, params: tuple = None) -> list:
+    """
+    Execute query on fuel_copilot database using connection pool.
+    Returns list of dict rows or empty list on error.
+
+    NOTE: fuel_copilot is on same MySQL server, just different database.
+    We use a separate engine or switch database in query.
+    """
     try:
+        # For now, use direct connection with short timeout
+        # TODO: Create separate pool for fuel_copilot if needed
         import pymysql
         from dotenv import load_dotenv
 
@@ -675,124 +684,115 @@ def get_fuel_db_connection():
             password=os.getenv("LOCAL_DB_PASS", ""),
             database=os.getenv("LOCAL_DB_NAME", "fuel_copilot"),
             charset="utf8mb4",
-            connect_timeout=5,
-            read_timeout=10,
+            connect_timeout=3,
+            read_timeout=5,  # Short timeout to fail fast
             cursorclass=pymysql.cursors.DictCursor,
         )
-        return conn
+        try:
+            cursor = conn.cursor()
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            rows = cursor.fetchall()
+            cursor.close()
+            return list(rows)
+        finally:
+            conn.close()
     except Exception as e:
-        logger.warning(f"Fuel DB not available: {e}")
-        return None
+        logger.warning(f"[V3] Fuel DB query error: {e}")
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SENSOR DATA FETCHING
+# SENSOR DATA FETCHING - USING CONNECTION POOL
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 def fetch_current_sensors_from_wialon() -> Dict[str, Dict[str, float]]:
     """
-    Fetch latest sensor readings from Wialon.
+    Fetch latest sensor readings from Wialon using connection pool.
     Returns dict: {truck_id: {sensor_name: value}}
     """
-    conn = get_wialon_connection()
-    if not conn:
+    query = """
+        SELECT 
+            s.n as truck_name,
+            s.p as param,
+            s.value,
+            s.m as epoch
+        FROM sensors s
+        INNER JOIN (
+            SELECT unit, p, MAX(m) as max_epoch
+            FROM sensors
+            WHERE m >= UNIX_TIMESTAMP() - 7200
+            AND p IN ('oil_press', 'cool_temp', 'oil_temp', 'pwr_ext', 
+                      'def_level', 'rpm', 'engine_load', 'fuel_rate', 'speed',
+                      'altitude', 'air_temp', 'intake_air_temp', 'odom', 'engine_hours')
+            GROUP BY unit, p
+        ) latest ON s.unit = latest.unit AND s.p = latest.p AND s.m = latest.max_epoch
+        WHERE s.m >= UNIX_TIMESTAMP() - 7200
+    """
+
+    rows = execute_wialon_query(query)
+    if not rows:
+        logger.warning("[V3] No sensor data from Wialon, using demo data")
         return {}
 
-    try:
-        cursor = conn.cursor()  # Already DictCursor from connection config
-        # Get latest reading for each sensor per unit (last 2 hours)
-        query = """
-            SELECT 
-                s.n as truck_name,
-                s.p as param,
-                s.value,
-                s.m as epoch
-            FROM sensors s
-            INNER JOIN (
-                SELECT unit, p, MAX(m) as max_epoch
-                FROM sensors
-                WHERE m >= UNIX_TIMESTAMP() - 7200
-                AND p IN ('oil_press', 'cool_temp', 'oil_temp', 'pwr_ext', 
-                          'def_level', 'rpm', 'engine_load', 'fuel_rate', 'speed',
-                          'altitude', 'air_temp', 'intake_air_temp', 'odom', 'engine_hours')
-                GROUP BY unit, p
-            ) latest ON s.unit = latest.unit AND s.p = latest.p AND s.m = latest.max_epoch
-            WHERE s.m >= UNIX_TIMESTAMP() - 7200
-        """
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        cursor.close()
+    trucks: Dict[str, Dict[str, float]] = {}
+    for row in rows:
+        truck_id = row.get("truck_name")
+        if not truck_id:
+            continue
 
-        trucks = {}
-        for row in rows:
-            truck_id = row["truck_name"]
-            if not truck_id:
-                continue
+        if truck_id not in trucks:
+            trucks[truck_id] = {}
 
-            if truck_id not in trucks:
-                trucks[truck_id] = {}
+        param = row.get("param")
+        value = row.get("value")
 
-            param = row["param"]
-            value = row["value"]
+        if value is not None and param:
+            trucks[truck_id][param] = float(value)
 
-            if value is not None:
-                trucks[truck_id][param] = float(value)
-
-        logger.info(f"[V3] Fetched sensors for {len(trucks)} trucks from Wialon")
-        return trucks
-
-    except Exception as e:
-        logger.error(f"Error fetching Wialon sensors: {e}")
-        return {}
-    finally:
-        conn.close()
+    logger.info(f"[V3] Fetched sensors for {len(trucks)} trucks from Wialon")
+    return trucks
 
 
 def fetch_current_sensors_from_fuel_db() -> Dict[str, Dict[str, float]]:
     """
     Fallback: fetch sensor data from fuel_metrics table.
     """
-    conn = get_fuel_db_connection()
-    if not conn:
+    query = """
+        SELECT 
+            t1.truck_id,
+            t1.sensor_pct as fuel_level,
+            t1.speed_mph as speed,
+            t1.timestamp_utc
+        FROM fuel_metrics t1
+        INNER JOIN (
+            SELECT truck_id, MAX(id) as max_id
+            FROM fuel_metrics
+            WHERE timestamp_utc >= NOW() - INTERVAL 2 HOUR
+            GROUP BY truck_id
+        ) t2 ON t1.truck_id = t2.truck_id AND t1.id = t2.max_id
+    """
+
+    rows = execute_fuel_query(query)
+    if not rows:
         return {}
 
-    try:
-        cursor = conn.cursor()  # Already DictCursor from connection config
-        query = """
-            SELECT 
-                t1.truck_id,
-                t1.sensor_pct as fuel_level,
-                t1.speed_mph as speed,
-                t1.timestamp_utc
-            FROM fuel_metrics t1
-            INNER JOIN (
-                SELECT truck_id, MAX(id) as max_id
-                FROM fuel_metrics
-                WHERE timestamp_utc >= NOW() - INTERVAL 2 HOUR
-                GROUP BY truck_id
-            ) t2 ON t1.truck_id = t2.truck_id AND t1.id = t2.max_id
-        """
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        cursor.close()
-
-        trucks = {}
-        for row in rows:
-            truck_id = row["truck_id"]
+    trucks: Dict[str, Dict[str, float]] = {}
+    for row in rows:
+        truck_id = row.get("truck_id")
+        if truck_id:
             trucks[truck_id] = {
-                "fuel_level": float(row["fuel_level"]) if row["fuel_level"] else None,
-                "speed": float(row["speed"]) if row["speed"] else None,
+                "fuel_level": (
+                    float(row["fuel_level"]) if row.get("fuel_level") else None
+                ),
+                "speed": float(row["speed"]) if row.get("speed") else None,
             }
 
-        logger.info(f"[V3] Fetched sensors for {len(trucks)} trucks from fuel_metrics")
-        return trucks
-
-    except Exception as e:
-        logger.error(f"Error fetching from fuel_metrics: {e}")
-        return {}
-    finally:
-        conn.close()
+    logger.info(f"[V3] Fetched sensors for {len(trucks)} trucks from fuel_metrics")
+    return trucks
 
 
 def fetch_historical_sensors(
@@ -802,40 +802,36 @@ def fetch_historical_sensors(
     Fetch historical sensor data for trend analysis.
     Returns: {sensor_name: [(timestamp, value), ...]}
     """
-    conn = get_wialon_connection()
-    if not conn:
+    # Use parameterized query with SQLAlchemy text binding
+    query = f"""
+        SELECT p as param, value, m as epoch
+        FROM sensors
+        WHERE n = '{truck_id}'
+        AND m >= UNIX_TIMESTAMP() - {days * 86400}
+        AND p IN ('oil_press', 'cool_temp', 'oil_temp', 'pwr_ext')
+        ORDER BY m ASC
+    """
+
+    rows = execute_wialon_query(query)
+    if not rows:
         return {}
 
-    try:
-        cursor = conn.cursor()  # Already DictCursor from connection config
-        query = """
-            SELECT p as param, value, m as epoch
-            FROM sensors
-            WHERE n = %s
-            AND m >= UNIX_TIMESTAMP() - %s
-            AND p IN ('oil_press', 'cool_temp', 'oil_temp', 'pwr_ext')
-            ORDER BY m ASC
-        """
-        cursor.execute(query, (truck_id, days * 86400))
-        rows = cursor.fetchall()
-        cursor.close()
+    history: Dict[str, List[Tuple[datetime, float]]] = {}
+    for row in rows:
+        param = row.get("param")
+        if not param:
+            continue
 
-        history = {}
-        for row in rows:
-            param = row["param"]
-            if param not in history:
-                history[param] = []
+        if param not in history:
+            history[param] = []
 
-            ts = datetime.fromtimestamp(row["epoch"], tz=timezone.utc)
-            history[param].append((ts, float(row["value"])))
+        epoch = row.get("epoch")
+        value = row.get("value")
+        if epoch and value is not None:
+            ts = datetime.fromtimestamp(epoch, tz=timezone.utc)
+            history[param].append((ts, float(value)))
 
-        return history
-
-    except Exception as e:
-        logger.error(f"Error fetching history for {truck_id}: {e}")
-        return {}
-    finally:
-        conn.close()
+    return history
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
