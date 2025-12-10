@@ -524,9 +524,15 @@ def get_fleet_summary() -> Dict[str, Any]:
 
     🔧 FIX v3.9.2: Now uses SQLAlchemy connection pooling
     🆕 v3.12.22: Cached for 30 seconds
+    🆕 v3.15.2: Filter only trucks in tanks.yaml
     """
+    # Trucks allowed from tanks.yaml
+    allowed_trucks = [
+        'VD3579', 'JC1282', 'JC9352', 'NQ6975', 'GP9677', 'JB8004', 'FM2416', 'FM3679', 'FM9838', 'JB6858', 'JP3281', 'JR7099', 'RA9250', 'RH1522', 'RR1272', 'BV6395', 'CO0681', 'CS8087', 'DR6664', 'DO9356', 'DO9693', 'FS7166', 'MA8159', 'MO0195', 'PC1280', 'RD5229', 'RR3094', 'RT9127', 'SG5760', 'YM6023', 'MJ9547', 'FM3363', 'GC9751', 'LV1422', 'LC6799', 'RC6625', 'FF7702', 'OG2033', 'OS3717', 'EM8514', 'MR7679'
+    ]
+    
     query = text(
-        """
+        f"""
         SELECT 
             COUNT(DISTINCT truck_id) as total_trucks,
             SUM(CASE WHEN truck_status != 'OFFLINE' THEN 1 ELSE 0 END) as active_trucks,
@@ -542,6 +548,7 @@ def get_fleet_summary() -> Dict[str, Any]:
                 SELECT truck_id, MAX(timestamp_utc) as max_time
                 FROM fuel_metrics
                 WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
+                  AND truck_id IN ({','.join(f"'{t}'" for t in allowed_trucks)})
                 GROUP BY truck_id
             ) t2 ON t1.truck_id = t2.truck_id AND t1.timestamp_utc = t2.max_time
         ) latest

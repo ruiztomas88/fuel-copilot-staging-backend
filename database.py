@@ -221,12 +221,18 @@ class DatabaseManager:
 
                 engine = get_sqlalchemy_engine()
                 with engine.connect() as conn:
+                    # Trucks allowed from tanks.yaml
+                    allowed_trucks = [
+                        'VD3579', 'JC1282', 'JC9352', 'NQ6975', 'GP9677', 'JB8004', 'FM2416', 'FM3679', 'FM9838', 'JB6858', 'JP3281', 'JR7099', 'RA9250', 'RH1522', 'RR1272', 'BV6395', 'CO0681', 'CS8087', 'DR6664', 'DO9356', 'DO9693', 'FS7166', 'MA8159', 'MO0195', 'PC1280', 'RD5229', 'RR3094', 'RT9127', 'SG5760', 'YM6023', 'MJ9547', 'FM3363', 'GC9751', 'LV1422', 'LC6799', 'RC6625', 'FF7702', 'OG2033', 'OS3717', 'EM8514', 'MR7679'
+                    ]
+                    
                     result = conn.execute(
                         text(
-                            """
+                            f"""
                         SELECT DISTINCT truck_id 
                         FROM fuel_metrics 
                         WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
+                          AND truck_id IN ({','.join(f"'{t}'" for t in allowed_trucks)})
                         ORDER BY truck_id
                     """
                         )
@@ -450,21 +456,14 @@ class DatabaseManager:
 
         🔧 v3.12.10: Fixed SQL to use actual column names from fuel_metrics table
         🔧 v3.15.1: Added estimated_gallons and sensor_gallons for dashboard display
+        🔧 v3.15.2: Filter only trucks in tanks.yaml
         """
-        try:
-            from sqlalchemy import text
-
-            try:
-                from database_mysql import get_sqlalchemy_engine
-            except ImportError:
-                from .database_mysql import get_sqlalchemy_engine
-
-            engine = get_sqlalchemy_engine()
-            with engine.connect() as conn:
-                # 🔧 v3.15.1: Added gallons columns for dashboard display
-                result = conn.execute(
-                    text(
-                        """
+        # Trucks allowed from tanks.yaml
+        allowed_trucks = [
+            'VD3579', 'JC1282', 'JC9352', 'NQ6975', 'GP9677', 'JB8004', 'FM2416', 'FM3679', 'FM9838', 'JB6858', 'JP3281', 'JR7099', 'RA9250', 'RH1522', 'RR1272', 'BV6395', 'CO0681', 'CS8087', 'DR6664', 'DO9356', 'DO9693', 'FS7166', 'MA8159', 'MO0195', 'PC1280', 'RD5229', 'RR3094', 'RT9127', 'SG5760', 'YM6023', 'MJ9547', 'FM3363', 'GC9751', 'LV1422', 'LC6799', 'RC6625', 'FF7702', 'OG2033', 'OS3717', 'EM8514', 'MR7679'
+        ]
+        
+        query = f"""
                     SELECT 
                         t1.truck_id,
                         t1.truck_status,
@@ -513,10 +512,11 @@ class DatabaseManager:
                           AND consumption_gph > 0.1 AND consumption_gph < 5.0
                         GROUP BY truck_id
                     ) idle_avg ON t1.truck_id = idle_avg.truck_id
+                    WHERE t1.truck_id IN ('VD3579', 'JC1282', 'JC9352', 'NQ6975', 'GP9677', 'JB8004', 'FM2416', 'FM3679', 'FM9838', 'JB6858', 'JP3281', 'JR7099', 'RA9250', 'RH1522', 'RR1272', 'BV6395', 'CO0681', 'CS8087', 'DR6664', 'DO9356', 'DO9693', 'FS7166', 'MA8159', 'MO0195', 'PC1280', 'RD5229', 'RR3094', 'RT9127', 'SG5760', 'YM6023', 'MJ9547', 'FM3363', 'GC9751', 'LV1422', 'LC6799', 'RC6625', 'FF7702', 'OG2033', 'OS3717', 'EM8514', 'MR7679')
                     ORDER BY t1.truck_id
                 """
-                    )
-                )
+                
+                result = conn.execute(text(query))
 
                 trucks = []
                 for row in result:
