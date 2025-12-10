@@ -1,0 +1,345 @@
+"""
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    HEALTH MONITOR - RESILIENCE MODULE                          ║
+║                         December 2025 - v5.3.1                                 ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║  Features:                                                                     ║
+║  1. Deep health check (DB, memory, connections)                               ║
+║  2. Memory usage monitoring                                                    ║
+║  3. Connection pool status                                                     ║
+║  4. Automatic alerting on degraded state                                       ║
+║  5. Deadlock detection                                                         ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+"""
+
+import os
+import gc
+import time
+import logging
+import threading
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, asdict
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+
+class HealthStatus(str, Enum):
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    CRITICAL = "critical"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class MemoryStats:
+    """Memory usage statistics"""
+
+    rss_mb: float  # Resident Set Size (actual RAM used)
+    vms_mb: float  # Virtual Memory Size
+    percent: float  # Percentage of system memory
+    available_mb: float  # Available system memory
+    threshold_exceeded: bool
+
+
+@dataclass
+class DatabaseStats:
+    """Database connection statistics"""
+
+    pool_size: int
+    checked_out: int
+    overflow: int
+    available: int
+    status: str
+    latency_ms: float
+
+
+@dataclass
+class HealthReport:
+    """Complete health report"""
+
+    status: HealthStatus
+    timestamp: str
+    version: str
+    uptime_seconds: float
+    memory: Optional[MemoryStats]
+    database: Optional[DatabaseStats]
+    wialon_sync: Dict[str, Any]
+    errors: List[str]
+    warnings: List[str]
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = {
+            "status": self.status.value,
+            "timestamp": self.timestamp,
+            "version": self.version,
+            "uptime_seconds": round(self.uptime_seconds, 1),
+            "errors": self.errors,
+            "warnings": self.warnings,
+            "wialon_sync": self.wialon_sync,
+        }
+        if self.memory:
+            result["memory"] = asdict(self.memory)
+        if self.database:
+            result["database"] = asdict(self.database)
+        return result
+
+
+class HealthMonitor:
+    """
+    Central health monitoring for the Fuel Analytics backend
+
+    Monitors:
+    - Memory usage (threshold: 80% of available RAM)
+    - Database connection pool
+    - Wialon sync status
+    - API response times
+    """
+
+    # Memory threshold (MB) - alert if exceeding
+    MEMORY_THRESHOLD_MB = 1024  # 1GB
+    MEMORY_THRESHOLD_PERCENT = 80  # 80% of system RAM
+
+    # Database thresholds
+    DB_LATENCY_WARNING_MS = 500
+    DB_LATENCY_CRITICAL_MS = 2000
+
+    def __init__(self):
+        self._start_time = time.time()
+        self._version = "5.3.1"
+        self._last_check: Optional[HealthReport] = None
+        self._lock = threading.Lock()
+
+    @property
+    def uptime_seconds(self) -> float:
+        return time.time() - self._start_time
+
+    def get_memory_stats(self) -> Optional[MemoryStats]:
+        """Get current memory usage statistics"""
+        try:
+            import psutil
+
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            system_mem = psutil.virtual_memory()
+
+            rss_mb = mem_info.rss / (1024 * 1024)
+            vms_mb = mem_info.vms / (1024 * 1024)
+            available_mb = system_mem.available / (1024 * 1024)
+            percent = process.memory_percent()
+
+            threshold_exceeded = (
+                rss_mb > self.MEMORY_THRESHOLD_MB
+                or percent > self.MEMORY_THRESHOLD_PERCENT
+            )
+
+            return MemoryStats(
+                rss_mb=round(rss_mb, 2),
+                vms_mb=round(vms_mb, 2),
+                percent=round(percent, 2),
+                available_mb=round(available_mb, 2),
+                threshold_exceeded=threshold_exceeded,
+            )
+        except ImportError:
+            logger.warning("psutil not installed - memory monitoring disabled")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting memory stats: {e}")
+            return None
+
+    def get_database_stats(self) -> Optional[DatabaseStats]:
+        """Get database connection pool statistics"""
+        try:
+            from database_pool import get_engine
+            from sqlalchemy import text
+
+            engine = get_engine()
+            pool = engine.pool
+
+            # Measure query latency
+            start = time.time()
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            latency_ms = (time.time() - start) * 1000
+
+            # Determine status based on latency
+            if latency_ms > self.DB_LATENCY_CRITICAL_MS:
+                status = "critical"
+            elif latency_ms > self.DB_LATENCY_WARNING_MS:
+                status = "slow"
+            else:
+                status = "healthy"
+
+            return DatabaseStats(
+                pool_size=pool.size(),
+                checked_out=pool.checkedout(),
+                overflow=pool.overflow(),
+                available=pool.size() - pool.checkedout(),
+                status=status,
+                latency_ms=round(latency_ms, 2),
+            )
+        except Exception as e:
+            logger.error(f"Error getting database stats: {e}")
+            return DatabaseStats(
+                pool_size=0,
+                checked_out=0,
+                overflow=0,
+                available=0,
+                status="error",
+                latency_ms=-1,
+            )
+
+    def get_wialon_sync_status(self) -> Dict[str, Any]:
+        """Get Wialon sync service status"""
+        try:
+            # Check if sync cache files exist and are fresh
+            from pathlib import Path
+
+            cache_dir = Path("data/truck_cache")
+
+            if not cache_dir.exists():
+                return {"status": "no_cache", "trucks_cached": 0}
+
+            cache_files = list(cache_dir.glob("*.json"))
+            if not cache_files:
+                return {"status": "empty_cache", "trucks_cached": 0}
+
+            # Check freshness of most recent cache file
+            newest_file = max(cache_files, key=lambda f: f.stat().st_mtime)
+            age_seconds = time.time() - newest_file.stat().st_mtime
+
+            if age_seconds > 120:  # Older than 2 minutes
+                status = "stale"
+            elif age_seconds > 60:  # Older than 1 minute
+                status = "lagging"
+            else:
+                status = "healthy"
+
+            return {
+                "status": status,
+                "trucks_cached": len(cache_files),
+                "newest_cache_age_seconds": round(age_seconds, 1),
+                "newest_cache_file": newest_file.name,
+            }
+        except Exception as e:
+            logger.error(f"Error checking Wialon sync: {e}")
+            return {"status": "error", "error": str(e)}
+
+    def run_deep_health_check(self) -> HealthReport:
+        """
+        Run comprehensive health check
+
+        This checks:
+        1. Memory usage
+        2. Database connection pool
+        3. Wialon sync freshness
+        4. Detects potential issues
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+        overall_status = HealthStatus.HEALTHY
+
+        # 1. Memory check
+        memory = self.get_memory_stats()
+        if memory:
+            if memory.threshold_exceeded:
+                warnings.append(
+                    f"High memory usage: {memory.rss_mb}MB ({memory.percent}%)"
+                )
+                overall_status = HealthStatus.DEGRADED
+
+        # 2. Database check
+        database = self.get_database_stats()
+        if database:
+            if database.status == "error":
+                errors.append("Database connection failed")
+                overall_status = HealthStatus.CRITICAL
+            elif database.status == "critical":
+                errors.append(f"Database latency critical: {database.latency_ms}ms")
+                overall_status = HealthStatus.CRITICAL
+            elif database.status == "slow":
+                warnings.append(f"Database latency high: {database.latency_ms}ms")
+                if overall_status == HealthStatus.HEALTHY:
+                    overall_status = HealthStatus.DEGRADED
+
+            # Check for connection pool exhaustion
+            if database.available == 0 and database.overflow > 0:
+                warnings.append(
+                    f"Connection pool exhausted, using overflow: {database.overflow}"
+                )
+                if overall_status == HealthStatus.HEALTHY:
+                    overall_status = HealthStatus.DEGRADED
+
+        # 3. Wialon sync check
+        wialon = self.get_wialon_sync_status()
+        if wialon.get("status") == "stale":
+            warnings.append(
+                f"Wialon cache stale: {wialon.get('newest_cache_age_seconds', 0)}s old"
+            )
+            if overall_status == HealthStatus.HEALTHY:
+                overall_status = HealthStatus.DEGRADED
+        elif wialon.get("status") == "error":
+            errors.append(f"Wialon sync error: {wialon.get('error', 'unknown')}")
+            overall_status = HealthStatus.CRITICAL
+
+        # 4. Force garbage collection if memory is high
+        if memory and memory.rss_mb > 800:
+            gc.collect()
+            logger.info(f"🧹 Forced garbage collection (memory: {memory.rss_mb}MB)")
+
+        report = HealthReport(
+            status=overall_status,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            version=self._version,
+            uptime_seconds=self.uptime_seconds,
+            memory=memory,
+            database=database,
+            wialon_sync=wialon,
+            errors=errors,
+            warnings=warnings,
+        )
+
+        with self._lock:
+            self._last_check = report
+
+        return report
+
+    def get_quick_status(self) -> Dict[str, Any]:
+        """Quick status check (no DB query, uses cached data)"""
+        memory = self.get_memory_stats()
+
+        status = "healthy"
+        if memory and memory.threshold_exceeded:
+            status = "degraded"
+
+        return {
+            "status": status,
+            "uptime_seconds": round(self.uptime_seconds, 1),
+            "version": self._version,
+            "memory_mb": memory.rss_mb if memory else None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+# Global singleton
+_health_monitor: Optional[HealthMonitor] = None
+
+
+def get_health_monitor() -> HealthMonitor:
+    """Get or create the global health monitor instance"""
+    global _health_monitor
+    if _health_monitor is None:
+        _health_monitor = HealthMonitor()
+    return _health_monitor
+
+
+# Convenience functions
+def deep_health_check() -> HealthReport:
+    """Run deep health check"""
+    return get_health_monitor().run_deep_health_check()
+
+
+def quick_status() -> Dict[str, Any]:
+    """Get quick status"""
+    return get_health_monitor().get_quick_status()

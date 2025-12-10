@@ -1,0 +1,567 @@
+"""
+API Endpoints v3.12.21
+Additional endpoints for new features
+
+This file contains endpoints for:
+- #32: Audit log API
+- #33: API key management
+- #17: Refuel predictions
+- #19: Fuel cost tracking
+- #21: Sensor anomalies
+- #22: Data export
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timezone, timedelta
+from pydantic import BaseModel, Field
+import io
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Create router
+router = APIRouter(prefix="/fuelAnalytics/api/v2", tags=["v2"])
+
+
+# =============================================================================
+# PYDANTIC MODELS
+# =============================================================================
+class APIKeyCreate(BaseModel):
+    """Request model for creating API key."""
+
+    name: str = Field(..., min_length=3, max_length=100)
+    description: Optional[str] = None
+    carrier_id: Optional[str] = None
+    role: str = Field(default="viewer", pattern="^(viewer|carrier_admin|admin)$")
+    scopes: Optional[List[str]] = None
+    rate_limit_per_minute: int = Field(default=60, ge=1, le=1000)
+    rate_limit_per_day: int = Field(default=10000, ge=100, le=100000)
+    expires_in_days: Optional[int] = Field(default=None, ge=1, le=365)
+
+
+class AuditLogQuery(BaseModel):
+    """Query parameters for audit log."""
+
+    action: Optional[str] = None
+    user_id: Optional[str] = None
+    carrier_id: Optional[str] = None
+    resource_type: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    success_only: Optional[bool] = None
+    limit: int = Field(default=100, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+
+
+class ExportRequest(BaseModel):
+    """Request model for data export."""
+
+    carrier_id: Optional[str] = None
+    truck_ids: Optional[List[str]] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    include_metrics: bool = True
+    include_refuels: bool = True
+    include_alerts: bool = True
+    include_summary: bool = True
+    format: str = Field(default="excel", pattern="^(excel|pdf|csv)$")
+
+
+# =============================================================================
+# API KEY ENDPOINTS (#33)
+# =============================================================================
+@router.post("/api-keys", summary="Create API Key", tags=["API Keys"])
+async def create_api_key(
+    request: APIKeyCreate,
+    # current_user = Depends(require_admin),  # Uncomment when auth is ready
+):
+    """
+    Create a new API key.
+
+    Returns the full API key (only shown once - save it securely!).
+    """
+    from api_key_auth import get_api_key_manager
+
+    manager = get_api_key_manager()
+    result = manager.create_key(
+        name=request.name,
+        description=request.description,
+        carrier_id=request.carrier_id,
+        role=request.role,
+        scopes=request.scopes,
+        rate_limit_per_minute=request.rate_limit_per_minute,
+        rate_limit_per_day=request.rate_limit_per_day,
+        expires_in_days=request.expires_in_days,
+        created_by=None,  # current_user.username when auth ready
+    )
+
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to create API key")
+
+    full_key, key_info = result
+
+    return {
+        "api_key": full_key,  # Only returned once!
+        "key_info": key_info,
+        "warning": "Save this API key securely - it will not be shown again!",
+    }
+
+
+@router.get("/api-keys", summary="List API Keys", tags=["API Keys"])
+async def list_api_keys(
+    carrier_id: Optional[str] = None,
+    include_inactive: bool = False,
+):
+    """List API keys (without revealing the actual keys)."""
+    from api_key_auth import get_api_key_manager
+
+    manager = get_api_key_manager()
+    keys = manager.list_keys(carrier_id=carrier_id, include_inactive=include_inactive)
+
+    return {
+        "keys": keys,
+        "total": len(keys),
+    }
+
+
+@router.delete("/api-keys/{key_id}", summary="Revoke API Key", tags=["API Keys"])
+async def revoke_api_key(key_id: int):
+    """Revoke (deactivate) an API key."""
+    from api_key_auth import get_api_key_manager
+
+    manager = get_api_key_manager()
+    success = manager.revoke_key(key_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    return {"message": "API key revoked", "key_id": key_id}
+
+
+# =============================================================================
+# AUDIT LOG ENDPOINTS (#32)
+# =============================================================================
+@router.get("/audit-log", summary="Query Audit Log", tags=["Audit"])
+async def query_audit_log(
+    action: Optional[str] = None,
+    user_id: Optional[str] = None,
+    carrier_id: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    success_only: Optional[bool] = None,
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+):
+    """
+    Query audit log entries with filtering.
+
+    Supports filtering by action, user, carrier, resource, date range, and success status.
+    """
+    from audit_log import get_audit_logger
+
+    audit = get_audit_logger()
+    entries = audit.query(
+        action=action,
+        user_id=user_id,
+        carrier_id=carrier_id,
+        resource_type=resource_type,
+        start_date=start_date,
+        end_date=end_date,
+        success_only=success_only,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "entries": entries,
+        "count": len(entries),
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/audit-log/summary", summary="Audit Log Summary", tags=["Audit"])
+async def get_audit_summary(
+    carrier_id: Optional[str] = None,
+    days: int = Query(default=7, ge=1, le=90),
+):
+    """Get audit log summary statistics."""
+    from audit_log import get_audit_logger
+
+    audit = get_audit_logger()
+    summary = audit.get_summary(carrier_id=carrier_id, days=days)
+
+    return summary
+
+
+# =============================================================================
+# REFUEL PREDICTION ENDPOINTS (#17)
+# =============================================================================
+@router.get(
+    "/predictions/refuel/{truck_id}",
+    summary="Predict Next Refuel",
+    tags=["Predictions"],
+)
+async def predict_refuel(
+    truck_id: str,
+    tank_capacity: float = Query(default=200.0, ge=50, le=500),
+):
+    """
+    Predict when a truck will need refueling.
+
+    Uses historical consumption patterns and ML regression.
+    """
+    from refuel_prediction import get_prediction_engine
+
+    engine = get_prediction_engine()
+
+    # Get current fuel level from database
+    from database_mysql import MySQLDatabase
+
+    db = MySQLDatabase()
+    truck_data = db.get_truck_detail(truck_id)
+
+    if not truck_data:
+        raise HTTPException(status_code=404, detail=f"Truck {truck_id} not found")
+
+    current_fuel_pct = truck_data.get("fuel_pct", 50)
+
+    prediction = engine.predict_refuel(
+        truck_id=truck_id,
+        current_fuel_pct=current_fuel_pct,
+        tank_capacity_gal=tank_capacity,
+    )
+
+    if not prediction:
+        raise HTTPException(
+            status_code=400,
+            detail="Insufficient historical data for prediction (need 7+ days)",
+        )
+
+    return prediction.to_dict()
+
+
+@router.get(
+    "/predictions/fleet", summary="Fleet Refuel Predictions", tags=["Predictions"]
+)
+async def predict_fleet_refuels(
+    carrier_id: Optional[str] = None,
+):
+    """
+    Get refuel predictions for entire fleet.
+
+    Returns trucks sorted by urgency (hours until refuel needed).
+    """
+    from refuel_prediction import get_prediction_engine
+
+    engine = get_prediction_engine()
+    predictions = engine.predict_fleet(carrier_id=carrier_id)
+
+    return {
+        "predictions": predictions,
+        "total": len(predictions),
+        "urgent": [
+            p for p in predictions if p["prediction"]["hours_until_refuel_needed"] < 8
+        ],
+    }
+
+
+@router.get(
+    "/predictions/consumption/{truck_id}",
+    summary="Consumption Trend",
+    tags=["Predictions"],
+)
+async def get_consumption_trend(
+    truck_id: str,
+    days: int = Query(default=30, ge=7, le=90),
+):
+    """Get consumption trend analysis for a truck."""
+    from refuel_prediction import get_prediction_engine
+
+    engine = get_prediction_engine()
+    trend = engine.get_consumption_trend(truck_id=truck_id, days=days)
+
+    return trend
+
+
+# =============================================================================
+# FUEL COST ENDPOINTS (#19)
+# =============================================================================
+@router.get("/costs/truck/{truck_id}", summary="Truck Cost Summary", tags=["Costs"])
+async def get_truck_costs(
+    truck_id: str,
+    days: int = Query(default=30, ge=1, le=90),
+):
+    """Get fuel cost summary for a specific truck."""
+    from fuel_cost_tracker import get_cost_tracker
+
+    tracker = get_cost_tracker()
+    summary = tracker.get_truck_cost_summary(truck_id=truck_id, days=days)
+
+    return summary
+
+
+@router.get("/costs/fleet", summary="Fleet Cost Summary", tags=["Costs"])
+async def get_fleet_costs(
+    carrier_id: Optional[str] = None,
+    days: int = Query(default=7, ge=1, le=30),
+):
+    """Get fuel cost summary for entire fleet."""
+    from fuel_cost_tracker import get_cost_tracker
+
+    tracker = get_cost_tracker()
+    summary = tracker.get_fleet_cost_summary(carrier_id=carrier_id, days=days)
+
+    return summary
+
+
+@router.get("/costs/drivers/{truck_id}", summary="Compare Drivers", tags=["Costs"])
+async def compare_drivers(
+    truck_id: str,
+    days: int = Query(default=30, ge=7, le=90),
+):
+    """Compare fuel costs between drivers on the same truck."""
+    from fuel_cost_tracker import get_cost_tracker
+
+    tracker = get_cost_tracker()
+    comparison = tracker.compare_drivers(truck_id=truck_id, days=days)
+
+    return comparison
+
+
+# =============================================================================
+# SENSOR ANOMALY ENDPOINTS (#21)
+# =============================================================================
+@router.get(
+    "/sensors/anomalies/{truck_id}", summary="Detect Sensor Anomalies", tags=["Sensors"]
+)
+async def detect_sensor_anomalies(
+    truck_id: str,
+    sensor: str = Query(
+        default="fuel_level", pattern="^(fuel_level|fuel_kalman|speed|mpg)$"
+    ),
+    hours: int = Query(default=24, ge=1, le=168),
+):
+    """Detect anomalies in sensor readings."""
+    from sensor_anomaly import get_anomaly_detector
+
+    detector = get_anomaly_detector()
+    anomalies = detector.detect_anomalies(
+        truck_id=truck_id,
+        sensor_name=sensor,
+        hours=hours,
+    )
+
+    return {
+        "truck_id": truck_id,
+        "sensor": sensor,
+        "period_hours": hours,
+        "anomalies": [a.to_dict() for a in anomalies],
+        "total": len(anomalies),
+    }
+
+
+@router.get("/sensors/health/{truck_id}", summary="Sensor Health", tags=["Sensors"])
+async def get_sensor_health(
+    truck_id: str,
+    sensor: str = Query(default="fuel_level"),
+):
+    """Get health status for a sensor."""
+    from sensor_anomaly import get_anomaly_detector
+
+    detector = get_anomaly_detector()
+    health = detector.get_sensor_health(truck_id=truck_id, sensor_name=sensor)
+
+    return health.to_dict()
+
+
+@router.get("/sensors/fleet-status", summary="Fleet Sensor Status", tags=["Sensors"])
+async def get_fleet_sensor_status(
+    carrier_id: Optional[str] = None,
+    sensor: str = Query(default="fuel_level"),
+):
+    """Get sensor health status for all trucks in fleet."""
+    from sensor_anomaly import get_anomaly_detector
+
+    detector = get_anomaly_detector()
+    status = detector.get_fleet_sensor_status(
+        carrier_id=carrier_id,
+        sensor_name=sensor,
+    )
+
+    return status
+
+
+@router.get(
+    "/sensors/timeline/{truck_id}", summary="Anomaly Timeline", tags=["Sensors"]
+)
+async def get_anomaly_timeline(
+    truck_id: str,
+    sensor: str = Query(default="fuel_level"),
+    hours: int = Query(default=24, ge=1, le=168),
+):
+    """Get timeline of anomalies for visualization."""
+    from sensor_anomaly import get_anomaly_detector
+
+    detector = get_anomaly_detector()
+    timeline = detector.get_anomaly_timeline(
+        truck_id=truck_id,
+        sensor_name=sensor,
+        hours=hours,
+    )
+
+    return timeline
+
+
+# =============================================================================
+# DATA EXPORT ENDPOINTS (#22)
+# =============================================================================
+@router.post("/export/excel", summary="Export to Excel", tags=["Export"])
+async def export_to_excel(
+    request: ExportRequest,
+    background_tasks: BackgroundTasks,
+):
+    """
+    Export fleet data to Excel format.
+
+    Returns Excel file as download.
+    """
+    from data_export import get_exporter, ExportConfig
+
+    config = ExportConfig(
+        carrier_id=request.carrier_id,
+        truck_ids=request.truck_ids,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        include_metrics=request.include_metrics,
+        include_refuels=request.include_refuels,
+        include_alerts=request.include_alerts,
+        include_summary=request.include_summary,
+    )
+
+    exporter = get_exporter()
+
+    try:
+        excel_data = exporter.export_to_excel(config)
+        filename = exporter.generate_filename(config, "xlsx")
+
+        return StreamingResponse(
+            io.BytesIO(excel_data),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/export/pdf", summary="Export to PDF", tags=["Export"])
+async def export_to_pdf(request: ExportRequest):
+    """
+    Export fleet data to PDF report.
+
+    Returns PDF file as download.
+    """
+    from data_export import get_exporter, ExportConfig
+
+    config = ExportConfig(
+        carrier_id=request.carrier_id,
+        truck_ids=request.truck_ids,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        include_metrics=request.include_metrics,
+        include_refuels=request.include_refuels,
+        include_alerts=request.include_alerts,
+        include_summary=request.include_summary,
+    )
+
+    exporter = get_exporter()
+
+    try:
+        pdf_data = exporter.export_to_pdf(config)
+        filename = exporter.generate_filename(config, "pdf")
+
+        return StreamingResponse(
+            io.BytesIO(pdf_data),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/export/csv/{data_type}", summary="Export to CSV", tags=["Export"])
+async def export_to_csv(
+    data_type: str,
+    carrier_id: Optional[str] = None,
+    truck_ids: Optional[str] = None,  # Comma-separated
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+):
+    """
+    Export specific data type to CSV.
+
+    Data types: metrics, refuels, alerts, summary
+    """
+    from data_export import get_exporter, ExportConfig
+
+    if data_type not in ("metrics", "refuels", "alerts", "summary"):
+        raise HTTPException(status_code=400, detail="Invalid data type")
+
+    config = ExportConfig(
+        carrier_id=carrier_id,
+        truck_ids=truck_ids.split(",") if truck_ids else None,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    exporter = get_exporter()
+
+    try:
+        csv_data = exporter.export_to_csv(config, data_type=data_type)
+        filename = f"{data_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        return StreamingResponse(
+            io.BytesIO(csv_data),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# USER MANAGEMENT ENDPOINTS (#5-8)
+# =============================================================================
+@router.get("/users", summary="List Users", tags=["Users"])
+async def list_users(
+    carrier_id: Optional[str] = None,
+):
+    """List all users, optionally filtered by carrier."""
+    from user_management import get_user_manager
+
+    manager = get_user_manager()
+    users = manager.list_users(carrier_id=carrier_id)
+
+    return {
+        "users": users,
+        "total": len(users),
+    }
+
+
+@router.get("/carriers", summary="List Carriers", tags=["Users"])
+async def list_carriers(
+    active_only: bool = True,
+):
+    """List all carriers."""
+    from user_management import get_user_manager
+
+    manager = get_user_manager()
+    carriers = manager.list_carriers(active_only=active_only)
+
+    return {
+        "carriers": carriers,
+        "total": len(carriers),
+    }

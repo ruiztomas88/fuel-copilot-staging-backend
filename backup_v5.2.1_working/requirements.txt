@@ -1,0 +1,63 @@
+# Fuel Copilot - Dependencias Python
+# Actualizado: 2025-12-03
+
+# ============================================================================
+# CORE DEPENDENCIES (Required)
+# ============================================================================
+
+# Base de datos
+pymysql==1.1.0
+PyMySQL[rsa]==1.1.0
+SQLAlchemy==2.0.44  # FIX: Actualizado para compatibilidad con Python 3.13
+
+# Procesamiento de datos
+numpy>=1.26.0
+pandas>=2.1.0
+
+# Dashboard web - FastAPI
+fastapi>=0.115.0
+uvicorn[standard]==0.24.0
+pydantic==2.9.2
+pydantic-settings==2.1.0
+
+# Configuración
+python-dotenv==1.0.0
+PyYAML==6.0.1
+
+# Monitoreo y performance
+psutil==5.9.6
+
+# Fechas y horas
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Utilidades
+requests==2.31.0
+tenacity==8.2.3  # Retry with exponential backoff
+twilio==8.10.0   # SMS and WhatsApp alerts
+
+# ============================================================================
+# MONITORING & OBSERVABILITY (Required for metrics)
+# ============================================================================
+prometheus-client==0.19.0
+prometheus-fastapi-instrumentator==7.0.0  # FIX: Agregado - faltaba
+
+# ============================================================================
+# OPTIONAL: Redis Caching (for production scale)
+# ============================================================================
+# Uncomment if using Redis:
+# redis==5.0.1
+# hiredis==2.2.3
+
+# ============================================================================
+# TESTING (Required for development)
+# ============================================================================
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+
+# ============================================================================
+# JWT Authentication
+# ============================================================================
+python-jose[cryptography]==3.3.0
+cryptography==41.0.7

@@ -1,0 +1,505 @@
+"""
+Parallel Truck Processing for True Real-Time Updates
+Uses ThreadPoolExecutor to process multiple trucks simultaneously
+Reduces cycle time from 2-3 minutes per truck to near real-time
+
+Thread Safety:
+- Per-truck locks prevent race conditions when accessing shared state
+- Dictionary-based lock management ensures each truck has its own lock
+- Safe concurrent access to estimator states and failure counters
+
+🆕 v3.4.0: Refactored singleton to proper dependency injection pattern
+- ProcessorFactory replaces global singleton
+- Easier testing with mock processors
+- Better lifecycle management
+"""
+
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from threading import Lock
+import time
+from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
+
+
+class ParallelTruckProcessor:
+    """
+    Process multiple trucks in parallel using thread pool with thread safety
+
+    Performance improvements:
+    - Sequential: 39 trucks * 2-3 min = ~90-120 seconds total
+    - Parallel (8 workers): 39 trucks / 8 workers * 2 sec = ~10 seconds total
+
+    Thread Safety:
+    - Per-truck locks prevent race conditions
+    - Safe concurrent access to shared state
+    """
+
+    def __init__(self, max_workers: int = 8):
+        """
+        Args:
+            max_workers: Number of parallel worker threads (default: 8)
+        """
+        self.max_workers = max_workers
+        self.executor: Optional[ThreadPoolExecutor] = None
+        self.total_processed = 0
+        self.total_errors = 0
+        self.cycle_times: List[float] = []
+        self._started = False
+
+        # Thread safety: locks for shared state
+        self.truck_locks: Dict[str, Lock] = {}  # Per-truck locks
+        self.locks_lock = Lock()  # Lock for creating new locks
+
+    def start(self) -> "ParallelTruckProcessor":
+        """
+        Start the executor pool. Returns self for chaining.
+
+        Usage:
+            processor = ParallelTruckProcessor(8).start()
+        """
+        if not self._started:
+            self.executor = ThreadPoolExecutor(
+                max_workers=self.max_workers, thread_name_prefix="TruckWorker"
+            )
+            self._started = True
+            logger.info(
+                f"🚀 Parallel Processor started with {self.max_workers} workers"
+            )
+        return self
+
+    def is_running(self) -> bool:
+        """Check if processor is running"""
+        return self._started and self.executor is not None
+
+    def _get_truck_lock(self, truck_id: str) -> Lock:
+        """
+        Get or create a lock for a specific truck (thread-safe)
+
+        Args:
+            truck_id: Truck identifier
+
+        Returns:
+            Lock object for this truck
+        """
+        if truck_id not in self.truck_locks:
+            with self.locks_lock:
+                # Double-check pattern
+                if truck_id not in self.truck_locks:
+                    self.truck_locks[truck_id] = Lock()
+
+        return self.truck_locks[truck_id]
+
+    def process_trucks_parallel(
+        self, trucks: Dict, process_function: Callable, **process_kwargs
+    ) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Process multiple trucks in parallel
+
+        Args:
+            trucks: Dict of {truck_id: truck_config}
+            process_function: Function to call for each truck
+            **process_kwargs: Additional kwargs passed to process_function
+
+        Returns:
+            Tuple of (successful_results, failed_results)
+
+        Raises:
+            RuntimeError: If processor not started
+        """
+        if not self._started or self.executor is None:
+            raise RuntimeError(
+                "Processor not started. Call start() first or use ProcessorFactory."
+            )
+
+        start_time = time.time()
+
+        # Submit all truck processing tasks
+        future_to_truck = {}
+        for truck_id, truck_config in trucks.items():
+            future = self.executor.submit(
+                self._process_single_truck,
+                truck_id,
+                truck_config,
+                process_function,
+                **process_kwargs,
+            )
+            future_to_truck[future] = truck_id
+
+        # Collect results as they complete
+        successful_results = []
+        failed_results = []
+
+        for future in as_completed(future_to_truck):
+            truck_id = future_to_truck[future]
+            try:
+                result = future.result()
+                if result["success"]:
+                    successful_results.append(result)
+                    self.total_processed += 1
+                else:
+                    failed_results.append(result)
+                    self.total_errors += 1
+            except Exception as e:
+                logger.error(f"❌ [{truck_id}] Unexpected error: {e}")
+                failed_results.append(
+                    {
+                        "truck_id": truck_id,
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
+                self.total_errors += 1
+
+        # Track cycle time
+        cycle_time = time.time() - start_time
+        self.cycle_times.append(cycle_time)
+
+        logger.info(
+            f"✅ Parallel cycle complete: {len(successful_results)}/{len(trucks)} trucks "
+            f"in {cycle_time:.1f}s ({cycle_time/len(trucks):.1f}s/truck avg)"
+        )
+
+        return successful_results, failed_results
+
+    def _process_single_truck(
+        self,
+        truck_id: str,
+        truck_config: Dict,
+        process_function: Callable,
+        **process_kwargs,
+    ) -> Dict:
+        """
+        Process a single truck (called by worker thread)
+
+        Returns:
+            Dict with {success: bool, truck_id: str, data: ..., error: ...}
+        """
+        try:
+            result = process_function(
+                truck_id=truck_id, truck_config=truck_config, **process_kwargs
+            )
+
+            return {
+                "success": True,
+                "truck_id": truck_id,
+                "data": result,
+            }
+
+        except Exception as e:
+            logger.warning(f"⚠️ [{truck_id}] Processing failed: {e}")
+            return {
+                "success": False,
+                "truck_id": truck_id,
+                "error": str(e),
+            }
+
+    def get_stats(self) -> Dict:
+        """Get processor statistics"""
+        avg_cycle_time = (
+            sum(self.cycle_times) / len(self.cycle_times) if self.cycle_times else 0
+        )
+
+        return {
+            "max_workers": self.max_workers,
+            "total_processed": self.total_processed,
+            "total_errors": self.total_errors,
+            "success_rate": (
+                self.total_processed / (self.total_processed + self.total_errors) * 100
+                if (self.total_processed + self.total_errors) > 0
+                else 0
+            ),
+            "cycles_completed": len(self.cycle_times),
+            "avg_cycle_time_seconds": avg_cycle_time,
+            "is_running": self._started,
+        }
+
+    def reset_stats(self) -> None:
+        """Reset statistics (useful for testing)"""
+        self.total_processed = 0
+        self.total_errors = 0
+        self.cycle_times = []
+
+    def shutdown(self, wait: bool = True) -> None:
+        """Shutdown the thread pool"""
+        if self._started and self.executor is not None:
+            logger.info("🛑 Shutting down parallel processor...")
+            self.executor.shutdown(wait=wait)
+            self._started = False
+            self.executor = None
+
+
+class ProcessorFactory:
+    """
+    🆕 v3.4.0: Factory for creating and managing processor instances.
+
+    Replaces global singleton pattern with proper dependency injection.
+    Benefits:
+    - Easier testing (can inject mock processors)
+    - Better lifecycle management
+    - Thread-safe instance creation
+    - Support for multiple named processors
+
+    Usage:
+        # Get default processor (creates if needed)
+        processor = ProcessorFactory.get_processor()
+
+        # Get/create named processor
+        processor = ProcessorFactory.get_processor("background_jobs", max_workers=4)
+
+        # Testing - inject mock
+        ProcessorFactory.set_processor("test", mock_processor)
+
+        # Cleanup
+        ProcessorFactory.shutdown_all()
+    """
+
+    _instances: Dict[str, ParallelTruckProcessor] = {}
+    _lock = Lock()
+
+    @classmethod
+    def get_processor(
+        cls, name: str = "default", max_workers: int = 8, auto_start: bool = True
+    ) -> ParallelTruckProcessor:
+        """
+        Get or create a named processor instance.
+
+        Args:
+            name: Processor name (default: "default")
+            max_workers: Worker count for new processors
+            auto_start: Automatically start the processor
+
+        Returns:
+            ParallelTruckProcessor instance
+        """
+        with cls._lock:
+            if name not in cls._instances:
+                processor = ParallelTruckProcessor(max_workers)
+                if auto_start:
+                    processor.start()
+                cls._instances[name] = processor
+                logger.debug(
+                    f"Created new processor '{name}' with {max_workers} workers"
+                )
+            return cls._instances[name]
+
+    @classmethod
+    def set_processor(cls, name: str, processor: ParallelTruckProcessor) -> None:
+        """
+        Set a processor instance (useful for testing with mocks).
+
+        Args:
+            name: Processor name
+            processor: Processor instance to set
+        """
+        with cls._lock:
+            # Shutdown existing if any
+            if name in cls._instances:
+                cls._instances[name].shutdown(wait=False)
+            cls._instances[name] = processor
+            logger.debug(f"Set processor '{name}' (for testing)")
+
+    @classmethod
+    def shutdown_processor(cls, name: str, wait: bool = True) -> None:
+        """
+        Shutdown a specific processor.
+
+        Args:
+            name: Processor name
+            wait: Wait for pending tasks to complete
+        """
+        with cls._lock:
+            if name in cls._instances:
+                cls._instances[name].shutdown(wait=wait)
+                del cls._instances[name]
+
+    @classmethod
+    def shutdown_all(cls, wait: bool = True) -> None:
+        """
+        Shutdown all processor instances.
+
+        Args:
+            wait: Wait for pending tasks to complete
+        """
+        with cls._lock:
+            for name, processor in list(cls._instances.items()):
+                processor.shutdown(wait=wait)
+            cls._instances.clear()
+            logger.info("🛑 All parallel processors shut down")
+
+    @classmethod
+    def get_all_stats(cls) -> Dict[str, Dict]:
+        """
+        Get statistics from all processors.
+
+        Returns:
+            Dict of {processor_name: stats_dict}
+        """
+        with cls._lock:
+            return {
+                name: processor.get_stats()
+                for name, processor in cls._instances.items()
+            }
+
+    @classmethod
+    @contextmanager
+    def temporary_processor(cls, max_workers: int = 4):
+        """
+        Context manager for temporary processor (auto-cleanup).
+
+        Usage:
+            with ProcessorFactory.temporary_processor(4) as processor:
+                processor.process_trucks_parallel(trucks, func)
+            # Automatically shut down after
+        """
+        processor = ParallelTruckProcessor(max_workers).start()
+        try:
+            yield processor
+        finally:
+            processor.shutdown(wait=True)
+
+
+# 🆕 Backward compatibility: Keep old function but use factory internally
+def get_parallel_processor(max_workers: int = 8) -> ParallelTruckProcessor:
+    """
+    Get or create the default parallel processor instance.
+
+    🆕 v3.4.0: Now uses ProcessorFactory internally.
+    For new code, prefer ProcessorFactory.get_processor() directly.
+
+    Args:
+        max_workers: Number of parallel worker threads (default: 8)
+
+    Returns:
+        ParallelTruckProcessor instance
+    """
+    return ProcessorFactory.get_processor("default", max_workers)
+
+
+def process_truck_wrapper(
+    truck_id: str,
+    truck_config: Dict,
+    estimator,
+    csv_reporter,
+    last_odom,
+    last_processed_timestamp,
+    engine,
+    tanks_config,
+    normalizer,
+    config: Dict,
+    consecutive_failures: Dict,
+    truck_display_data: Dict,
+    truck_lock: Optional[Lock] = None,
+) -> Optional[Dict]:
+    """
+    Wrapper function to process a single truck (thread-safe parallel processing)
+
+    Thread Safety:
+    - Uses truck_lock to prevent race conditions when accessing shared state
+    - Protects: estimator.states, consecutive_failures, truck_display_data
+    - Each truck has its own lock, so different trucks can process in parallel
+
+    Returns:
+        Dict with processing results or None if no new data
+    """
+    # Import here to avoid circular dependencies
+    from fuel_copilot_v2_1_fixed import (
+        get_latest_reading,
+        normalize_units,
+        TruckStatus,
+        calculate_health_score,
+    )
+
+    try:
+        unit_id = truck_config["unit_id"]
+        capacity_liters = truck_config["capacity_liters"]
+
+        # Adaptive fuel age limits
+        fuel_freq = truck_config.get("fuel_sensor_freq", "moderate")
+        if fuel_freq == "frequent":
+            fuel_age_limit = 180
+        elif fuel_freq == "infrequent":
+            fuel_age_limit = 480
+        else:
+            fuel_age_limit = 240
+
+        # Thread-safe access to estimator state
+        if truck_lock:
+            with truck_lock:
+                is_initialized = estimator.initialized
+        else:
+            is_initialized = estimator.initialized
+
+        max_fuel_age = 720 if not is_initialized else fuel_age_limit
+
+        # Get latest reading (database read is thread-safe with connection pool)
+        df = get_latest_reading(engine, unit_id, max_fuel_lvl_age_min=max_fuel_age)
+
+        if df is None or df.empty:
+            logger.warning(f"[{truck_id}] No data received from database")
+
+            # Thread-safe update of failure counter
+            if truck_lock:
+                with truck_lock:
+                    consecutive_failures[truck_id] += 1
+            else:
+                consecutive_failures[truck_id] += 1
+
+            return None
+
+        # Process the data (same logic as sequential, but thread-safe)
+        timestamp = df["measure_datetime"].max()
+        now = datetime.now(timezone.utc)
+
+        # Skip if same timestamp
+        if last_processed_timestamp and timestamp <= last_processed_timestamp:
+            return None
+
+        # Calculate data age
+        age_minutes = (now - timestamp).total_seconds() / 60
+
+        # Skip if too old
+        if age_minutes > config["aged_critical_min"]:
+            logger.warning(f"[{truck_id}] Data too old ({age_minutes:.0f} min)")
+
+            # Thread-safe update of failure counter
+            if truck_lock:
+                with truck_lock:
+                    consecutive_failures[truck_id] += 1
+            else:
+                consecutive_failures[truck_id] += 1
+
+            return None
+
+        # Thread-safe access to estimator's last fuel level
+        if truck_lock:
+            with truck_lock:
+                last_fuel_pct = estimator.last_fuel_lvl_pct
+        else:
+            last_fuel_pct = estimator.last_fuel_lvl_pct
+
+        # Normalize sensors
+        sensors = normalize_units(df, config, last_fuel_pct, normalizer)
+
+        # Return processed data
+        return {
+            "truck_id": truck_id,
+            "timestamp": timestamp,
+            "sensors": sensors,
+            "age_minutes": age_minutes,
+        }
+
+    except Exception as e:
+        logger.error(f"❌ [{truck_id}] Error in parallel processing: {e}")
+
+        # Thread-safe update of failure counter
+        if truck_lock:
+            with truck_lock:
+                consecutive_failures[truck_id] += 1
+        else:
+            consecutive_failures[truck_id] += 1
+
+        return None

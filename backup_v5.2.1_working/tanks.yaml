@@ -1,0 +1,439 @@
+# Tank Configuration for Fuel Copilot
+# ⚠️ SIMPLIFIED VERSION - Direct ECU % conversion (NO LUT needed)
+# 
+# fuel_lvl from sensors = ECU % (0-100) from J1939/OBD
+# Conversion: litros = (fuel_lvl / 100) × capacity_liters
+#
+# LUT removed - was incorrectly converting already-calibrated ECU % values
+#
+# 🆕 v3.0.7-REFUEL-FIX: refuel_factor opcional por truck
+# - Factor global: 0.90 (COMMON_CONFIG)
+# - Si un truck es diferente, agregar: refuel_factor: 0.88 (ejemplo)
+# - Compensa no-linealidad de tanques (100 gal raw → 90 gal real)
+#
+# 🆕 v3.10.8: carrier_id for multi-tenant support
+# - All trucks belong to a carrier (customer)
+# - carrier_id is stored in MySQL for filtering by customer
+# - Current carriers: skylord (Skylord Trucking LLC)
+
+# Carrier definitions
+carriers:
+  skylord:
+    name: "Skylord Trucking LLC"
+    contact_email: "dispatch@skylordtrucking.com"
+    timezone: "America/New_York"
+    created_at: "2024-01-01"
+
+trucks:
+  VD3579:
+    carrier_id: skylord
+    # 🔧 Calibrado Dec 2025: Análisis de 9 recibos reales muestra capacidad efectiva ~180 gal
+    # Sensor no-lineal: error esperado ±15%
+    capacity_gallons: 180
+    capacity_liters: 681.4
+    unit_id: 401849345
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  JC1282:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401575668
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  JC9352:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401965756
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  NQ6975:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 402023398
+    refuel_factor: 1.23
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  GP9677:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401919268
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  JB8004:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401016899
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  FM2416:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401792486
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  FM3679:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401792499
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  FM9838:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401792506
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  JB6858:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 402007354
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  JP3281:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 402001134
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  JR7099:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401961904
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  RA9250:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 402023717
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  RH1522:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401727511
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  RR1272:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 400871870
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  BV6395:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401989479
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  CO0681:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401956896
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  CS8087:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 402007387
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  DR6664:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401975691
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  DO9356:
+    carrier_id: skylord
+    capacity_gallons: 220
+    capacity_liters: 832.79
+    unit_id: 402055548
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  DO9693:
+    carrier_id: skylord
+    capacity_gallons: 220
+    capacity_liters: 832.79
+    unit_id: 402055528
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  FS7166:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 402056005
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  MA8159:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401722625
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  MO0195:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401698358
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  PC1280:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401929776
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  RD5229:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401723615
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  RR3094:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401980459
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  RT9127:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401905963
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  SG5760:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401260028
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  YM6023:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401910879
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  MJ9547:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401879526
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  FM3363:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401980054
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  GC9751:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401722617
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  LV1422:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401927667
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  LC6799:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 402033131
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+
+  RC6625:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401926420
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  FF7702:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401989385
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  OG2033:
+    carrier_id: skylord
+    capacity_gallons: 260
+    capacity_liters: 984.21
+    unit_id: 401023584
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  OS3717:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401869135
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  EM8514:
+    carrier_id: skylord
+    capacity_gallons: 300
+    capacity_liters: 1135.62
+    unit_id: 401096320
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  MR7679:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401959416
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
