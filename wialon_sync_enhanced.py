@@ -1356,7 +1356,7 @@ def sync_cycle(
     mpg_config: MPGConfig,
     idle_config: IdleConfig,
 ):
-    """Single sync cycle with full Kalman processing"""
+    """Single sync cycle with full Kalman processing - OPTIMIZED BATCH VERSION"""
     cycle_start = time.time()
 
     logger.info("═" * 70)
@@ -1376,74 +1376,105 @@ def sync_cycle(
     }
     refuel_count = 0
 
-    for truck_id, unit_id in TRUCK_UNIT_MAPPING.items():
-        try:
-            # Get raw sensor data
-            sensor_data = reader.get_latest_sensor_data(unit_id)
+    # 🚀 OPTIMIZED: Get ALL truck data in ONE batch query
+    logger.info("📊 Fetching data for all trucks in batch...")
+    all_truck_data = reader.get_all_trucks_data()
 
-            if sensor_data:
-                # Full processing with Kalman
-                metrics = process_truck(
+    if not all_truck_data:
+        logger.warning("⚠️ No truck data retrieved from Wialon")
+        return
+
+    logger.info(f"✅ Retrieved data for {len(all_truck_data)} trucks")
+
+    # Process each truck's data
+    for truck_data in all_truck_data:
+        truck_id = truck_data.truck_id
+        try:
+            # Convert TruckSensorData to dict format expected by process_truck
+            sensor_data = {
+                "timestamp": truck_data.timestamp,
+                "latitude": getattr(truck_data, 'latitude', None),
+                "longitude": getattr(truck_data, 'longitude', None),
+                "speed": truck_data.speed,
+                "rpm": truck_data.rpm,
+                "fuel_lvl": truck_data.fuel_lvl,
+                "fuel_rate": truck_data.fuel_rate,
+                "odometer": truck_data.odometer,
+                "altitude": truck_data.altitude,
+                "engine_hours": truck_data.engine_hours,
+                "hdop": truck_data.hdop,
+                "coolant_temp": truck_data.coolant_temp,
+                "total_fuel_used": truck_data.total_fuel_used,
+                "pwr_ext": truck_data.pwr_ext,
+                "engine_load": truck_data.engine_load,
+                "oil_press": truck_data.oil_press,
+                "oil_temp": truck_data.oil_temp,
+                "def_level": truck_data.def_level,
+                "intake_air_temp": truck_data.intake_air_temp,
+            }
+
+            # Full processing with Kalman
+            metrics = process_truck(
+                truck_id=truck_id,
+                sensor_data=sensor_data,
+                state_manager=state_manager,
+                mpg_config=mpg_config,
+                idle_config=idle_config,
+            )
+
+            # Save to database
+            inserted = save_to_fuel_metrics(local_conn, metrics)
+            total_inserted += inserted
+            trucks_processed += 1
+
+            # Track status
+            status = metrics["truck_status"]
+            status_counts[status] = status_counts.get(status, 0) + 1
+
+            # Handle refuel detection - buffer consecutive jumps
+            # 🆕 v3.12.20: Use pending buffer to consolidate multi-jump refuels
+            if metrics.get("refuel_detected") == "YES" and metrics.get(
+                "refuel_event"
+            ):
+                refuel_count += 1
+                refuel_evt = metrics["refuel_event"]
+
+                # Calculate fuel percentages
+                fuel_before = metrics.get("fuel_before_pct") or 0
+                fuel_after = metrics.get("sensor_pct") or 0
+                gallons_added = refuel_evt.get("increase_gal", 0)
+
+                # Add to pending buffer instead of saving immediately
+                finalized = add_pending_refuel(
                     truck_id=truck_id,
-                    sensor_data=sensor_data,
-                    state_manager=state_manager,
-                    mpg_config=mpg_config,
-                    idle_config=idle_config,
+                    gallons=gallons_added,
+                    before_pct=fuel_before,
+                    after_pct=fuel_after,
+                    timestamp=metrics["timestamp_utc"],
                 )
 
-                # Save to database
-                inserted = save_to_fuel_metrics(local_conn, metrics)
-                total_inserted += inserted
-                trucks_processed += 1
-
-                # Track status
-                status = metrics["truck_status"]
-                status_counts[status] = status_counts.get(status, 0) + 1
-
-                # Handle refuel detection - buffer consecutive jumps
-                # 🆕 v3.12.20: Use pending buffer to consolidate multi-jump refuels
-                if metrics.get("refuel_detected") == "YES" and metrics.get(
-                    "refuel_event"
-                ):
-                    refuel_count += 1
-                    refuel_evt = metrics["refuel_event"]
-
-                    # Calculate fuel percentages
-                    fuel_before = metrics.get("fuel_before_pct") or 0
-                    fuel_after = metrics.get("sensor_pct") or 0
-                    gallons_added = refuel_evt.get("increase_gal", 0)
-
-                    # Add to pending buffer instead of saving immediately
-                    finalized = add_pending_refuel(
-                        truck_id=truck_id,
-                        gallons=gallons_added,
-                        before_pct=fuel_before,
-                        after_pct=fuel_after,
-                        timestamp=metrics["timestamp_utc"],
+                # If a previous refuel was finalized, save and notify
+                if finalized:
+                    # 🔧 v3.12.28: Only notify if save was successful (not duplicate)
+                    was_saved = save_refuel_event(
+                        connection=local_conn,
+                        truck_id=finalized["truck_id"],
+                        timestamp_utc=finalized["timestamp"],
+                        fuel_before=finalized["start_pct"],
+                        fuel_after=finalized["end_pct"],
+                        gallons_added=finalized["gallons"],
+                        latitude=metrics.get("latitude"),
+                        longitude=metrics.get("longitude"),
+                        refuel_type="GAP_DETECTED",
                     )
-
-                    # If a previous refuel was finalized, save and notify
-                    if finalized:
-                        # 🔧 v3.12.28: Only notify if save was successful (not duplicate)
-                        was_saved = save_refuel_event(
-                            connection=local_conn,
+                    if was_saved:
+                        send_refuel_notification(
                             truck_id=finalized["truck_id"],
-                            timestamp_utc=finalized["timestamp"],
+                            gallons_added=finalized["gallons"],
                             fuel_before=finalized["start_pct"],
                             fuel_after=finalized["end_pct"],
-                            gallons_added=finalized["gallons"],
-                            latitude=metrics.get("latitude"),
-                            longitude=metrics.get("longitude"),
-                            refuel_type="GAP_DETECTED",
+                            timestamp_utc=finalized["timestamp"],
                         )
-                        if was_saved:
-                            send_refuel_notification(
-                                truck_id=finalized["truck_id"],
-                                gallons_added=finalized["gallons"],
-                                fuel_before=finalized["start_pct"],
-                                fuel_after=finalized["end_pct"],
-                                timestamp_utc=finalized["timestamp"],
-                            )
 
                 # 🆕 v3.12.27: Process fuel events with intelligent classification
                 # This differentiates THEFT from SENSOR_ISSUE by monitoring recovery

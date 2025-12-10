@@ -95,6 +95,10 @@ class TruckSensorData:
     capacity_gallons: float
     capacity_liters: float
 
+    # Location data
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
     # Sensor values
     fuel_lvl: Optional[float] = None
     speed: Optional[float] = None
@@ -106,6 +110,7 @@ class TruckSensorData:
     altitude: Optional[float] = None
     pwr_ext: Optional[float] = None
     oil_press: Optional[float] = None
+    engine_hours: Optional[float] = None  # Engine hours
     # 🆕 NEW SENSORS for improved accuracy
     total_fuel_used: Optional[float] = None  # ECU cumulative fuel (gallons)
     total_idle_fuel: Optional[float] = None  # ECU idle fuel (gallons)
@@ -551,6 +556,8 @@ class WialonReader:
                             epoch_time=sensor_data["epoch_time"],
                             capacity_gallons=capacity_gallons,
                             capacity_liters=capacity_liters,
+                            latitude=sensor_data.get("latitude"),
+                            longitude=sensor_data.get("longitude"),
                             fuel_lvl=sensor_data.get("fuel_lvl"),
                             speed=sensor_data.get("speed"),
                             rpm=sensor_data.get("rpm"),
@@ -561,6 +568,7 @@ class WialonReader:
                             altitude=sensor_data.get("altitude"),
                             pwr_ext=sensor_data.get("pwr_ext"),
                             oil_press=sensor_data.get("oil_press"),
+                            engine_hours=sensor_data.get("engine_hours"),
                             total_fuel_used=sensor_data.get("total_fuel_used"),
                             total_idle_fuel=sensor_data.get("total_idle_fuel"),
                             engine_load=sensor_data.get("engine_load"),
@@ -663,7 +671,58 @@ class WialonReader:
             self.disconnect()
 
 
-# Load truck configuration from tanks.yaml
+# Load truck configuration from database units_map table
+def load_truck_config_from_db() -> Dict[str, Dict]:
+    """
+    Load truck configuration from Wialon units_map table
+
+    Returns:
+        Dict with truck_id -> {unit_id, capacity_gallons, capacity_liters}
+    """
+    try:
+        # Connect to Wialon DB to get mapping
+        conn = pymysql.connect(
+            host=os.getenv('WIALON_DB_HOST', 'localhost'),
+            port=int(os.getenv('WIALON_DB_PORT', '3306')),
+            user=os.getenv('WIALON_DB_USER', 'wialon_user'),
+            password=os.getenv('WIALON_DB_PASS', ''),
+            database=os.getenv('WIALON_DB_NAME', 'wialon'),
+            charset='utf8mb4',
+            connect_timeout=5,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+
+        cursor = conn.cursor()
+
+        # Get mapping from units_map table
+        cursor.execute('SELECT beyondId, unit, fuel_capacity FROM units_map ORDER BY beyondId')
+        units_data = cursor.fetchall()
+
+        trucks = {}
+        for row in units_data:
+            beyond_id = row['beyondId']
+            unit_id = row['unit']
+            fuel_capacity = row.get('fuel_capacity', 200)  # Default 200 gallons
+
+            trucks[beyond_id] = {
+                'unit_id': unit_id,
+                'capacity_gallons': fuel_capacity,
+                'capacity_liters': fuel_capacity * 3.78541,  # Convert gallons to liters
+            }
+
+        cursor.close()
+        conn.close()
+
+        logger.info(f"✅ Loaded configuration for {len(trucks)} trucks from units_map table")
+        return trucks
+
+    except Exception as e:
+        logger.error(f"❌ Failed to load truck config from database: {e}")
+        # Fallback to tanks.yaml if database fails
+        return load_truck_config()
+
+
+# Load truck configuration from tanks.yaml (fallback)
 def load_truck_config(yaml_path: str = "tanks.yaml") -> Dict[str, Dict]:
     """
     Load truck configuration from tanks.yaml
@@ -684,8 +743,8 @@ def load_truck_config(yaml_path: str = "tanks.yaml") -> Dict[str, Dict]:
     return trucks
 
 
-# Load configuration
-TRUCK_CONFIG = load_truck_config()
+# Load configuration - try database first, fallback to yaml
+TRUCK_CONFIG = load_truck_config_from_db()
 
 # Extract unit ID mapping
 TRUCK_UNIT_MAPPING = {
