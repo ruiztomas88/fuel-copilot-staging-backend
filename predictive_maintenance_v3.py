@@ -638,10 +638,12 @@ class FleetHealthReport:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def execute_wialon_query(query: str, params: tuple = None) -> list:
+def execute_wialon_query(query: str, params: Optional[dict] = None) -> list:
     """
     Execute query on Wialon database using connection pool.
     Returns list of dict rows or empty list on error.
+    
+    🔒 v5.3.3: Now uses dict params for named parameter binding (SQLAlchemy)
     """
     try:
         from database_pool import get_engine
@@ -801,18 +803,21 @@ def fetch_historical_sensors(
     """
     Fetch historical sensor data for trend analysis.
     Returns: {sensor_name: [(timestamp, value), ...]}
+    
+    🔒 v5.3.3: Fixed SQL injection - now uses parameterized query
     """
-    # Use parameterized query with SQLAlchemy text binding
-    query = f"""
+    # Use parameterized query to prevent SQL injection
+    seconds_back = days * 86400
+    query = """
         SELECT p as param, value, m as epoch
         FROM sensors
-        WHERE n = '{truck_id}'
-        AND m >= UNIX_TIMESTAMP() - {days * 86400}
+        WHERE n = :truck_id
+        AND m >= UNIX_TIMESTAMP() - :seconds_back
         AND p IN ('oil_press', 'cool_temp', 'oil_temp', 'pwr_ext')
         ORDER BY m ASC
     """
 
-    rows = execute_wialon_query(query)
+    rows = execute_wialon_query(query, {"truck_id": truck_id, "seconds_back": seconds_back})
     if not rows:
         return {}
 

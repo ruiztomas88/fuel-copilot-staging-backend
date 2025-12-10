@@ -970,6 +970,8 @@ def process_truck(
     oil_temp = sensor_data.get("oil_temp")  # Oil Temperature (°F)
     def_level = sensor_data.get("def_level")  # DEF Level (%)
     intake_air_temp = sensor_data.get("intake_air_temp")  # Intake Air Temp (°F)
+    # 🆕 v5.3.3: Ambient temperature for weather-adjusted alerts
+    ambient_temp = sensor_data.get("ambient_temp")  # Outside Air Temp (°F)
 
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
@@ -1229,6 +1231,8 @@ def process_truck(
         "engine_load_pct": engine_load,
         "def_level_pct": def_level,
         "intake_air_temp_f": intake_air_temp,
+        # 🆕 v5.3.3: Ambient temperature for weather-adjusted alerts
+        "ambient_temp_f": ambient_temp,
     }
 
 
@@ -1248,6 +1252,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
 
     try:
         with connection.cursor() as cursor:
+            # 🆕 v5.3.3: Added ambient_temp_f and intake_air_temp_f columns
             query = """
                 INSERT INTO fuel_metrics 
                 (timestamp_utc, truck_id, carrier_id, truck_status,
@@ -1260,8 +1265,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  idle_method, idle_mode, drift_pct, drift_warning,
                  anchor_detected, anchor_type, data_age_min,
                  oil_pressure_psi, oil_temp_f, battery_voltage, 
-                 engine_load_pct, def_level_pct)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 engine_load_pct, def_level_pct,
+                 ambient_temp_f, intake_air_temp_f)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -1291,7 +1297,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     oil_temp_f = VALUES(oil_temp_f),
                     battery_voltage = VALUES(battery_voltage),
                     engine_load_pct = VALUES(engine_load_pct),
-                    def_level_pct = VALUES(def_level_pct)
+                    def_level_pct = VALUES(def_level_pct),
+                    ambient_temp_f = VALUES(ambient_temp_f),
+                    intake_air_temp_f = VALUES(intake_air_temp_f)
             """
 
             values = (
@@ -1330,6 +1338,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 metrics.get("battery_voltage"),
                 metrics.get("engine_load_pct"),
                 metrics.get("def_level_pct"),
+                # 🆕 v5.3.3: Temperature sensors for weather-adjusted alerts
+                metrics.get("ambient_temp_f"),
+                metrics.get("intake_air_temp_f"),
             )
 
             cursor.execute(query, values)

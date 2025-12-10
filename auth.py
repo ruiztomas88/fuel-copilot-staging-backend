@@ -4,9 +4,14 @@ JWT-based authentication with carrier_id (multi-tenant) support
 
 Features:
 - JWT token generation and validation
-- Password hashing with bcrypt
+- Password hashing with bcrypt (🔐 v5.3.3: upgraded from SHA256)
 - Role-based access control (admin, carrier_admin, viewer)
 - Multi-tenant isolation by carrier_id
+
+🔐 v5.3.3 Security Updates:
+- Passwords now read from environment variables
+- bcrypt for password hashing (was SHA256 with static salt)
+- JWT_SECRET_KEY required in production
 """
 
 from datetime import datetime, timedelta, timezone
@@ -15,7 +20,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import jwt
-import hashlib
+import bcrypt
 import secrets
 import os
 import logging
@@ -24,10 +29,14 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 # 🔧 v3.12.21: Generate secure random key if not provided
-# IMPORTANT: Set JWT_SECRET_KEY in .env for production!
+# 🔐 v5.3.3: REQUIRED in production!
 _default_secret = secrets.token_urlsafe(32)
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+
 if not SECRET_KEY:
+    if ENVIRONMENT == "production":
+        raise RuntimeError("🔐 JWT_SECRET_KEY is REQUIRED in production! Set it in .env")
     logger.warning(
         "⚠️ JWT_SECRET_KEY not set! Using random key (sessions won't persist across restarts)"
     )
@@ -76,18 +85,51 @@ class User(BaseModel):
 # ============================================================================
 # USER DATABASE (In-memory for now, can migrate to MySQL later)
 # ============================================================================
-# Password hash: sha256(password + salt)
-def hash_password(password: str, salt: str = "fuel-copilot-salt") -> str:
-    """Hash password with SHA256 + salt"""
-    return hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
+# 🔐 v5.3.3: Password hashing with bcrypt (was SHA256 with static salt)
+def hash_password(password: str) -> str:
+    """Hash password with bcrypt - secure against rainbow tables"""
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify password against bcrypt hash"""
+    try:
+        return bcrypt.checkpw(password.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+# 🔐 v5.3.3: Get passwords from environment variables (fallback for development only)
+def _get_user_password(user: str, env_var: str, dev_default: str) -> str:
+    """Get password from env var, with dev fallback and warning"""
+    password = os.getenv(env_var)
+    if not password:
+        if ENVIRONMENT == "production":
+            logger.error(f"🔐 CRITICAL: {env_var} not set in production!")
+            raise RuntimeError(f"{env_var} is REQUIRED in production!")
+        logger.warning(f"⚠️ {env_var} not set, using development default for '{user}'")
+        password = dev_default
+    return password
+
+
+# Pre-hash passwords at startup (bcrypt is slow by design)
+_admin_password = _get_user_password("admin", "ADMIN_PASSWORD", "FuelAdmin2025!")
+_skylord_password = _get_user_password("skylord", "SKYLORD_PASSWORD", "Skylord2025!")
+_skylord_viewer_password = _get_user_password("skylord_viewer", "SKYLORD_VIEWER_PASSWORD", "SkylordView2025")
+
+# Store hashed passwords
+_password_hashes = {
+    "admin": hash_password(_admin_password),
+    "skylord": hash_password(_skylord_password),
+    "skylord_viewer": hash_password(_skylord_viewer_password),
+}
 
 # Pre-configured users (migrate to MySQL carriers table later)
 USERS_DB: Dict[str, Dict] = {
     # Super Admin - can see ALL carriers
     "admin": {
         "username": "admin",
-        "password_hash": hash_password("FuelAdmin2025!"),
+        "password_hash": _password_hashes["admin"],
         "carrier_id": "*",  # Wildcard = all carriers
         "role": "super_admin",
         "name": "System Administrator",
@@ -97,7 +139,7 @@ USERS_DB: Dict[str, Dict] = {
     # Skylord Admin - can only see skylord trucks
     "skylord": {
         "username": "skylord",
-        "password_hash": hash_password("Skylord2025!"),
+        "password_hash": _password_hashes["skylord"],
         "carrier_id": "skylord",
         "role": "carrier_admin",
         "name": "Skylord Trucking Admin",
@@ -107,7 +149,7 @@ USERS_DB: Dict[str, Dict] = {
     # Skylord Viewer - read-only access
     "skylord_viewer": {
         "username": "skylord_viewer",
-        "password_hash": hash_password("SkylordView2025"),
+        "password_hash": _password_hashes["skylord_viewer"],
         "carrier_id": "skylord",
         "role": "viewer",
         "name": "Skylord Viewer",
@@ -121,7 +163,7 @@ USERS_DB: Dict[str, Dict] = {
 # AUTHENTICATION FUNCTIONS
 # ============================================================================
 def authenticate_user(username: str, password: str) -> Optional[Dict]:
-    """Authenticate user with username and password"""
+    """Authenticate user with username and password (bcrypt)"""
     user = USERS_DB.get(username)
     if not user:
         logger.warning(f"🔒 Login failed: user '{username}' not found")
@@ -131,8 +173,8 @@ def authenticate_user(username: str, password: str) -> Optional[Dict]:
         logger.warning(f"🔒 Login failed: user '{username}' is inactive")
         return None
 
-    password_hash = hash_password(password)
-    if user["password_hash"] != password_hash:
+    # 🔐 v5.3.3: Use bcrypt verification
+    if not verify_password(password, user["password_hash"]):
         logger.warning(f"🔒 Login failed: wrong password for '{username}'")
         return None
 
