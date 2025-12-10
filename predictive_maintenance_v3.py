@@ -23,11 +23,93 @@ import logging
 import os
 import statistics
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+from pathlib import Path
+import yaml
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TANKS.YAML FILTER - Only analyze trucks in our fleet
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def get_allowed_trucks() -> Set[str]:
+    """
+    🆕 v5.3.5: Load allowed truck IDs from tanks.yaml.
+    Same list used by database_mysql.py for consistency.
+    """
+    try:
+        tanks_path = Path(__file__).parent / "tanks.yaml"
+        if tanks_path.exists():
+            with open(tanks_path, "r") as f:
+                tanks_config = yaml.safe_load(f)
+                if tanks_config and "trucks" in tanks_config:
+                    allowed = set(tanks_config["trucks"].keys())
+                    logger.info(f"[V3] Loaded {len(allowed)} trucks from tanks.yaml")
+                    return allowed
+    except Exception as e:
+        logger.warning(f"[V3] Could not load tanks.yaml: {e}")
+
+    # Fallback: hardcoded list (same as database_mysql.py)
+    return {
+        "VD3579",
+        "JC1282",
+        "JC9352",
+        "NQ6975",
+        "GP9677",
+        "JB8004",
+        "FM2416",
+        "FM3679",
+        "FM9838",
+        "JB6858",
+        "JP3281",
+        "JR7099",
+        "RA9250",
+        "RH1522",
+        "RR1272",
+        "BV6395",
+        "CO0681",
+        "CS8087",
+        "DR6664",
+        "DO9356",
+        "DO9693",
+        "FS7166",
+        "MA8159",
+        "MO0195",
+        "PC1280",
+        "RD5229",
+        "RR3094",
+        "RT9127",
+        "SG5760",
+        "YM6023",
+        "MJ9547",
+        "FM3363",
+        "GC9751",
+        "LV1422",
+        "LC6799",
+        "RC6625",
+        "FF7702",
+        "OG2033",
+        "OS3717",
+        "EM8514",
+        "MR7679",
+        "AG8915",
+        "MR2714",
+        "JE8853",
+        "OA2474",
+        "LH1141",
+        "JB6554",
+        "OM7769",
+        "EH5291",
+        "YG5998",
+        "YG7957",
+        "YR4424",
+        "GS5030",
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1143,8 +1225,13 @@ def analyze_fleet_health(
     - Maintenance schedule
     - Trend analysis
 
+    🆕 v5.3.5: Now filters by tanks.yaml to match Dashboard behavior
+
     Returns complete report with all trucks, alerts, and summary.
     """
+    # 🆕 v5.3.5: Get allowed trucks from tanks.yaml
+    allowed_trucks = get_allowed_trucks()
+
     # Try to get real data
     sensors_data = fetch_current_sensors_from_wialon()
 
@@ -1158,13 +1245,23 @@ def analyze_fleet_health(
         logger.info("No real data available, returning demo data")
         return generate_demo_report()
 
+    # 🆕 v5.3.5: Filter to only allowed trucks
+    filtered_sensors = {k: v for k, v in sensors_data.items() if k in allowed_trucks}
+    logger.info(
+        f"[V3] Filtered from {len(sensors_data)} to {len(filtered_sensors)} trucks (tanks.yaml)"
+    )
+
+    if not filtered_sensors:
+        logger.warning("[V3] No trucks matched tanks.yaml filter, returning demo data")
+        return generate_demo_report()
+
     trucks_health = []
     all_alerts = []
     all_nelson_violations = []
     total_potential_savings = 0
     total_suppressed = 0
 
-    for truck_id, sensors in sensors_data.items():
+    for truck_id, sensors in filtered_sensors.items():
         # ═══════════════════════════════════════════════════════════════════════
         # 1. DETECT OPERATIONAL CONTEXT
         # ═══════════════════════════════════════════════════════════════════════

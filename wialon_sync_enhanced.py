@@ -1138,7 +1138,7 @@ def process_truck(
     if truck_status == "STOPPED":
         previous_fuel_L = None
         previous_idle_fuel = None  # 🆕 v5.3.3: Track previous ECU idle counter
-        
+
         if truck_id in state_manager.last_sensor_data:
             prev = state_manager.last_sensor_data[truck_id]
             if prev.get("fuel_lvl"):
