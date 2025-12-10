@@ -25,6 +25,7 @@ class IdleMethod(Enum):
     """Idle calculation method used"""
 
     NOT_IDLE = "NOT_IDLE"
+    ECU_IDLE_COUNTER = "ECU_IDLE_COUNTER"  # 🆕 v5.3.3: Direct from ECU (most accurate)
     SENSOR_FUEL_RATE = "SENSOR_FUEL_RATE"
     CALCULATED_DELTA = "CALCULATED_DELTA"
     FALLBACK_CONSENSUS = "FALLBACK_CONSENSUS"
@@ -140,9 +141,15 @@ def calculate_idle_consumption(
     config: IdleConfig = IdleConfig(),
     truck_id: str = "UNKNOWN",
     temperature_f: Optional[float] = None,  # 🆕 Temperature parameter
+    total_idle_fuel: Optional[
+        float
+    ] = None,  # 🆕 v5.3.3: ECU idle fuel counter (gallons)
+    previous_total_idle_fuel: Optional[float] = None,  # 🆕 v5.3.3: Previous ECU value
 ) -> Tuple[float, IdleMethod]:
     """
-    Calculate idle fuel consumption using hybrid three-tier method
+    Calculate idle fuel consumption using hybrid four-tier method
+
+    🆕 v5.3.3: Added ECU_IDLE_COUNTER as priority method (most accurate: ±0.1%)
 
     Args:
         truck_status: "STOPPED", "MOVING", or "OFFLINE"
@@ -154,6 +161,8 @@ def calculate_idle_consumption(
         config: Idle configuration
         truck_id: Truck identifier for logging
         temperature_f: 🆕 Ambient temperature in Fahrenheit (for HVAC adjustment)
+        total_idle_fuel: 🆕 v5.3.3 ECU cumulative idle fuel counter (gallons)
+        previous_total_idle_fuel: 🆕 v5.3.3 Previous ECU counter value
 
     Returns:
         Tuple of (idle_gph, method)
@@ -161,15 +170,46 @@ def calculate_idle_consumption(
         - method: IdleMethod enum indicating calculation source
 
     Logic:
+        0. 🆕 Try ECU_IDLE_COUNTER if available (most accurate: ±0.1%)
         1. Check if truck is STOPPED and engine ON (rpm > 0 or rpm=None)
-        2. Try SENSOR_FUEL_RATE if available and valid
-        3. Try CALCULATED_DELTA if time window sufficient
+        2. Try SENSOR_FUEL_RATE if available and valid (±2-5%)
+        3. Try CALCULATED_DELTA if time window sufficient (±5-10%)
         4. Fall back to FALLBACK_CONSENSUS (🆕 with temperature adjustment)
     """
 
     # Not idle if moving
     if truck_status != "STOPPED":
         return 0.0, IdleMethod.NOT_IDLE
+
+    # 🆕 v5.3.3: METHOD 0: ECU_IDLE_COUNTER (highest priority - most accurate)
+    # The ECU tracks cumulative idle fuel with ±0.1% accuracy
+    if (
+        total_idle_fuel is not None
+        and previous_total_idle_fuel is not None
+        and time_delta_hours > 0.01  # At least ~36 seconds
+    ):
+        idle_fuel_delta = total_idle_fuel - previous_total_idle_fuel
+
+        # Validate: should be positive and reasonable (< 5 gallons per sample)
+        if 0 < idle_fuel_delta < 5.0:
+            idle_gph = idle_fuel_delta / time_delta_hours
+
+            # Sanity check: idle should be 0.3-3.0 GPH typically
+            if 0.1 <= idle_gph <= 5.0:
+                logger.debug(
+                    f"[{truck_id}] Idle via ECU_COUNTER: {idle_gph:.3f} gph "
+                    f"(delta: {idle_fuel_delta:.4f} gal in {time_delta_hours*60:.1f}min)"
+                )
+                return idle_gph, IdleMethod.ECU_IDLE_COUNTER
+            else:
+                logger.debug(
+                    f"[{truck_id}] ECU_COUNTER {idle_gph:.2f} gph out of sane range"
+                )
+        elif idle_fuel_delta < 0:
+            logger.warning(
+                f"[{truck_id}] ECU idle counter went backwards: "
+                f"{previous_total_idle_fuel:.2f} → {total_idle_fuel:.2f}"
+            )
 
     # Check valid fuel rate first
     has_valid_fuel_rate = False

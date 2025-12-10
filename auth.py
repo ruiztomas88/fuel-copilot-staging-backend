@@ -36,7 +36,9 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 if not SECRET_KEY:
     if ENVIRONMENT == "production":
-        raise RuntimeError("🔐 JWT_SECRET_KEY is REQUIRED in production! Set it in .env")
+        raise RuntimeError(
+            "🔐 JWT_SECRET_KEY is REQUIRED in production! Set it in .env"
+        )
     logger.warning(
         "⚠️ JWT_SECRET_KEY not set! Using random key (sessions won't persist across restarts)"
     )
@@ -115,7 +117,9 @@ def _get_user_password(user: str, env_var: str, dev_default: str) -> str:
 # Pre-hash passwords at startup (bcrypt is slow by design)
 _admin_password = _get_user_password("admin", "ADMIN_PASSWORD", "FuelAdmin2025!")
 _skylord_password = _get_user_password("skylord", "SKYLORD_PASSWORD", "Skylord2025!")
-_skylord_viewer_password = _get_user_password("skylord_viewer", "SKYLORD_VIEWER_PASSWORD", "SkylordView2025")
+_skylord_viewer_password = _get_user_password(
+    "skylord_viewer", "SKYLORD_VIEWER_PASSWORD", "SkylordView2025"
+)
 
 # Store hashed passwords
 _password_hashes = {

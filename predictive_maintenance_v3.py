@@ -642,7 +642,7 @@ def execute_wialon_query(query: str, params: Optional[dict] = None) -> list:
     """
     Execute query on Wialon database using connection pool.
     Returns list of dict rows or empty list on error.
-    
+
     🔒 v5.3.3: Now uses dict params for named parameter binding (SQLAlchemy)
     """
     try:
@@ -803,7 +803,7 @@ def fetch_historical_sensors(
     """
     Fetch historical sensor data for trend analysis.
     Returns: {sensor_name: [(timestamp, value), ...]}
-    
+
     🔒 v5.3.3: Fixed SQL injection - now uses parameterized query
     """
     # Use parameterized query to prevent SQL injection
@@ -817,7 +817,9 @@ def fetch_historical_sensors(
         ORDER BY m ASC
     """
 
-    rows = execute_wialon_query(query, {"truck_id": truck_id, "seconds_back": seconds_back})
+    rows = execute_wialon_query(
+        query, {"truck_id": truck_id, "seconds_back": seconds_back}
+    )
     if not rows:
         return {}
 

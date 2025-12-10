@@ -972,6 +972,8 @@ def process_truck(
     intake_air_temp = sensor_data.get("intake_air_temp")  # Intake Air Temp (°F)
     # 🆕 v5.3.3: Ambient temperature for weather-adjusted alerts
     ambient_temp = sensor_data.get("ambient_temp")  # Outside Air Temp (°F)
+    # 🆕 v5.3.3: ECU idle fuel counter (most accurate idle measurement)
+    total_idle_fuel = sensor_data.get("total_idle_fuel")  # Gallons (ECU idle counter)
 
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
@@ -1135,10 +1137,14 @@ def process_truck(
 
     if truck_status == "STOPPED":
         previous_fuel_L = None
+        previous_idle_fuel = None  # 🆕 v5.3.3: Track previous ECU idle counter
+        
         if truck_id in state_manager.last_sensor_data:
             prev = state_manager.last_sensor_data[truck_id]
             if prev.get("fuel_lvl"):
                 previous_fuel_L = (prev["fuel_lvl"] / 100) * tank_capacity_liters
+            # 🆕 v5.3.3: Get previous ECU idle fuel counter
+            previous_idle_fuel = prev.get("total_idle_fuel")
 
         idle_gph, method_enum = calculate_idle_consumption(
             truck_status=truck_status,
@@ -1150,6 +1156,9 @@ def process_truck(
             config=idle_config,
             truck_id=truck_id,
             temperature_f=coolant_temp,
+            # 🆕 v5.3.3: Pass ECU idle fuel counter for highest accuracy (±0.1%)
+            total_idle_fuel=total_idle_fuel,
+            previous_total_idle_fuel=previous_idle_fuel,
         )
         idle_method = method_enum.value
         idle_mode_enum = detect_idle_mode(idle_gph, idle_config)
@@ -1404,8 +1413,8 @@ def sync_cycle(
             # Convert TruckSensorData to dict format expected by process_truck
             sensor_data = {
                 "timestamp": truck_data.timestamp,
-                "latitude": getattr(truck_data, 'latitude', None),
-                "longitude": getattr(truck_data, 'longitude', None),
+                "latitude": getattr(truck_data, "latitude", None),
+                "longitude": getattr(truck_data, "longitude", None),
                 "speed": truck_data.speed,
                 "rpm": truck_data.rpm,
                 "fuel_lvl": truck_data.fuel_lvl,
@@ -1444,9 +1453,7 @@ def sync_cycle(
 
             # Handle refuel detection - buffer consecutive jumps
             # 🆕 v3.12.20: Use pending buffer to consolidate multi-jump refuels
-            if metrics.get("refuel_detected") == "YES" and metrics.get(
-                "refuel_event"
-            ):
+            if metrics.get("refuel_detected") == "YES" and metrics.get("refuel_event"):
                 refuel_count += 1
                 refuel_evt = metrics["refuel_event"]
 
