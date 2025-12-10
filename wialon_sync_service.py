@@ -54,44 +54,47 @@ def save_to_cache(truck_id: str, sensor_data: dict):
 # 🆕 v5.3.1: CIRCUIT BREAKER FOR RESILIENCE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class CircuitBreaker:
     """
     Simple circuit breaker to prevent cascade failures
-    
+
     States:
     - CLOSED: Normal operation, requests go through
     - OPEN: Failures exceeded threshold, requests blocked
     - HALF_OPEN: Testing if service recovered
     """
-    
+
     def __init__(self, failure_threshold: int = 3, recovery_timeout: int = 60):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.failures = 0
         self.last_failure_time = 0
         self.state = "CLOSED"
-    
+
     def record_failure(self):
         """Record a failure and potentially open the circuit"""
         self.failures += 1
         self.last_failure_time = time.time()
-        
+
         if self.failures >= self.failure_threshold:
             self.state = "OPEN"
-            logger.warning(f"🔴 Circuit breaker OPEN after {self.failures} failures. Will retry in {self.recovery_timeout}s")
-    
+            logger.warning(
+                f"🔴 Circuit breaker OPEN after {self.failures} failures. Will retry in {self.recovery_timeout}s"
+            )
+
     def record_success(self):
         """Record success and reset the circuit"""
         if self.state != "CLOSED":
             logger.info(f"🟢 Circuit breaker CLOSED - service recovered")
         self.failures = 0
         self.state = "CLOSED"
-    
+
     def can_proceed(self) -> bool:
         """Check if request should proceed"""
         if self.state == "CLOSED":
             return True
-        
+
         if self.state == "OPEN":
             # Check if recovery timeout has passed
             if time.time() - self.last_failure_time >= self.recovery_timeout:
@@ -99,7 +102,7 @@ class CircuitBreaker:
                 logger.info("🟡 Circuit breaker HALF_OPEN - testing recovery")
                 return True
             return False
-        
+
         # HALF_OPEN: allow one request through
         return True
 
@@ -114,14 +117,16 @@ def sync_cycle(reader: WialonReader):
 
     🔧 FIX v3.9.3: Use batch query instead of 39 individual queries
     This reduces sync time from ~10s to ~1s
-    
+
     🆕 v5.3.1: Added circuit breaker for resilience
     """
     # Check circuit breaker
     if not wialon_circuit_breaker.can_proceed():
-        logger.warning(f"⏸️ Sync skipped - circuit breaker OPEN. Will retry in {wialon_circuit_breaker.recovery_timeout - (time.time() - wialon_circuit_breaker.last_failure_time):.0f}s")
+        logger.warning(
+            f"⏸️ Sync skipped - circuit breaker OPEN. Will retry in {wialon_circuit_breaker.recovery_timeout - (time.time() - wialon_circuit_breaker.last_failure_time):.0f}s"
+        )
         return
-    
+
     cycle_start = time.time()
 
     logger.info("=" * 50)
@@ -170,7 +175,7 @@ def sync_cycle(reader: WialonReader):
         trucks_without_data = set(TRUCK_UNIT_MAPPING.keys()) - trucks_with_data
         for truck_id in trucks_without_data:
             logger.warning(f"⚠️ {truck_id}: No data from Wialon")
-        
+
         # Success! Reset circuit breaker
         wialon_circuit_breaker.record_success()
 

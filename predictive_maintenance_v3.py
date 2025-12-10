@@ -638,19 +638,21 @@ class FleetHealthReport:
 def get_wialon_connection():
     """Get connection to Wialon database. Returns None if unavailable."""
     try:
-        import mysql.connector
+        import pymysql
         from dotenv import load_dotenv
 
         load_dotenv()
 
-        conn = mysql.connector.connect(
+        conn = pymysql.connect(
             host=os.getenv("WIALON_DB_HOST", "localhost"),
             port=int(os.getenv("WIALON_DB_PORT", "3306")),
             user=os.getenv("WIALON_DB_USER", ""),
             password=os.getenv("WIALON_DB_PASS", ""),
             database=os.getenv("WIALON_DB_NAME", "wialon_collect"),
             charset="utf8mb4",
-            connection_timeout=5,
+            connect_timeout=5,
+            read_timeout=10,
+            cursorclass=pymysql.cursors.DictCursor,
         )
         return conn
     except Exception as e:
@@ -661,19 +663,21 @@ def get_wialon_connection():
 def get_fuel_db_connection():
     """Get connection to fuel_copilot database. Returns None if unavailable."""
     try:
-        import mysql.connector
+        import pymysql
         from dotenv import load_dotenv
 
         load_dotenv()
 
-        conn = mysql.connector.connect(
+        conn = pymysql.connect(
             host=os.getenv("LOCAL_DB_HOST", "localhost"),
             port=int(os.getenv("LOCAL_DB_PORT", "3306")),
             user=os.getenv("LOCAL_DB_USER", "fuel_admin"),
             password=os.getenv("LOCAL_DB_PASS", ""),
             database=os.getenv("LOCAL_DB_NAME", "fuel_copilot"),
             charset="utf8mb4",
-            connection_timeout=5,
+            connect_timeout=5,
+            read_timeout=10,
+            cursorclass=pymysql.cursors.DictCursor,
         )
         return conn
     except Exception as e:
@@ -696,7 +700,7 @@ def fetch_current_sensors_from_wialon() -> Dict[str, Dict[str, float]]:
         return {}
 
     try:
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()  # Already DictCursor from connection config
         # Get latest reading for each sensor per unit (last 2 hours)
         query = """
             SELECT 
@@ -754,7 +758,7 @@ def fetch_current_sensors_from_fuel_db() -> Dict[str, Dict[str, float]]:
         return {}
 
     try:
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()  # Already DictCursor from connection config
         query = """
             SELECT 
                 t1.truck_id,
@@ -803,7 +807,7 @@ def fetch_historical_sensors(
         return {}
 
     try:
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()  # Already DictCursor from connection config
         query = """
             SELECT p as param, value, m as epoch
             FROM sensors
