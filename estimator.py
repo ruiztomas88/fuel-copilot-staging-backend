@@ -6,15 +6,17 @@ Kalman Filter for Fuel Level Estimation with:
 - ECU-based consumption calculation
 - Emergency reset and auto-resync
 - Anchor-based calibration support
+- 🆕 v5.3.0: Adaptive Q_r based on truck status (PARKED/IDLE/MOVING)
+- 🆕 v5.3.0: Kalman confidence indicator
 
 Author: Fuel Copilot Team
-Version: 3.5.0
-Date: November 26, 2025
+Version: 5.3.0
+Date: December 9, 2025
 """
 
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
@@ -38,6 +40,87 @@ class TruckStatus(Enum):
     STOPPED = "STOPPED"  # Engine ON, parked
     PARKED = "PARKED"  # Engine OFF, recently
     OFFLINE = "OFFLINE"  # No data > 30 min
+    IDLE = "IDLE"  # Engine ON, not moving (🆕 v5.3.0)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.3.0: ADAPTIVE Q_r CALCULATION - From predictive_maintenance_v3.py
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def calculate_adaptive_Q_r(truck_status: str, consumption_lph: float = 0.0) -> float:
+    """
+    🆕 v5.3.0: Calculate adaptive process noise based on truck operational state.
+
+    - PARKED: Very low process noise (fuel shouldn't change)
+    - STOPPED/IDLE: Low process noise (only idle consumption)
+    - MOVING: Higher process noise (active consumption)
+
+    This improves Kalman filter accuracy by adjusting expectations
+    based on what the truck is actually doing.
+
+    Args:
+        truck_status: "PARKED", "STOPPED", "IDLE", or "MOVING"
+        consumption_lph: Current fuel consumption in liters per hour
+
+    Returns:
+        Recommended Q_r (process noise) value
+    """
+    if truck_status == "PARKED":
+        return 0.01  # Almost no expected change
+    elif truck_status == "STOPPED":
+        return 0.05  # Small idle consumption
+    elif truck_status == "IDLE":
+        return 0.05 + (consumption_lph / 100) * 0.02
+    else:  # MOVING
+        # Base + proportional to consumption rate
+        return 0.1 + (consumption_lph / 50) * 0.1
+
+
+def get_kalman_confidence(P: float) -> Dict:
+    """
+    🆕 v5.3.0: Convert Kalman filter covariance (P) to confidence level.
+    Lower P = higher confidence in the estimate.
+
+    Args:
+        P: Current Kalman covariance value
+
+    Returns:
+        Dict with level, score, color, description
+    """
+    if P < 0.5:
+        return {
+            "level": "HIGH",
+            "score": 95,
+            "color": "green",
+            "description": "Highly confident estimate based on consistent sensor data",
+        }
+    elif P < 2.0:
+        return {
+            "level": "MEDIUM",
+            "score": 75,
+            "color": "yellow",
+            "description": "Moderate confidence - some sensor variability detected",
+        }
+    elif P < 5.0:
+        return {
+            "level": "LOW",
+            "score": 50,
+            "color": "orange",
+            "description": "Low confidence - high sensor variability or limited data",
+        }
+    else:
+        return {
+            "level": "VERY_LOW",
+            "score": 25,
+            "color": "red",
+            "description": "Very low confidence - sensor data unreliable or insufficient",
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ESTIMATOR CONFIG
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 @dataclass
@@ -197,6 +280,55 @@ class FuelEstimator:
                 f"[{self.truck_id}] ⚠️ EXTREME DRIFT ({drift_pct:.1f}%) - Auto-resyncing"
             )
             self.initialize(sensor_pct=sensor_pct)
+
+    def update_adaptive_Q_r(
+        self, speed: float = None, rpm: float = None, consumption_lph: float = None
+    ):
+        """
+        🆕 v5.3.0: Update Q_r based on truck status for improved Kalman accuracy.
+
+        Call this before predict() to adapt process noise to operational state.
+
+        Args:
+            speed: Current speed in mph
+            rpm: Engine RPM
+            consumption_lph: Current fuel consumption rate
+        """
+        # Determine truck status
+        if speed is not None and rpm is not None:
+            if speed < 1 and rpm < 100:
+                status = "PARKED"
+            elif speed < 3 and rpm < 900:
+                status = "IDLE"
+            elif speed < 3:
+                status = "STOPPED"
+            else:
+                status = "MOVING"
+        elif speed is not None:
+            if speed < 1:
+                status = "PARKED"
+            elif speed < 5:
+                status = "IDLE"
+            else:
+                status = "MOVING"
+        else:
+            status = "MOVING"  # Default to moving if unknown
+
+        # Calculate and set adaptive Q_r
+        self.Q_r = calculate_adaptive_Q_r(status, consumption_lph or 0)
+
+        logger.debug(
+            f"[{self.truck_id}] Adaptive Q_r: {self.Q_r:.4f} (status={status})"
+        )
+
+    def get_confidence(self) -> Dict:
+        """
+        🆕 v5.3.0: Get confidence level of current estimate.
+
+        Returns:
+            Dict with level, score, color, description
+        """
+        return get_kalman_confidence(self.P)
 
     def predict(
         self,
