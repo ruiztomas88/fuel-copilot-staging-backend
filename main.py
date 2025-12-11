@@ -1336,6 +1336,7 @@ async def get_refuel_analytics(
 ):
     """
     🆕 v3.10.3: Advanced Refuel Analytics
+    🆕 v4.0.0: Added Redis caching (60s TTL) for faster responses
 
     Comprehensive refuel intelligence:
     - Refuel events with precise gallons
@@ -1345,12 +1346,24 @@ async def get_refuel_analytics(
     - Per-truck summaries
     """
     try:
+        # Try cache first
+        from cache_service import get_cache
+        cache = await get_cache()
+        cache_key = f"refuel:analytics:{days}d"
+        cached = await cache.get(cache_key)
+        if cached:
+            return JSONResponse(content=cached)
+
         try:
             from .database_mysql import get_advanced_refuel_analytics
         except ImportError:
             from database_mysql import get_advanced_refuel_analytics
 
         analytics = get_advanced_refuel_analytics(days_back=days)
+        
+        # Cache for 60 seconds
+        await cache.set(cache_key, analytics, ttl=60)
+        
         return JSONResponse(content=analytics)
     except Exception as e:
         logger.error(f"Error in refuel analytics: {e}")
@@ -1365,6 +1378,7 @@ async def get_theft_analysis(
 ):
     """
     🆕 v3.10.3: Fuel Theft Detection & Analysis
+    🆕 v4.0.0: Added Redis caching (60s TTL) for faster responses
 
     Detects suspicious fuel level drops:
     - Sudden drops when truck is off
@@ -1375,12 +1389,24 @@ async def get_theft_analysis(
     Returns events ranked by confidence level
     """
     try:
+        # Try cache first
+        from cache_service import get_cache
+        cache = await get_cache()
+        cache_key = f"theft:analysis:{days}d"
+        cached = await cache.get(cache_key)
+        if cached:
+            return JSONResponse(content=cached)
+
         try:
             from .database_mysql import get_fuel_theft_analysis
         except ImportError:
             from database_mysql import get_fuel_theft_analysis
 
         analysis = get_fuel_theft_analysis(days_back=days)
+        
+        # Cache for 60 seconds
+        await cache.set(cache_key, analysis, ttl=60)
+        
         return JSONResponse(content=analysis)
     except Exception as e:
         logger.error(f"Error in theft analysis: {e}")
