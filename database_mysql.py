@@ -2645,13 +2645,23 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                 if both_null:
                     continue
 
-                # If current is 0% and previous had valid sensor with >20%,
-                # this is likely a sensor disconnect to 0, not theft
+                # 🆕 v4.0.0: IMPROVED - If current reading drops to near-zero (<5%) 
+                # from a normal level (>20%), this is almost always a sensor disconnect/failure
+                # Real thieves don't drain tanks to exactly 0%
                 if (
-                    est_pct == 0
-                    and prev_sensor_pct is not None
-                    and float(prev_sensor_pct) > 20
+                    est_pct <= 5  # Near zero (was == 0, now <= 5)
+                    and prev_pct > 20  # Previous was normal
                 ):
+                    logger.debug(
+                        f"🔧 {truck_id}: Skipping drop to {est_pct}% from {prev_pct}% - likely sensor disconnect"
+                    )
+                    continue
+                    
+                # Also skip if sensor reading is exactly 0 (NULL/disconnect indicator)
+                if sensor_pct is not None and float(sensor_pct) == 0 and prev_pct > 20:
+                    logger.debug(
+                        f"🔧 {truck_id}: Skipping sensor=0% event - sensor disconnect"
+                    )
                     continue
                 # ============================================
 
