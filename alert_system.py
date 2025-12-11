@@ -1,4 +1,12 @@
 """
+⚠️ SECONDARY - Consider using alert_service.py instead (December 2025)
+================================================================================
+This file is only used for ONE endpoint: /api/alerts/fleet-status
+Primary alert system: alert_service.py (used by wialon_sync_enhanced.py)
+
+STATUS: Kept for backward compatibility but may be consolidated in future.
+================================================================================
+
 Fuel Copilot - Alert System v2.0
 Automated alerts for fuel monitoring with PREDICTIVE capabilities
 

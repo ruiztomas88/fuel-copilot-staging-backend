@@ -1,4 +1,12 @@
 """
+⚠️ DEPRECATED - NOT IN USE (December 2025)
+================================================================================
+This file is NOT imported anywhere in the codebase.
+Notification functionality is handled by alert_service.py instead.
+
+RECOMMENDATION: Delete this file after confirming no external dependencies.
+================================================================================
+
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║              ENGINE HEALTH ALERT NOTIFICATION SERVICE                          ║
 ║                         Fuel Copilot v3.13.0                                   ║
