@@ -782,3 +782,53 @@ class AnchorDetector:
 
     def _reset_cruise(self):
         self.cruise_readings = []
+
+
+# ============================================================================
+# COMMON_CONFIG - Migrated from fuel_copilot_v2_1_fixed.py for test compatibility
+# ============================================================================
+COMMON_CONFIG = {
+    # ─────────────────────────────────────────────────────────────────────
+    # Kalman Filter Parameters
+    # ─────────────────────────────────────────────────────────────────────
+    "idle_rate_lph": 2.0,  # Liters per hour when idling
+    "Q_r": 0.1,  # Process noise for consumption rate
+    "Q_L_moving": 4.0,  # Level noise when moving
+    "Q_L_static": 1.0,  # Level noise when static
+    "Q_L": 4.0,  # Default level noise
+    "R_base": 4.0,  # Base measurement noise
+    "R_scale_drift": 0.5,  # Scale measurement noise by drift
+    # ─────────────────────────────────────────────────────────────────────
+    # Drift & Reset Thresholds
+    # ─────────────────────────────────────────────────────────────────────
+    "max_drift_pct": 7.5,  # Warning threshold for drift
+    "reset_drift_pct": 15.0,  # Auto-reset threshold
+    "refuel_jump_threshold_pct": 15.0,  # Min jump to detect refuel
+    "emergency_drift_pct": 25.0,  # Emergency reset threshold
+    # ─────────────────────────────────────────────────────────────────────
+    # Static Anchor Parameters
+    # ─────────────────────────────────────────────────────────────────────
+    "anchor_static_speed_max": 0.5,  # Max speed (km/h) for static
+    "anchor_static_rpm_min": 500,  # Min RPM (engine on)
+    "anchor_static_hdop_max": 1.5,  # Max HDOP for good GPS
+    "anchor_static_min_duration_s": 30,  # Min duration for anchor
+    "anchor_static_readings_min": 3,  # Min readings for anchor
+    "anchor_static_std_max": 0.5,  # Max std dev of fuel readings
+    "anchor_drift_min": 1.5,  # Min drift to trigger anchor
+    # ─────────────────────────────────────────────────────────────────────
+    # Micro Anchor Parameters (Cruise)
+    # ─────────────────────────────────────────────────────────────────────
+    "anchor_micro_min_readings": 10,
+    "anchor_micro_min_duration_s": 60,
+    "anchor_micro_speed_min": 60,  # km/h
+    "anchor_micro_speed_max": 100,  # km/h
+    "anchor_micro_speed_var_max": 25,  # km/h variance
+    "anchor_micro_fuel_var_max": 0.5,  # % variance
+    "anchor_micro_drift_min": 2.0,  # Min drift to trigger
+    # ─────────────────────────────────────────────────────────────────────
+    # Adaptive Q_r (v5.3.0)
+    # ─────────────────────────────────────────────────────────────────────
+    "Q_r_parked": 0.01,  # Very low noise when parked
+    "Q_r_idle": 0.05,  # Low noise when idling
+    "Q_r_moving": 0.1,  # Normal noise when moving
+}

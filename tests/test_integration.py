@@ -75,7 +75,7 @@ def mock_tanks_config():
 @pytest.fixture
 def estimator(mock_tanks_config):
     """Create FuelEstimator for testing"""
-    from fuel_copilot_v2_1_fixed import FuelEstimator, COMMON_CONFIG
+    from estimator import FuelEstimator, COMMON_CONFIG
 
     est = FuelEstimator(
         truck_id="TEST001",
@@ -148,7 +148,7 @@ class TestFullPipeline:
 
     def test_multiple_trucks_parallel(self, mock_tanks_config):
         """Test parallel processing of multiple trucks"""
-        from fuel_copilot_v2_1_fixed import FuelEstimator, COMMON_CONFIG
+        from estimator import FuelEstimator, COMMON_CONFIG
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         # Create multiple estimators
@@ -324,7 +324,7 @@ class TestAlertIntegration:
 
     def test_drift_alert_triggers(self):
         """Test that high drift triggers alert logic"""
-        from fuel_copilot_v2_1_fixed import FuelEstimator, COMMON_CONFIG
+        from estimator import FuelEstimator, COMMON_CONFIG
 
         config = {**COMMON_CONFIG, "max_drift_pct": 5.0}
 
@@ -354,7 +354,7 @@ class TestEndToEnd:
 
     def test_highway_driving_scenario(self, mock_tanks_config):
         """Test realistic highway driving scenario"""
-        from fuel_copilot_v2_1_fixed import FuelEstimator, COMMON_CONFIG
+        from estimator import FuelEstimator, COMMON_CONFIG
         from mpg_engine import update_mpg_state, MPGState, MPGConfig
 
         est = FuelEstimator(
@@ -399,7 +399,7 @@ class TestEndToEnd:
 
     def test_refuel_detection_scenario(self, mock_tanks_config):
         """Test refuel detection during operation"""
-        from fuel_copilot_v2_1_fixed import FuelEstimator, COMMON_CONFIG
+        from estimator import FuelEstimator, COMMON_CONFIG
 
         est = FuelEstimator(
             truck_id="REFUEL_TEST",
@@ -428,7 +428,7 @@ class TestEndToEnd:
 
     def test_offline_recovery_scenario(self, mock_tanks_config):
         """Test recovery after truck goes offline"""
-        from fuel_copilot_v2_1_fixed import FuelEstimator, COMMON_CONFIG
+        from estimator import FuelEstimator, COMMON_CONFIG
 
         est = FuelEstimator(
             truck_id="OFFLINE_TEST",

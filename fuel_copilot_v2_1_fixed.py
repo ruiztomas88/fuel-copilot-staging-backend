@@ -1,4 +1,21 @@
 """
+⚠️ DEPRECATED - This file is LEGACY code preserved for reference.
+================================================================================
+As of v5.3.7 (December 2025), production uses estimator.py instead.
+
+DO NOT use this file in new code. Import from estimator.py instead:
+    from estimator import FuelEstimator, COMMON_CONFIG
+
+This file is only used by:
+- parallel_processor.py (which is only used in tests)
+- Some legacy tests (being migrated)
+
+MIGRATION STATUS:
+- ✅ FuelEstimator class → estimator.py
+- ✅ COMMON_CONFIG dict → estimator.py
+- ⚠️ Utility functions (get_latest_reading, normalize_units, etc.) → NOT migrated
+================================================================================
+
 Fuel Copilot v3.11.6 - Production-Grade Fleet Fuel Monitoring
 Real-time Fuel Level Estimation with Kalman Filter
 

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 # Add parent directory to path to import main module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fuel_copilot_v2_1_fixed import FuelEstimator, COMMON_CONFIG
+from estimator import FuelEstimator, COMMON_CONFIG
 
 
 class MockTanksConfig:
