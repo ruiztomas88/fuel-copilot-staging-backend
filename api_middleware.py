@@ -253,14 +253,15 @@ class RateLimiter:
 # 🆕 v4.0: REDIS-BASED DISTRIBUTED RATE LIMITER
 # ===========================================
 
+
 class RedisRateLimiter:
     """
     Redis-based rate limiter using sliding window algorithm.
-    
+
     Works correctly across multiple server instances for horizontal scaling.
     Falls back to in-memory limiter if Redis is unavailable.
     """
-    
+
     def __init__(
         self,
         requests_per_minute: int = 60,
@@ -279,15 +280,16 @@ class RedisRateLimiter:
             requests_per_second=requests_per_second,
             burst_size=burst_size,
         )
-    
+
     async def connect(self) -> bool:
         """Connect to Redis"""
         if not REDIS_RATE_LIMIT_ENABLED:
             logger.info("Redis rate limiting disabled, using in-memory")
             return False
-        
+
         try:
             import redis.asyncio as redis
+
             self._redis = redis.from_url(
                 self._redis_url,
                 encoding="utf-8",
@@ -305,7 +307,7 @@ class RedisRateLimiter:
         except Exception as e:
             logger.warning(f"Redis rate limiter connection failed: {e}")
             return False
-    
+
     def _get_client_id(self, request: Request) -> str:
         """Get client identifier"""
         forwarded = request.headers.get("x-forwarded-for")
@@ -317,7 +319,7 @@ class RedisRateLimiter:
         if request.client:
             return request.client.host
         return "unknown"
-    
+
     def _get_user_role(self, request: Request) -> str:
         """Get user role from request"""
         try:
@@ -328,7 +330,7 @@ class RedisRateLimiter:
         except Exception:
             pass
         return "anonymous"
-    
+
     def _get_limits_for_role(self, role: str) -> tuple:
         """Get rate limits for role"""
         limits = RATE_LIMITS_BY_ROLE.get(role, RATE_LIMITS_BY_ROLE["anonymous"])
@@ -337,41 +339,41 @@ class RedisRateLimiter:
             limits["requests_per_second"],
             limits["burst_size"],
         )
-    
+
     async def check(self, request: Request, role: str = None) -> None:
         """Check rate limit using Redis sliding window"""
         if is_testing_mode():
             return
-        
+
         # Fallback to in-memory if not connected
         if not self._connected:
             await self._fallback.check(request, role)
             return
-        
+
         client_id = self._get_client_id(request)
         user_role = role or self._get_user_role(request)
         rpm, rps, _ = self._get_limits_for_role(user_role)
-        
+
         now = time.time()
         minute_key = f"rl:rpm:{client_id}"
         second_key = f"rl:rps:{client_id}"
-        
+
         try:
             # Use Redis pipeline for atomicity
             pipe = self._redis.pipeline()
-            
+
             # Remove old entries and count current for minute window
             pipe.zremrangebyscore(minute_key, 0, now - 60)
             pipe.zcard(minute_key)
-            
+
             # Remove old entries and count current for second window
             pipe.zremrangebyscore(second_key, 0, now - 1)
             pipe.zcard(second_key)
-            
+
             results = await pipe.execute()
             minute_count = results[1]
             second_count = results[3]
-            
+
             # Check per-minute limit
             if minute_count >= rpm:
                 retry_after = 60
@@ -388,7 +390,7 @@ class RedisRateLimiter:
                     },
                     headers={"Retry-After": str(retry_after)},
                 )
-            
+
             # Check per-second limit
             if second_count >= rps:
                 logger.warning(
@@ -404,7 +406,7 @@ class RedisRateLimiter:
                     },
                     headers={"Retry-After": "1"},
                 )
-            
+
             # Record this request
             pipe = self._redis.pipeline()
             pipe.zadd(minute_key, {str(now): now})
@@ -412,14 +414,14 @@ class RedisRateLimiter:
             pipe.zadd(second_key, {str(now): now})
             pipe.expire(second_key, 2)
             await pipe.execute()
-            
+
         except HTTPException:
             raise
         except Exception as e:
             # On Redis error, fall back to in-memory
             logger.warning(f"Redis rate limit error, falling back: {e}")
             await self._fallback.check(request, role)
-    
+
     def get_remaining(self, request: Request, role: str = None) -> dict:
         """Get remaining rate limit info"""
         # Use fallback for simplicity (stats are approximate anyway)
@@ -429,7 +431,7 @@ class RedisRateLimiter:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     FastAPI middleware for rate limiting.
-    
+
     🆕 v4.0: Now supports Redis-based distributed rate limiting.
 
     Usage:
