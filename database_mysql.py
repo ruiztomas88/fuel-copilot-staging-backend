@@ -528,9 +528,49 @@ def get_fleet_summary() -> Dict[str, Any]:
     """
     # Trucks allowed from tanks.yaml
     allowed_trucks = [
-        'VD3579', 'JC1282', 'JC9352', 'NQ6975', 'GP9677', 'JB8004', 'FM2416', 'FM3679', 'FM9838', 'JB6858', 'JP3281', 'JR7099', 'RA9250', 'RH1522', 'RR1272', 'BV6395', 'CO0681', 'CS8087', 'DR6664', 'DO9356', 'DO9693', 'FS7166', 'MA8159', 'MO0195', 'PC1280', 'RD5229', 'RR3094', 'RT9127', 'SG5760', 'YM6023', 'MJ9547', 'FM3363', 'GC9751', 'LV1422', 'LC6799', 'RC6625', 'FF7702', 'OG2033', 'OS3717', 'EM8514', 'MR7679'
+        "VD3579",
+        "JC1282",
+        "JC9352",
+        "NQ6975",
+        "GP9677",
+        "JB8004",
+        "FM2416",
+        "FM3679",
+        "FM9838",
+        "JB6858",
+        "JP3281",
+        "JR7099",
+        "RA9250",
+        "RH1522",
+        "RR1272",
+        "BV6395",
+        "CO0681",
+        "CS8087",
+        "DR6664",
+        "DO9356",
+        "DO9693",
+        "FS7166",
+        "MA8159",
+        "MO0195",
+        "PC1280",
+        "RD5229",
+        "RR3094",
+        "RT9127",
+        "SG5760",
+        "YM6023",
+        "MJ9547",
+        "FM3363",
+        "GC9751",
+        "LV1422",
+        "LC6799",
+        "RC6625",
+        "FF7702",
+        "OG2033",
+        "OS3717",
+        "EM8514",
+        "MR7679",
     ]
-    
+
     query = text(
         f"""
         SELECT 
@@ -2556,10 +2596,11 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
     SIPHON_MIN_GALLONS = 20.0  # Overnight siphoning threshold
     IDLE_CONSUMPTION_GPH = 1.2  # Conservative idle consumption estimate
 
-    # 🆕 Recovery detection thresholds
-    RECOVERY_WINDOW_MINUTES = 15  # Check for recovery within 15 min
+    # 🆕 v4.0.0: Recovery detection thresholds - INCREASED based on real data analysis
+    # Analysis of MR7679, FF7702 etc showed recoveries taking 20-25 minutes
+    RECOVERY_WINDOW_MINUTES = 30  # Check for recovery within 30 min (was 15)
     RECOVERY_TOLERANCE_PCT = (
-        10.0  # If fuel recovers to within 10% of original = sensor issue
+        15.0  # If fuel recovers to within 15% of original = sensor issue (was 10%)
     )
 
     # 🆕 First query: Get all fuel readings with LEAD to check recovery
@@ -2645,7 +2686,7 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                 if both_null:
                     continue
 
-                # 🆕 v4.0.0: IMPROVED - If current reading drops to near-zero (<5%) 
+                # 🆕 v4.0.0: IMPROVED - If current reading drops to near-zero (<5%)
                 # from a normal level (>20%), this is almost always a sensor disconnect/failure
                 # Real thieves don't drain tanks to exactly 0%
                 if (
@@ -2656,7 +2697,7 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                         f"🔧 {truck_id}: Skipping drop to {est_pct}% from {prev_pct}% - likely sensor disconnect"
                     )
                     continue
-                    
+
                 # Also skip if sensor reading is exactly 0 (NULL/disconnect indicator)
                 if sensor_pct is not None and float(sensor_pct) == 0 and prev_pct > 20:
                     logger.debug(
