@@ -966,8 +966,8 @@ class DatabaseManager:
                     health -= 20
                 elif age_minutes > 120:  # > 2 hours
                     health -= 10
-        except:
-            pass
+        except (ValueError, TypeError, AttributeError):
+            pass  # Timestamp parsing failed, skip age penalty
 
         # 3. Drift penalty (-30, -20, or -10 points)
         drift = record.get("drift_pct")

@@ -203,8 +203,10 @@ class StateManager:
                             estimator.last_update_time = datetime.fromisoformat(
                                 data["last_timestamp"]
                             )
-                        except:
-                            pass
+                        except (ValueError, TypeError) as e:
+                            logger.debug(
+                                f"Invalid timestamp format for {truck_id}: {e}"
+                            )
                     self.estimators[truck_id] = estimator
             except Exception as e:
                 logger.warning(f"⚠️ Could not load state from {state_file}: {e}")
