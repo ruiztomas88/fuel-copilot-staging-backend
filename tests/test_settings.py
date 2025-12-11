@@ -219,7 +219,7 @@ class TestAppSettings:
         from settings import AppSettings
 
         settings = AppSettings()
-        assert settings.version == "3.12.21"
+        assert settings.version == "4.0.0"
 
     def test_data_directories(self):
         """Should have data directories defined"""

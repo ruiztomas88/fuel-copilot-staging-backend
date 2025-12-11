@@ -1,14 +1,13 @@
 """
-FastAPI Backend for Fuel Copilot Dashboard v3.12.21
+FastAPI Backend for Fuel Copilot Dashboard v4.0.0
 Modern async API with HTTP polling (WebSocket removed for simplicity)
 
 🔧 FIX v3.9.3: Migrated from deprecated @app.on_event to lifespan handlers
 🆕 v3.10.8: Added JWT authentication and multi-tenant support
 🆕 v3.10.9: Removed WebSocket - dashboard uses HTTP polling
 🆕 v3.12.21: Unified version, fixed bugs from Phase 1 audit
+🆕 v4.0.0: Redis caching, distributed rate limiting, scalability improvements
 """
-
-# agregamos comentarios
 
 from contextlib import asynccontextmanager
 from fastapi import (
@@ -28,6 +27,9 @@ import asyncio
 import json
 import logging
 import os
+
+# Import centralized settings for VERSION
+from settings import settings
 import pandas as pd  # For KPIs calculation
 from dotenv import load_dotenv
 
@@ -287,7 +289,7 @@ All responses follow this structure:
 - [GitHub Repository](https://github.com/fleetbooster/Fuel-Analytics-Backend)
 - [API Changelog](/fuelAnalytics/api/docs#changelog)
 """,
-    version="3.12.21",
+    version=settings.app.version,
     docs_url="/fuelAnalytics/api/docs",
     redoc_url="/fuelAnalytics/api/redoc",
     openapi_tags=[
@@ -796,7 +798,7 @@ async def api_status():
     trucks = db.get_all_trucks()
     return {
         "status": "healthy",
-        "version": "3.9.5",
+        "version": settings.app.version,
         "timestamp": datetime.now(),
         "trucks_available": len(trucks),
     }
@@ -881,7 +883,7 @@ def health_check():
         "status": (
             "healthy" if mysql_status == "connected" and data_fresh else "degraded"
         ),
-        "version": "3.1.0",
+        "version": settings.app.version,
         "timestamp": datetime.now(),
         "trucks_available": len(trucks),
         "mysql_status": mysql_status,

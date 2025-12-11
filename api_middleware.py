@@ -1,8 +1,8 @@
 """
-API Middleware Module for Fuel Copilot v3.12.21
+API Middleware Module for Fuel Copilot v4.0.0
 
 Production-ready middleware for:
-- Rate limiting (with role-based limits)
+- Rate limiting (with role-based limits, Redis support)
 - Request validation
 - Error handling
 - Security headers
@@ -35,6 +35,11 @@ def is_testing_mode() -> bool:
     This is different from TESTING which is for general test mode.
     """
     return os.getenv("SKIP_RATE_LIMIT", "").lower() in ("1", "true", "yes")
+
+
+# Redis configuration
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+REDIS_RATE_LIMIT_ENABLED = os.environ.get("REDIS_RATE_LIMIT", "true").lower() == "true"
 
 
 # ===========================================
@@ -244,9 +249,188 @@ class RateLimiter:
         }
 
 
+# ===========================================
+# 🆕 v4.0: REDIS-BASED DISTRIBUTED RATE LIMITER
+# ===========================================
+
+class RedisRateLimiter:
+    """
+    Redis-based rate limiter using sliding window algorithm.
+    
+    Works correctly across multiple server instances for horizontal scaling.
+    Falls back to in-memory limiter if Redis is unavailable.
+    """
+    
+    def __init__(
+        self,
+        requests_per_minute: int = 60,
+        requests_per_second: int = 10,
+        burst_size: int = 20,
+        redis_url: str = REDIS_URL,
+    ):
+        self.rpm = requests_per_minute
+        self.rps = requests_per_second
+        self.burst = burst_size
+        self._redis_url = redis_url
+        self._redis = None
+        self._connected = False
+        self._fallback = RateLimiter(
+            requests_per_minute=requests_per_minute,
+            requests_per_second=requests_per_second,
+            burst_size=burst_size,
+        )
+    
+    async def connect(self) -> bool:
+        """Connect to Redis"""
+        if not REDIS_RATE_LIMIT_ENABLED:
+            logger.info("Redis rate limiting disabled, using in-memory")
+            return False
+        
+        try:
+            import redis.asyncio as redis
+            self._redis = redis.from_url(
+                self._redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_timeout=2.0,
+                socket_connect_timeout=2.0,
+            )
+            await self._redis.ping()
+            self._connected = True
+            logger.info(f"✅ Redis rate limiter connected")
+            return True
+        except ImportError:
+            logger.warning("redis package not installed, using in-memory rate limiter")
+            return False
+        except Exception as e:
+            logger.warning(f"Redis rate limiter connection failed: {e}")
+            return False
+    
+    def _get_client_id(self, request: Request) -> str:
+        """Get client identifier"""
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip
+        if request.client:
+            return request.client.host
+        return "unknown"
+    
+    def _get_user_role(self, request: Request) -> str:
+        """Get user role from request"""
+        try:
+            if hasattr(request, "state") and hasattr(request.state, "user"):
+                return getattr(request.state.user, "role", "viewer")
+            if request.headers.get("authorization", "").startswith("Bearer "):
+                return "viewer"
+        except Exception:
+            pass
+        return "anonymous"
+    
+    def _get_limits_for_role(self, role: str) -> tuple:
+        """Get rate limits for role"""
+        limits = RATE_LIMITS_BY_ROLE.get(role, RATE_LIMITS_BY_ROLE["anonymous"])
+        return (
+            limits["requests_per_minute"],
+            limits["requests_per_second"],
+            limits["burst_size"],
+        )
+    
+    async def check(self, request: Request, role: str = None) -> None:
+        """Check rate limit using Redis sliding window"""
+        if is_testing_mode():
+            return
+        
+        # Fallback to in-memory if not connected
+        if not self._connected:
+            await self._fallback.check(request, role)
+            return
+        
+        client_id = self._get_client_id(request)
+        user_role = role or self._get_user_role(request)
+        rpm, rps, _ = self._get_limits_for_role(user_role)
+        
+        now = time.time()
+        minute_key = f"rl:rpm:{client_id}"
+        second_key = f"rl:rps:{client_id}"
+        
+        try:
+            # Use Redis pipeline for atomicity
+            pipe = self._redis.pipeline()
+            
+            # Remove old entries and count current for minute window
+            pipe.zremrangebyscore(minute_key, 0, now - 60)
+            pipe.zcard(minute_key)
+            
+            # Remove old entries and count current for second window
+            pipe.zremrangebyscore(second_key, 0, now - 1)
+            pipe.zcard(second_key)
+            
+            results = await pipe.execute()
+            minute_count = results[1]
+            second_count = results[3]
+            
+            # Check per-minute limit
+            if minute_count >= rpm:
+                retry_after = 60
+                logger.warning(
+                    f"Rate limit exceeded for {client_id} (role: {user_role}, backend: redis)"
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "Rate limit exceeded",
+                        "limit": f"{rpm} requests per minute",
+                        "retry_after": retry_after,
+                        "role": user_role,
+                    },
+                    headers={"Retry-After": str(retry_after)},
+                )
+            
+            # Check per-second limit
+            if second_count >= rps:
+                logger.warning(
+                    f"Burst limit exceeded for {client_id} (role: {user_role}, backend: redis)"
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "Too many requests",
+                        "limit": f"{rps} requests per second",
+                        "retry_after": 1,
+                        "role": user_role,
+                    },
+                    headers={"Retry-After": "1"},
+                )
+            
+            # Record this request
+            pipe = self._redis.pipeline()
+            pipe.zadd(minute_key, {str(now): now})
+            pipe.expire(minute_key, 61)
+            pipe.zadd(second_key, {str(now): now})
+            pipe.expire(second_key, 2)
+            await pipe.execute()
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            # On Redis error, fall back to in-memory
+            logger.warning(f"Redis rate limit error, falling back: {e}")
+            await self._fallback.check(request, role)
+    
+    def get_remaining(self, request: Request, role: str = None) -> dict:
+        """Get remaining rate limit info"""
+        # Use fallback for simplicity (stats are approximate anyway)
+        return self._fallback.get_remaining(request, role)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     FastAPI middleware for rate limiting.
+    
+    🆕 v4.0: Now supports Redis-based distributed rate limiting.
 
     Usage:
         app.add_middleware(RateLimitMiddleware, limiter=RateLimiter())
@@ -391,6 +575,7 @@ def setup_middleware(
     enable_security_headers: bool = True,
     enable_error_handling: bool = True,
     enable_timing: bool = True,
+    use_redis_rate_limit: bool = True,
 ) -> None:
     """
     Setup all middleware for the application.
@@ -403,6 +588,7 @@ def setup_middleware(
         enable_security_headers: Add security headers
         enable_error_handling: Global error handling
         enable_timing: Add timing headers
+        use_redis_rate_limit: Use Redis for distributed rate limiting (v4.0)
     """
 
     # Order matters! Last added = first executed
@@ -420,14 +606,26 @@ def setup_middleware(
         logger.info("✅ Security headers middleware enabled")
 
     if enable_rate_limit:
-        limiter = RateLimiter(
-            requests_per_minute=rate_limit_rpm,
-            requests_per_second=rate_limit_rps,
-        )
+        if use_redis_rate_limit and REDIS_RATE_LIMIT_ENABLED:
+            # Try Redis-based rate limiter for distributed setup
+            limiter = RedisRateLimiter(
+                requests_per_minute=rate_limit_rpm,
+                requests_per_second=rate_limit_rps,
+            )
+            # Note: Connection happens async, will fallback if fails
+            logger.info(
+                f"✅ Rate limiting enabled (Redis): {rate_limit_rpm} rpm, {rate_limit_rps} rps"
+            )
+        else:
+            # Use in-memory rate limiter
+            limiter = RateLimiter(
+                requests_per_minute=rate_limit_rpm,
+                requests_per_second=rate_limit_rps,
+            )
+            logger.info(
+                f"✅ Rate limiting enabled (memory): {rate_limit_rpm} rpm, {rate_limit_rps} rps"
+            )
         app.add_middleware(RateLimitMiddleware, limiter=limiter)
-        logger.info(
-            f"✅ Rate limiting enabled: {rate_limit_rpm} rpm, {rate_limit_rps} rps"
-        )
 
 
 # ===========================================

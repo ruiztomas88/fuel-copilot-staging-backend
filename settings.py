@@ -413,7 +413,7 @@ class AppSettings:
 
     debug: bool = field(default_factory=lambda: _get_env_bool("DEBUG", False))
     log_level: str = field(default_factory=lambda: _get_env("LOG_LEVEL", "INFO"))
-    version: str = "3.12.21"
+    version: str = "4.0.0"  # 🆕 v4.0.0: Redis caching, distributed rate limiting
 
     # Data directories
     data_dir: Path = field(default_factory=lambda: Path(__file__).parent / "data")
