@@ -13,25 +13,32 @@ class TestPasswordHashing:
     """Test password hashing functions"""
 
     def test_hash_password(self):
-        """Should hash password consistently"""
-        from auth import hash_password
+        """Should hash password and verify correctly"""
+        from auth import hash_password, verify_password
 
         password = "test_password_123"
+        hashed = hash_password(password)
+
+        # Hash should not be plain text
+        assert hashed != password
+        # Should be able to verify
+        assert verify_password(password, hashed) is True
+        # Wrong password should not verify
+        assert verify_password("wrong_password", hashed) is False
+
+    def test_hash_password_produces_unique_hashes(self):
+        """bcrypt produces different hashes each time (different salts)"""
+        from auth import hash_password, verify_password
+
+        password = "test_password"
         hash1 = hash_password(password)
         hash2 = hash_password(password)
 
-        assert hash1 == hash2
-        assert hash1 != password  # Should not be plain text
-
-    def test_hash_password_with_salt(self):
-        """Should produce different hashes with different salts"""
-        from auth import hash_password
-
-        password = "test_password"
-        hash1 = hash_password(password, "salt1")
-        hash2 = hash_password(password, "salt2")
-
+        # Hashes should be different (different salts)
         assert hash1 != hash2
+        # But both should verify correctly
+        assert verify_password(password, hash1) is True
+        assert verify_password(password, hash2) is True
 
 
 class TestAuthentication:
