@@ -1348,6 +1348,7 @@ async def get_refuel_analytics(
     try:
         # Try cache first
         from cache_service import get_cache
+
         cache = await get_cache()
         cache_key = f"refuel:analytics:{days}d"
         cached = await cache.get(cache_key)
@@ -1360,10 +1361,10 @@ async def get_refuel_analytics(
             from database_mysql import get_advanced_refuel_analytics
 
         analytics = get_advanced_refuel_analytics(days_back=days)
-        
+
         # Cache for 60 seconds
         await cache.set(cache_key, analytics, ttl=60)
-        
+
         return JSONResponse(content=analytics)
     except Exception as e:
         logger.error(f"Error in refuel analytics: {e}")
@@ -1374,39 +1375,72 @@ async def get_refuel_analytics(
 
 @app.get("/fuelAnalytics/api/theft-analysis", tags=["Security"])
 async def get_theft_analysis(
-    days: int = Query(7, ge=1, le=90, description="Number of days to analyze")
+    days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
+    algorithm: str = Query(
+        "advanced",
+        description="Algorithm version: 'advanced' (v4.1 with trip correlation) or 'legacy' (v3.x)",
+    ),
 ):
     """
-    🆕 v3.10.3: Fuel Theft Detection & Analysis
-    🆕 v4.0.0: Added Redis caching (60s TTL) for faster responses
+    🛡️ v4.1.0: ADVANCED Fuel Theft Detection & Analysis
 
-    Detects suspicious fuel level drops:
-    - Sudden drops when truck is off
-    - Overnight siphoning patterns
-    - Tank leak detection
-    - Sensor manipulation detection
+    Sophisticated multi-signal theft detection that combines:
+    - Fuel level analysis (drops, recovery patterns)
+    - Trip/movement correlation from Wialon (was truck moving during drop?)
+    - Time pattern analysis (night, weekends)
+    - Sensor health scoring (is sensor reliable?)
+    - Machine learning-style confidence scoring
 
-    Returns events ranked by confidence level
+    KEY IMPROVEMENT: Cross-references fuel drops with actual trip data
+    to eliminate false positives from normal fuel consumption.
+
+    Algorithms:
+    - 'advanced' (default): New v4.1 algorithm with Wialon trip correlation
+    - 'legacy': Previous v3.x algorithm for comparison
+
+    Returns events classified as:
+    - ROBO CONFIRMADO: High confidence theft (>85%)
+    - ROBO SOSPECHOSO: Possible theft (60-85%)
+    - CONSUMO NORMAL: Fuel drop during active trip
+    - PROBLEMA DE SENSOR: Sensor glitch with recovery
     """
     try:
         # Try cache first
         from cache_service import get_cache
+
         cache = await get_cache()
-        cache_key = f"theft:analysis:{days}d"
+        cache_key = f"theft:analysis:{algorithm}:{days}d"
         cached = await cache.get(cache_key)
         if cached:
             return JSONResponse(content=cached)
 
-        try:
-            from .database_mysql import get_fuel_theft_analysis
-        except ImportError:
-            from database_mysql import get_fuel_theft_analysis
+        if algorithm == "advanced":
+            # 🆕 v4.1.0: Use new advanced engine with Wialon trip correlation
+            try:
+                from theft_detection_engine import analyze_fuel_drops_advanced
 
-        analysis = get_fuel_theft_analysis(days_back=days)
-        
+                analysis = analyze_fuel_drops_advanced(days_back=days)
+            except Exception as e:
+                logger.warning(
+                    f"Advanced algorithm failed, falling back to legacy: {e}"
+                )
+                # Fallback to legacy
+                try:
+                    from .database_mysql import get_fuel_theft_analysis
+                except ImportError:
+                    from database_mysql import get_fuel_theft_analysis
+                analysis = get_fuel_theft_analysis(days_back=days)
+        else:
+            # Legacy algorithm
+            try:
+                from .database_mysql import get_fuel_theft_analysis
+            except ImportError:
+                from database_mysql import get_fuel_theft_analysis
+            analysis = get_fuel_theft_analysis(days_back=days)
+
         # Cache for 60 seconds
         await cache.set(cache_key, analysis, ttl=60)
-        
+
         return JSONResponse(content=analysis)
     except Exception as e:
         logger.error(f"Error in theft analysis: {e}")
