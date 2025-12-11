@@ -3967,6 +3967,80 @@ async def get_truck_health(
 
 
 # ============================================================================
+# 🆕 v5.3.7: PREDICTIVE MAINTENANCE V5 WRAPPER
+# ============================================================================
+# This endpoint wraps V3 to maintain backward compatibility with frontend
+# The frontend's useFleetHealth.ts expects this endpoint format
+
+
+@app.get("/fuelAnalytics/api/v5/predictive-maintenance", tags=["Predictive Maintenance"])
+async def get_predictive_maintenance_v5():
+    """
+    🆕 v5.3.7: Wrapper for V3 fleet health that filters by tanks.yaml.
+    
+    This endpoint:
+    1. Calls the V3 analyze_fleet_health() function
+    2. Returns data in the format expected by useFleetHealth.ts frontend hook
+    3. Ensures only trucks in tanks.yaml are included (41 trucks)
+    """
+    try:
+        from predictive_maintenance_v3 import analyze_fleet_health
+        
+        # Get V3 report (already filtered by tanks.yaml)
+        report = analyze_fleet_health(include_trends=True, include_maintenance=True)
+        report_dict = report.to_dict()
+        
+        # Transform to V5 format expected by frontend
+        trucks_list = report_dict.get("trucks", [])
+        
+        # Count status breakdown
+        status_breakdown = {"NORMAL": 0, "WARNING": 0, "WATCH": 0, "CRITICAL": 0}
+        for truck in trucks_list:
+            status = truck.get("status", "NORMAL").upper()
+            if status in status_breakdown:
+                status_breakdown[status] += 1
+            elif status == "HEALTHY":
+                status_breakdown["NORMAL"] += 1
+        
+        return {
+            "success": True,
+            "source": "predictive_maintenance_v3",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "fleet_health": {
+                "total_trucks": len(trucks_list),
+                "average_health_score": report_dict.get("fleet_summary", {}).get("average_score", 80),
+                "status_breakdown": status_breakdown,
+            },
+            "trucks": [
+                {
+                    "truck_id": t.get("truck_id"),
+                    "health_score": t.get("overall_score", 80),
+                    "status": t.get("status", "NORMAL"),
+                    "sensors": t.get("current_values", {}),
+                    "issues": [a.get("title", "") for a in t.get("alerts", [])],
+                    "last_updated": t.get("last_updated", datetime.now(timezone.utc).isoformat()),
+                }
+                for t in trucks_list
+            ],
+        }
+        
+    except Exception as e:
+        logger.error(f"[V5] Predictive maintenance error: {e}")
+        # Return empty but valid response
+        return {
+            "success": True,
+            "source": "fallback",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "fleet_health": {
+                "total_trucks": 0,
+                "average_health_score": 0,
+                "status_breakdown": {"NORMAL": 0, "WARNING": 0, "WATCH": 0, "CRITICAL": 0},
+            },
+            "trucks": [],
+        }
+
+
+# ============================================================================
 # 🆕 v5.3.0: PREDICTIVE MAINTENANCE V3 - NEW IMPLEMENTATION
 # ============================================================================
 # Features:

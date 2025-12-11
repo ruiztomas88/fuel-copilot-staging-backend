@@ -3508,6 +3508,7 @@ def main():
         # 🆕 v3.11.6: Flush any pending MySQL records before shutdown
         try:
             from bulk_mysql_handler import flush_pending_records
+
             flush_pending_records()
         except Exception as flush_err:
             logger.warning(f"⚠️ Could not flush pending MySQL records: {flush_err}")
@@ -3530,6 +3531,7 @@ def main():
         try:
             # 🆕 v3.11.6: Flush pending MySQL records even on crash
             from bulk_mysql_handler import flush_pending_records
+
             flush_pending_records()
         except Exception as flush_err:
             logger.warning(f"⚠️ Could not flush pending MySQL records: {flush_err}")
