@@ -5854,7 +5854,29 @@ async def catch_all_routes(full_path: str):
 if __name__ == "__main__":
     import uvicorn
     import os
+    import sys
+
+    # 🔧 v5.4.3: Windows-specific asyncio fixes for WinError 64
+    if sys.platform == "win32":
+        import asyncio
+
+        # Use ProactorEventLoop instead of SelectorEventLoop on Windows
+        # This prevents WinError 64 network errors
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        logger.info("🪟 Windows detected - using ProactorEventLoop policy")
 
     # Only use reload in development (when DEV_MODE env var is set)
     is_dev = os.getenv("DEV_MODE", "false").lower() == "true"
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=is_dev, log_level="info")
+
+    # 🔧 v5.4.3: Enhanced uvicorn config for stability on Windows
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=is_dev,
+        log_level="info",
+        # Windows-specific: prevent socket reuse issues
+        timeout_keep_alive=5,  # Close idle connections faster
+        limit_concurrency=1000,  # Prevent socket exhaustion
+        backlog=2048,  # Larger backlog for Windows
+    )
