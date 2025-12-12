@@ -747,39 +747,12 @@ def execute_fuel_query(query: str, params: tuple = None) -> list:
     Execute query on fuel_copilot database using connection pool.
     Returns list of dict rows or empty list on error.
 
-    NOTE: fuel_copilot is on same MySQL server, just different database.
-    We use a separate engine or switch database in query.
+    NOTE: Uses centralized connection pool from database_pool.py
+    to prevent connection exhaustion (BUG #2 FIX from audit v5.4)
     """
     try:
-        # For now, use direct connection with short timeout
-        # TODO: Create separate pool for fuel_copilot if needed
-        import pymysql
-        from dotenv import load_dotenv
-
-        load_dotenv()
-
-        conn = pymysql.connect(
-            host=os.getenv("LOCAL_DB_HOST", "localhost"),
-            port=int(os.getenv("LOCAL_DB_PORT", "3306")),
-            user=os.getenv("LOCAL_DB_USER", "fuel_admin"),
-            password=os.getenv("LOCAL_DB_PASS", ""),
-            database=os.getenv("LOCAL_DB_NAME", "fuel_copilot"),
-            charset="utf8mb4",
-            connect_timeout=3,
-            read_timeout=5,  # Short timeout to fail fast
-            cursorclass=pymysql.cursors.DictCursor,
-        )
-        try:
-            cursor = conn.cursor()
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-            rows = cursor.fetchall()
-            cursor.close()
-            return list(rows)
-        finally:
-            conn.close()
+        from database_pool import execute_local_query
+        return execute_local_query(query, params)
     except Exception as e:
         logger.warning(f"[V3] Fuel DB query error: {e}")
         return []
