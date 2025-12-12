@@ -1274,6 +1274,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
     try:
         with connection.cursor() as cursor:
             # 🆕 v5.3.3: Added ambient_temp_f and intake_air_temp_f columns
+            # 🔧 FIX v5.4.7: Added idle_gph to INSERT (was missing - BUG #1 from audit)
             query = """
                 INSERT INTO fuel_metrics 
                 (timestamp_utc, truck_id, carrier_id, truck_status,
@@ -1283,12 +1284,12 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  consumption_lph, consumption_gph, mpg_current,
                  rpm, engine_hours, odometer_mi,
                  altitude_ft, hdop, coolant_temp_f,
-                 idle_method, idle_mode, drift_pct, drift_warning,
+                 idle_gph, idle_method, idle_mode, drift_pct, drift_warning,
                  anchor_detected, anchor_type, data_age_min,
                  oil_pressure_psi, oil_temp_f, battery_voltage, 
                  engine_load_pct, def_level_pct,
                  ambient_temp_f, intake_air_temp_f)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -1309,6 +1310,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     altitude_ft = VALUES(altitude_ft),
                     hdop = VALUES(hdop),
                     coolant_temp_f = VALUES(coolant_temp_f),
+                    idle_gph = VALUES(idle_gph),
                     idle_method = VALUES(idle_method),
                     idle_mode = VALUES(idle_mode),
                     drift_pct = VALUES(drift_pct),
@@ -1346,6 +1348,8 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 metrics["altitude_ft"],
                 metrics["hdop"],
                 metrics["coolant_temp_f"],
+                # 🔧 FIX v5.4.7: Added idle_gph value (was missing - BUG #1)
+                metrics.get("idle_gph"),
                 metrics["idle_method"],
                 metrics["idle_mode"],
                 metrics["drift_pct"],
