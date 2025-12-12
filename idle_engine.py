@@ -234,13 +234,14 @@ def calculate_idle_consumption(
         # Convert LPH to GPH (1 gal = 3.78541 L)
         idle_gph_raw = fuel_rate / 3.78541
 
-        # 🔧 Range validation: Class 8 idle should be 0.5-5.0 GPH
-        # Below 0.5: Sensor error (too low)
+        # 🔧 Range validation: Class 8 idle should be 0.1-5.0 GPH
+        # Below 0.1: Engine off or sensor error (too low)
         # Above 5.0: PTO/reefer or sensor error (out of idle range)
-        if 0.5 <= idle_gph_raw <= 5.0:
+        # 🔧 v5.4.4: Reduced min from 0.5 to 0.1 GPH to catch low idle (e.g., 0.15-0.3 GPH real idle)
+        if 0.1 <= idle_gph_raw <= 5.0:
             # 🔧 EMA smoothing to reduce noise: 30% new, 70% previous
             # This filters minor sensor fluctuations while responding to real changes
-            if previous_idle_gph is not None and 0.5 <= previous_idle_gph <= 5.0:
+            if previous_idle_gph is not None and 0.1 <= previous_idle_gph <= 5.0:
                 idle_gph = 0.3 * idle_gph_raw + 0.7 * previous_idle_gph
                 logger.debug(
                     f"[{truck_id}] Idle via SENSOR (EMA): {idle_gph:.2f} gph "
@@ -259,7 +260,7 @@ def calculate_idle_consumption(
             # Sensor out of valid idle range - fall through to next method
             logger.debug(
                 f"[{truck_id}] fuel_rate {idle_gph_raw:.2f} GPH ({fuel_rate:.2f} LPH) "
-                f"out of valid idle range [0.5, 5.0] GPH - likely sensor error or PTO active"
+                f"out of valid idle range [0.1, 5.0] GPH - likely sensor error or PTO active"
             )
     elif fuel_rate is not None:
         logger.debug(

@@ -2706,8 +2706,12 @@ def process_single_truck(
 
         # Calculate Idle
         # 🆕 v5.4.3: Get previous idle GPH for EMA smoothing
-        previous_idle_gph = estimator.previous_idle_gph if hasattr(estimator, 'previous_idle_gph') else None
-        
+        previous_idle_gph = (
+            estimator.previous_idle_gph
+            if hasattr(estimator, "previous_idle_gph")
+            else None
+        )
+
         idle_gph, idle_method = calculate_idle_consumption(
             truck_status.value,
             rpm,
@@ -2719,7 +2723,7 @@ def process_single_truck(
             truck_id,
             previous_idle_gph=previous_idle_gph,
         )
-        
+
         # 🆕 v5.4.3: Store idle_gph for next cycle
         estimator.previous_idle_gph = idle_gph
 
