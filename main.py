@@ -5854,7 +5854,7 @@ async def catch_all_routes(full_path: str):
 if __name__ == "__main__":
     import uvicorn
     import os
-    
+
     # Only use reload in development (when DEV_MODE env var is set)
     is_dev = os.getenv("DEV_MODE", "false").lower() == "true"
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=is_dev, log_level="info")

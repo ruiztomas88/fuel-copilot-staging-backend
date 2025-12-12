@@ -36,80 +36,40 @@ logger = logging.getLogger(__name__)
 # TANKS.YAML FILTER - Only analyze trucks in our fleet
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# 🆕 v5.4.2: Use centralized get_allowed_trucks() from config.py
+try:
+    from config import get_allowed_trucks
+    logger.info("[V3] Using centralized get_allowed_trucks from config.py")
+except ImportError:
+    logger.warning("[V3] Could not import from config, using local fallback")
+    
+    def get_allowed_trucks() -> Set[str]:
+        """
+        Fallback: Load allowed truck IDs from tanks.yaml.
+        Prefer using config.get_allowed_trucks() instead.
+        """
+        try:
+            tanks_path = Path(__file__).parent / "tanks.yaml"
+            if tanks_path.exists():
+                with open(tanks_path, "r", encoding="utf-8") as f:
+                    tanks_config = yaml.safe_load(f)
+                    if tanks_config and "trucks" in tanks_config:
+                        allowed = set(tanks_config["trucks"].keys())
+                        logger.info(f"[V3] Loaded {len(allowed)} trucks from tanks.yaml")
+                        return allowed
+        except Exception as e:
+            logger.warning(f"[V3] Could not load tanks.yaml: {e}")
 
-def get_allowed_trucks() -> Set[str]:
-    """
-    🆕 v5.3.5: Load allowed truck IDs from tanks.yaml.
-    Same list used by database_mysql.py for consistency.
-    """
-    try:
-        tanks_path = Path(__file__).parent / "tanks.yaml"
-        if tanks_path.exists():
-            with open(tanks_path, "r") as f:
-                tanks_config = yaml.safe_load(f)
-                if tanks_config and "trucks" in tanks_config:
-                    allowed = set(tanks_config["trucks"].keys())
-                    logger.info(f"[V3] Loaded {len(allowed)} trucks from tanks.yaml")
-                    return allowed
-    except Exception as e:
-        logger.warning(f"[V3] Could not load tanks.yaml: {e}")
-
-    # Fallback: hardcoded list (same as database_mysql.py)
-    return {
-        "VD3579",
-        "JC1282",
-        "JC9352",
-        "NQ6975",
-        "GP9677",
-        "JB8004",
-        "FM2416",
-        "FM3679",
-        "FM9838",
-        "JB6858",
-        "JP3281",
-        "JR7099",
-        "RA9250",
-        "RH1522",
-        "RR1272",
-        "BV6395",
-        "CO0681",
-        "CS8087",
-        "DR6664",
-        "DO9356",
-        "DO9693",
-        "FS7166",
-        "MA8159",
-        "MO0195",
-        "PC1280",
-        "RD5229",
-        "RR3094",
-        "RT9127",
-        "SG5760",
-        "YM6023",
-        "MJ9547",
-        "FM3363",
-        "GC9751",
-        "LV1422",
-        "LC6799",
-        "RC6625",
-        "FF7702",
-        "OG2033",
-        "OS3717",
-        "EM8514",
-        "MR7679",
-        "AG8915",
-        "MR2714",
-        "JE8853",
-        "OA2474",
-        "LH1141",
-        "JB6554",
-        "OM7769",
-        "EH5291",
-        "YG5998",
-        "YG7957",
-        "YR4424",
-        "GS5030",
-    }
+        # Fallback: hardcoded list
+        return {
+            "VD3579", "JC1282", "JC9352", "NQ6975", "GP9677", "JB8004",
+            "FM2416", "FM3679", "FM9838", "JB6858", "JP3281", "JR7099",
+            "RA9250", "RH1522", "RR1272", "BV6395", "CO0681", "CS8087",
+            "DR6664", "DO9356", "DO9693", "FS7166", "MA8159", "MO0195",
+            "PC1280", "RD5229", "RR3094", "RT9127", "SG5760", "YM6023",
+            "MJ9547", "FM3363", "GC9751", "LV1422", "LC6799", "RC6625",
+            "FF7702", "OG2033", "OS3717", "EM8514", "MR7679",
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

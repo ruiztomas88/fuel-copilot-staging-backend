@@ -3,6 +3,7 @@ MySQL Database Service - Direct Query from fuel_metrics table
 Replaces CSV reading with direct MySQL queries for better performance and historical analysis
 
 🔧 FIX v3.9.2: All queries now use SQLAlchemy connection pooling
+🆕 v5.4.2: Now uses centralized get_allowed_trucks() from config.py
 - pool_pre_ping=True: Check connection health before use
 - pool_recycle=3600: Recycle connections after 1 hour
 - pool_size=10: Maintain 10 connections in pool
@@ -21,6 +22,17 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 
 logger = logging.getLogger(__name__)
+
+# 🆕 v5.4.2: Centralized truck filtering
+try:
+    from config import get_allowed_trucks
+    CENTRALIZED_TRUCKS = True
+except ImportError:
+    logger.warning("⚠️ Could not import get_allowed_trucks from config")
+    CENTRALIZED_TRUCKS = False
+    def get_allowed_trucks():
+        # Fallback - will be replaced when config.py is available
+        return set()
 
 # 🆕 v3.12.22: Memory cache for performance optimization
 try:
@@ -524,52 +536,14 @@ def get_fleet_summary() -> Dict[str, Any]:
 
     🔧 FIX v3.9.2: Now uses SQLAlchemy connection pooling
     🆕 v3.12.22: Cached for 30 seconds
-    🆕 v3.15.2: Filter only trucks in tanks.yaml
+    🆕 v5.4.2: Now uses centralized get_allowed_trucks() from config.py
     """
-    # Trucks allowed from tanks.yaml
-    allowed_trucks = [
-        "VD3579",
-        "JC1282",
-        "JC9352",
-        "NQ6975",
-        "GP9677",
-        "JB8004",
-        "FM2416",
-        "FM3679",
-        "FM9838",
-        "JB6858",
-        "JP3281",
-        "JR7099",
-        "RA9250",
-        "RH1522",
-        "RR1272",
-        "BV6395",
-        "CO0681",
-        "CS8087",
-        "DR6664",
-        "DO9356",
-        "DO9693",
-        "FS7166",
-        "MA8159",
-        "MO0195",
-        "PC1280",
-        "RD5229",
-        "RR3094",
-        "RT9127",
-        "SG5760",
-        "YM6023",
-        "MJ9547",
-        "FM3363",
-        "GC9751",
-        "LV1422",
-        "LC6799",
-        "RC6625",
-        "FF7702",
-        "OG2033",
-        "OS3717",
-        "EM8514",
-        "MR7679",
-    ]
+    # 🆕 v5.4.2: Use centralized truck filtering
+    allowed_trucks = list(get_allowed_trucks())
+    
+    if not allowed_trucks:
+        logger.warning("⚠️ No allowed trucks found, using empty list")
+        return _empty_fleet_summary()
 
     query = text(
         f"""
