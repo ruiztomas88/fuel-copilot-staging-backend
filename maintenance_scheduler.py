@@ -33,12 +33,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Local imports
-from predictive_maintenance_engine import (
-    PredictiveMaintenanceEngine,
-    HealthAlert,
-    AlertSeverity,
-)
+# Local imports - using modern models.py for types, legacy engine for class
+from models import AlertSeverity, HealthAlert
+from predictive_maintenance_engine import PredictiveMaintenanceEngine
 
 # Configure logging (ASCII-safe for Windows)
 logging.basicConfig(

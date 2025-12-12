@@ -405,13 +405,19 @@ def process_truck_wrapper(
     Returns:
         Dict with processing results or None if no new data
     """
-    # Import here to avoid circular dependencies
-    from fuel_copilot_v2_1_fixed import (
-        get_latest_reading,
-        normalize_units,
-        TruckStatus,
-        calculate_health_score,
-    )
+    # Import from modern modules (migrated from fuel_copilot_v2_1_fixed)
+    from models import TruckStatus
+    from predictive_maintenance_v3 import calculate_health_score
+
+    # Legacy placeholders - these functions return None/{} anyway
+    # Keeping inline stubs for backwards compatibility
+    def get_latest_reading(engine, unit_id, max_fuel_lvl_age_min=240):
+        """Placeholder - returns None (was stub in fuel_copilot_v2_1_fixed)"""
+        return None
+
+    def normalize_units(df, config, last_fuel_pct, normalizer):
+        """Placeholder - returns {} (was stub in fuel_copilot_v2_1_fixed)"""
+        return {}
 
     try:
         unit_id = truck_config["unit_id"]
