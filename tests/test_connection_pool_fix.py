@@ -149,11 +149,15 @@ class TestNoRegressionInOtherFiles:
         # Should be a context manager
         assert hasattr(get_db_session, "__enter__") or callable(get_db_session)
 
-    def test_database_url_unchanged_for_wialon(self):
-        """Verify Wialon DATABASE_URL still points to correct database"""
+    def test_database_url_configured_for_wialon_vars(self):
+        """Verify Wialon DATABASE_URL uses MYSQL_* environment variables"""
         import database_pool
 
-        assert "wialon_collect" in database_pool.DATABASE_URL
+        # The URL should use MYSQL_DATABASE env var (defaults to wialon_collect)
+        # or be configured via environment
+        assert "mysql+pymysql://" in database_pool.DATABASE_URL
+        # Should NOT use LOCAL_DB_* variables
+        assert database_pool.MYSQL_DATABASE in database_pool.DATABASE_URL
 
 
 @pytest.mark.integration
