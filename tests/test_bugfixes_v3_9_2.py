@@ -219,16 +219,8 @@ class TestMPGStateHasOdometerField:
         assert state.last_odometer_mi == 12500.75
 
 
-class TestFuelCopilotOdomDeltaIntegration:
-    """Integration test for odom_delta_mi in main fuel copilot"""
-
-    def test_fuel_copilot_file_exists(self):
-        """Verify fuel_copilot_v2_1_fixed.py exists"""
-        main_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "fuel_copilot_v2_1_fixed.py",
-        )
-        assert os.path.exists(main_path), "fuel_copilot_v2_1_fixed.py should exist"
+# Legacy test removed - fuel_copilot_v2_1_fixed.py was deleted
+# Core logic now in: estimator.py, reporter.py, mpg_engine.py
 
 
 if __name__ == "__main__":
