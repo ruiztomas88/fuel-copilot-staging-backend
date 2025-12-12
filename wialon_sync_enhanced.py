@@ -45,6 +45,7 @@ from idle_engine import (
     IdleConfig,
 )
 from wialon_reader import WialonReader, WialonConfig, TRUCK_UNIT_MAPPING
+from config import get_allowed_trucks  # 🆕 v5.4.6: Filter to only process configured trucks
 
 # 🆕 v3.12.27: Import fuel event classifier for theft/sensor differentiation
 from alert_service import (
@@ -1692,9 +1693,17 @@ def main():
     mpg_config = MPGConfig()
     idle_config = IdleConfig()
 
-    # Initialize Wialon Reader
+    # 🆕 v5.4.6: Filter to only configured trucks from tanks.yaml
+    allowed_trucks = get_allowed_trucks()
+    filtered_mapping = {k: v for k, v in TRUCK_UNIT_MAPPING.items() if k in allowed_trucks}
+    
+    logger.info(f"📋 Total trucks in Wialon DB: {len(TRUCK_UNIT_MAPPING)}")
+    logger.info(f"✅ Configured trucks in tanks.yaml: {len(filtered_mapping)}")
+    logger.info(f"🎯 Processing: {', '.join(sorted(filtered_mapping.keys()))}")
+
+    # Initialize Wialon Reader with filtered mapping
     wialon_config = WialonConfig()
-    reader = WialonReader(wialon_config, TRUCK_UNIT_MAPPING)
+    reader = WialonReader(wialon_config, filtered_mapping)
 
     if not reader.connect():
         logger.error("❌ Failed to connect to Remote Wialon DB")
