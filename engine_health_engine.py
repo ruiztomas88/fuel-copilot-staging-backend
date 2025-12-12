@@ -141,6 +141,33 @@ ENGINE_HEALTH_THRESHOLDS = {
         "action_critical": "REDUCE LOAD - Risk of overheating and wear",
         "action_warning": "Monitor engine temperatures closely",
     },
+    # 🆕 v5.4.2: New sensor thresholds
+    "fuel_rate_gph": {
+        "critical_high": 15.0,  # Excessive consumption - possible leak or injector issue
+        "warning_high": 12.0,  # Higher than expected for Class 8 trucks
+        "watch_high": 10.0,  # Above typical highway cruising
+        "normal_range": (2.0, 8.0),  # Normal operating range (idle to highway)
+        "idle_critical_high": 2.5,  # Too high at idle (injector leak?)
+        "idle_warning_high": 2.0,  # Elevated idle consumption
+        "idle_normal_max": 1.5,  # Normal idle consumption
+        "sustained_minutes": 15,  # Minutes at high rate before alert
+        "unit": "gph",
+        "description": "Fuel Consumption Rate",
+        "action_critical": "CHECK FOR FUEL LEAK - Excessive consumption detected",
+        "action_warning": "Monitor fuel economy - consider injector inspection",
+    },
+    "intake_air_temp_f": {
+        "critical_high": 150,  # Turbo/intercooler failure risk
+        "warning_high": 140,  # Intercooler efficiency reduced
+        "watch_high": 130,  # Running hot for intake
+        "normal_range": (60, 120),  # Normal based on ambient + turbo heat
+        "ambient_delta_warning": 60,  # intake - ambient > 60°F = intercooler issue
+        "ambient_delta_critical": 80,  # intake - ambient > 80°F = intercooler failed
+        "unit": "°F",
+        "description": "Intake Air Temperature",
+        "action_critical": "CHECK INTERCOOLER - Risk of turbo damage",
+        "action_warning": "Inspect intercooler and air intake system",
+    },
 }
 
 
