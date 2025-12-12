@@ -107,6 +107,7 @@ except ImportError:
             "EM8514",
             "MR7679",
             "OM7769",
+            "LH1141",
         }
 
 
