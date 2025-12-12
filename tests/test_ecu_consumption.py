@@ -224,7 +224,8 @@ class TestECUConsumption:
         estimator.calculate_ecu_consumption(total_fuel_used=1000.0, dt_hours=15 / 3600)
 
         # ECU: 6 GPH, fuel_rate: 50 L/h (= 13.2 GPH) - 7 GPH difference!
-        with patch("fuel_copilot_v2_1_fixed.logger") as mock_logger:
+        # Note: fuel_copilot_v2_1_fixed.py was deleted, patch the estimator module instead
+        with patch("estimator.logger") as mock_logger:
             result = estimator.calculate_ecu_consumption(
                 total_fuel_used=1006.0,
                 dt_hours=1.0,

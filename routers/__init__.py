@@ -1,11 +1,14 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                         ROUTERS PACKAGE v4.0.0                                 ║
+║                         ROUTERS PACKAGE v5.5.0                                 ║
 ║         Modular API routing (from 5,796-line main.py monolith)                 ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
-║  STATUS: ALL ROUTERS DISABLED TO PREVENT DUPLICATE ENDPOINTS                   ║
+║  STATUS: LEGACY ROUTERS DISABLED - ML INTELLIGENCE ENABLED                     ║
 ║                                                                                ║
-║  ENDPOINT INVENTORY (105 total in main.py):                                    ║
+║  🆕 NEW ROUTERS (not in main.py - safe to enable):                             ║
+║  - ml_intelligence: Anomaly Detection & Driver Clustering                      ║
+║                                                                                ║
+║  LEGACY ENDPOINT INVENTORY (105 total in main.py):                             ║
 ║  ┌─────────────────────────┬───────────────────────────────────────────────┐   ║
 ║  │ Category                │ Endpoints                                     │   ║
 ║  ├─────────────────────────┼───────────────────────────────────────────────┤   ║
@@ -40,7 +43,7 @@
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
-# 🔧 ALL ROUTERS DISABLED - main.py already has these endpoints
+# 🔧 LEGACY ROUTERS DISABLED - main.py already has these endpoints
 # Enabling causes "duplicate endpoint" errors in tests and runtime conflicts
 
 # from .health import router as health_router
@@ -48,12 +51,18 @@
 # from .fleet import router as fleet_router
 # from .analytics import router as analytics_router
 
+# 🆕 NEW ROUTERS (not in main.py) - SAFE TO ENABLE
+from .ml_intelligence import router as ml_intelligence_router
+
 __all__ = [
-    # All routers disabled until main.py endpoints are removed
+    # Legacy routers disabled until main.py endpoints are removed
     # "health_router",
     # "maintenance_router",
     # "fleet_router",
     # "analytics_router",
+    
+    # 🆕 New routers - safe to use
+    "ml_intelligence_router",
 ]
 
 
@@ -61,12 +70,16 @@ def include_all_routers(app, auth_dependency=None):
     """
     Include all routers in the FastAPI app.
 
-    NOTE: ALL ROUTERS DISABLED until we properly migrate from main.py
+    NOTE: Legacy routers are DISABLED until we properly migrate from main.py
     The endpoints already exist in main.py - enabling routers creates duplicates.
+    
+    NEW routers (ml_intelligence) are ENABLED - they don't exist in main.py
     """
-    # 🔧 ALL DISABLED - main.py has these endpoints already
+    # 🔧 LEGACY - DISABLED - main.py has these endpoints already
     # app.include_router(health_router)
     # app.include_router(maintenance_router)
     # app.include_router(fleet_router)
     # app.include_router(analytics_router)
-    pass  # No-op until migration is complete
+    
+    # 🆕 NEW - ENABLED - these are new endpoints
+    app.include_router(ml_intelligence_router)
