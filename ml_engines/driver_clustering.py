@@ -30,11 +30,53 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import silhouette_score
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, date
 from typing import Dict, List, Optional, Any, Tuple
 import warnings
+import threading
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
+
+# 🆕 v5.5.5: Cache for clustering results (avoid re-training on every request)
+_clustering_cache: Dict[str, Dict[str, Any]] = {}
+_clustering_cache_lock = threading.Lock()
+_CLUSTERING_CACHE_TTL_SECONDS = 3600  # 1 hour
+
+
+def _get_cached_analysis(cache_key: str) -> Optional[Dict[str, Any]]:
+    """Get cached clustering analysis if still valid."""
+    with _clustering_cache_lock:
+        if cache_key in _clustering_cache:
+            cached = _clustering_cache[cache_key]
+            if (
+                datetime.now(timezone.utc).timestamp() - cached["timestamp"]
+                < _CLUSTERING_CACHE_TTL_SECONDS
+            ):
+                logger.info(
+                    f"🎯 Using cached clustering analysis (key: {cache_key[:20]}...)"
+                )
+                return cached["data"]
+            else:
+                # Expired - remove
+                del _clustering_cache[cache_key]
+    return None
+
+
+def _set_cached_analysis(cache_key: str, data: Dict[str, Any]):
+    """Cache clustering analysis result."""
+    with _clustering_cache_lock:
+        _clustering_cache[cache_key] = {
+            "data": data,
+            "timestamp": datetime.now(timezone.utc).timestamp(),
+        }
+        # Cleanup old entries (keep max 10)
+        if len(_clustering_cache) > 10:
+            oldest_key = min(
+                _clustering_cache.keys(),
+                key=lambda k: _clustering_cache[k]["timestamp"],
+            )
+            del _clustering_cache[oldest_key]
 
 
 # Cluster labels based on characteristics
@@ -503,6 +545,8 @@ def analyze_driver_clusters(days: int = 30) -> Dict[str, Any]:
     """
     Main entry point: Analyze and cluster all drivers.
 
+    🆕 v5.5.5: Results are cached for 1 hour to avoid re-training on every request.
+
     Args:
         days: Days of history to analyze
 
@@ -512,6 +556,12 @@ def analyze_driver_clusters(days: int = 30) -> Dict[str, Any]:
         - Individual driver assignments
         - Recommendations
     """
+    # 🆕 v5.5.5: Check cache first
+    cache_key = f"clustering_{date.today().isoformat()}_{days}"
+    cached = _get_cached_analysis(cache_key)
+    if cached:
+        return cached
+
     logger.info(f"Starting driver clustering analysis ({days} days of data)")
 
     # Fetch data
@@ -543,13 +593,18 @@ def analyze_driver_clusters(days: int = 30) -> Dict[str, Any]:
     # Generate fleet-wide insights
     insights = _generate_fleet_insights(summary, all_drivers)
 
-    return {
+    result = {
         "summary": summary,
         "drivers": all_drivers,
         "insights": insights,
         "analysis_period_days": days,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+    # 🆕 v5.5.5: Cache the result
+    _set_cached_analysis(cache_key, result)
+
+    return result
 
 
 def _generate_fleet_insights(summary: Dict, drivers: List[Dict]) -> List[Dict]:

@@ -24,18 +24,56 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 import pickle
 import hashlib
 import os
+import time
 from pathlib import Path
+import threading
 
 logger = logging.getLogger(__name__)
 
 # Directory for cached models
 MODEL_CACHE_DIR = Path("/tmp/fuel_copilot_models")
 MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# 🆕 v5.5.5: Model cache TTL (7 days)
+MODEL_CACHE_TTL_SECONDS = 7 * 24 * 3600
+
+# 🆕 v5.5.5: Lock for thread-safe model operations
+_model_locks: Dict[str, threading.Lock] = {}
+_model_locks_lock = threading.Lock()
+
+
+def _get_model_lock(truck_id: str) -> threading.Lock:
+    """Get or create a lock for a specific truck's model."""
+    with _model_locks_lock:
+        if truck_id not in _model_locks:
+            _model_locks[truck_id] = threading.Lock()
+        return _model_locks[truck_id]
+
+
+def _cleanup_old_models():
+    """
+    🆕 v5.5.5: Cleanup models older than MODEL_CACHE_TTL_SECONDS.
+    Called periodically during model save operations.
+    """
+    try:
+        now = time.time()
+        cleaned = 0
+        for model_file in MODEL_CACHE_DIR.glob("anomaly_*.pkl"):
+            try:
+                if model_file.stat().st_mtime < now - MODEL_CACHE_TTL_SECONDS:
+                    model_file.unlink()
+                    cleaned += 1
+            except Exception:
+                pass
+        if cleaned > 0:
+            logger.info(f"🧹 Cleaned up {cleaned} old ML models from cache")
+    except Exception as e:
+        logger.warning(f"Model cleanup error: {e}")
 
 
 class EngineAnomalyDetector:
@@ -391,21 +429,29 @@ class EngineAnomalyDetector:
             return f"🔴 CRITICAL: Significant anomalies in {feature_list}. Immediate attention recommended."
 
     def save_model(self, truck_id: str) -> str:
-        """Save trained model to cache."""
+        """Save trained model to cache with thread safety and cleanup."""
         if not self.is_trained:
             return ""
 
-        model_path = MODEL_CACHE_DIR / f"anomaly_{truck_id}.pkl"
-        with open(model_path, "wb") as f:
-            pickle.dump(
-                {
-                    "model": self.model,
-                    "scaler": self.scaler,
-                    "feature_stats": self.feature_stats,
-                },
-                f,
-            )
-        return str(model_path)
+        # 🆕 v5.5.5: Thread-safe model save
+        lock = _get_model_lock(truck_id)
+        with lock:
+            # Cleanup old models periodically (1 in 10 saves)
+            if hash(truck_id) % 10 == 0:
+                _cleanup_old_models()
+
+            model_path = MODEL_CACHE_DIR / f"anomaly_{truck_id}.pkl"
+            with open(model_path, "wb") as f:
+                pickle.dump(
+                    {
+                        "model": self.model,
+                        "scaler": self.scaler,
+                        "feature_stats": self.feature_stats,
+                        "saved_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    f,
+                )
+            return str(model_path)
 
     def load_model(self, truck_id: str) -> bool:
         """Load model from cache."""

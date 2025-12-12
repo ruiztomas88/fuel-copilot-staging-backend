@@ -270,7 +270,9 @@ class GamificationEngine:
 
         ratio = mpg / fleet_avg_mpg
         # Scale: 0.8 = 0 points, 1.0 = 50 points, 1.2 = 100 points
-        score = (ratio - 0.8) / 0.4 * 100
+        # 🆕 v5.5.5: Explicit divisor variable for clarity
+        divisor = 0.4
+        score = (ratio - 0.8) / divisor * 100 if divisor != 0 else 50.0
         return max(0, min(100, score))
 
     def calculate_idle_score(self, idle_pct: float) -> float:

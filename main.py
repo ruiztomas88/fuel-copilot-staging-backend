@@ -20,7 +20,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel  # 🆕 v5.5.4: For batch endpoint request model
+from pydantic import BaseModel, Field  # 🆕 v5.5.4: For batch endpoint request model
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -965,9 +965,10 @@ def quick_health_check():
 class BatchRequest(BaseModel):
     """Request model for batch API calls"""
 
-    endpoints: List[str] = []  # List of endpoint names to fetch
+    # 🆕 v5.5.5: Limit max endpoints to prevent abuse
+    endpoints: List[str] = Field(default=[], max_length=10)
     truck_ids: Optional[List[str]] = None  # Optional truck IDs for truck-specific data
-    days: Optional[int] = 7  # Days for historical data
+    days: Optional[int] = Field(default=7, ge=1, le=90)  # Limit days range
 
 
 @app.post("/fuelAnalytics/api/batch", tags=["Batch"])
