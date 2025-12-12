@@ -106,6 +106,7 @@ except ImportError:
             "OS3717",
             "EM8514",
             "MR7679",
+            "OM7769",
         }
 
 

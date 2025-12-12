@@ -432,7 +432,17 @@ trucks:
     carrier_id: skylord
     capacity_gallons: 200
     capacity_liters: 757.08
-    unit_id: 401959416
+    unit_id: 401991494
+    mpg:
+      highway: 7.47
+      city: 3.83
+      overall: 6.39
+  
+  OM7769:
+    carrier_id: skylord
+    capacity_gallons: 200
+    capacity_liters: 757.08
+    unit_id: 401859979
     mpg:
       highway: 7.47
       city: 3.83

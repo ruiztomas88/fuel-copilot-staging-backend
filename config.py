@@ -105,6 +105,7 @@ def get_allowed_trucks() -> Set[str]:
         "OS3717",
         "EM8514",
         "MR7679",
+        "OM7769",
     }
     return _cached_allowed_trucks
 
