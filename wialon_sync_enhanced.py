@@ -463,9 +463,19 @@ def detect_refuel(
     if sensor_pct is None or estimated_pct is None:
         return None
 
-    # Time gap validation (5 min to 24 hours)
+    # Time gap validation (5 min to 72 hours)
     # 🔧 v3.15.4: Extended from 2h to 24h for overnight refuels
-    if time_gap_hours < 5 / 60 or time_gap_hours > 24:
+    # 🔧 v5.5.3: Extended to 72h for weekend/holiday refuels (VD3579 missed refuel case)
+    if time_gap_hours < 5 / 60:
+        return None
+    if time_gap_hours > 72:
+        # 🔧 v5.5.3: Log when rejecting due to large gap (for debugging)
+        fuel_jump = sensor_pct - estimated_pct
+        if fuel_jump > 15:  # Would have been a refuel
+            logger.warning(
+                f"⏭️ [{truck_id}] Potential refuel REJECTED: gap={time_gap_hours:.1f}h > 72h max, "
+                f"jump={fuel_jump:.1f}% ({(fuel_jump/100)*tank_capacity_gal:.1f} gal)"
+            )
         return None
 
     # 🔧 v3.12.29: Calculate increase using Kalman as baseline
@@ -499,13 +509,21 @@ def detect_refuel(
             f"(+{fuel_increase_pct:.1f}%, +{increase_gal:.1f} gal{factor_note}) over {time_gap_hours*60:.0f} min"
         )
 
+        # 🔧 v5.5.3: Calculate display values that are CONSISTENT
+        # prev_pct for display = current_sensor - increase_pct (so math adds up)
+        # This ensures: after - before = gallons_added (user-visible consistency)
+        display_before_pct = sensor_pct - fuel_increase_pct
+        display_gallons = (fuel_increase_pct / 100) * tank_capacity_gal * refuel_factor
+
         return {
             "type": "REFUEL",
-            "prev_pct": estimated_pct,  # 🔧 Now using Kalman estimate as "before"
+            "prev_pct": display_before_pct,  # 🔧 v5.5.3: Consistent with gallons shown
             "new_pct": sensor_pct,
             "increase_pct": fuel_increase_pct,
-            "increase_gal": increase_gal,
+            "increase_gal": display_gallons,  # 🔧 v5.5.3: Recalculated for consistency
             "time_gap_hours": time_gap_hours,
+            "kalman_before": estimated_pct,  # Original Kalman for debugging
+            "last_sensor_pct": last_sensor_pct,  # Last sensor reading for reference
         }
 
     return None
@@ -1244,7 +1262,8 @@ def process_truck(
         "theft_detected": "YES" if theft_event else "NO",
         # Refuel event details for persistence and notifications
         "refuel_event": refuel_event,
-        "fuel_before_pct": estimator.last_fuel_lvl_pct if refuel_event else None,
+        # 🔧 v5.5.3: Use prev_pct from refuel_event (already calculated to be consistent)
+        "fuel_before_pct": refuel_event.get("prev_pct") if refuel_event else None,
         # 🆕 v3.12.26: Engine Health sensors
         "oil_pressure_psi": oil_press,
         "oil_temp_f": oil_temp,

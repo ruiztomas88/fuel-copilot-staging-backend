@@ -481,7 +481,7 @@ def get_all_drivers_data(days: int = 30) -> Dict[str, pd.DataFrame]:
 
     drivers_data = {}
     trucks = get_allowed_trucks()
-    
+
     # 🔧 v5.5.2: Added detailed logging for debugging
     logger.info(f"ML Clustering: Fetching data for {len(trucks)} trucks")
 
@@ -493,7 +493,9 @@ def get_all_drivers_data(days: int = 30) -> Dict[str, pd.DataFrame]:
         else:
             logger.debug(f"ML: {truck_id} has {len(data)} records - skipped (min 10)")
 
-    logger.info(f"ML Clustering: {len(drivers_data)}/{len(trucks)} drivers with sufficient data")
+    logger.info(
+        f"ML Clustering: {len(drivers_data)}/{len(trucks)} drivers with sufficient data"
+    )
     return drivers_data
 
 

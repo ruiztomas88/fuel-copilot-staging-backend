@@ -491,7 +491,7 @@ def analyze_truck_anomaly(truck_id: str) -> Dict[str, Any]:
     """
     # 🔧 v5.5.2: Reduced minimum samples from 50 to 20 for better data availability
     MIN_SAMPLES = 20
-    
+
     detector = EngineAnomalyDetector(contamination=0.05)
 
     # Try to load cached model
