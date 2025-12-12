@@ -58,7 +58,8 @@ class IdleConfig:
     delta_max_lph: float = 10.0
 
     # Fallback defaults
-    fallback_gph: float = 0.8  # Conservative estimate
+    # 🔧 v5.4.3: 0.8 GPH is typical Class 8 idle (was 0.66)
+    fallback_gph: float = 0.8  # Conservative estimate for Class 8
 
     # Idle mode thresholds (GPH)
     normal_max_gph: float = 1.2
@@ -145,10 +146,12 @@ def calculate_idle_consumption(
         float
     ] = None,  # 🆕 v5.3.3: ECU idle fuel counter (gallons)
     previous_total_idle_fuel: Optional[float] = None,  # 🆕 v5.3.3: Previous ECU value
+    previous_idle_gph: Optional[float] = None,  # 🆕 v5.4.3: For EMA smoothing
 ) -> Tuple[float, IdleMethod]:
     """
     Calculate idle fuel consumption using hybrid four-tier method
 
+    🆕 v5.4.3: Simplified to use fuel_rate direct with EMA smoothing and range validation
     🆕 v5.3.3: Added ECU_IDLE_COUNTER as priority method (most accurate: ±0.1%)
 
     Args:
@@ -163,6 +166,7 @@ def calculate_idle_consumption(
         temperature_f: 🆕 Ambient temperature in Fahrenheit (for HVAC adjustment)
         total_idle_fuel: 🆕 v5.3.3 ECU cumulative idle fuel counter (gallons)
         previous_total_idle_fuel: 🆕 v5.3.3 Previous ECU counter value
+        previous_idle_gph: 🆕 v5.4.3 Previous idle value for EMA smoothing
 
     Returns:
         Tuple of (idle_gph, method)
@@ -172,7 +176,7 @@ def calculate_idle_consumption(
     Logic:
         0. 🆕 Try ECU_IDLE_COUNTER if available (most accurate: ±0.1%)
         1. Check if truck is STOPPED and engine ON (rpm > 0 or rpm=None)
-        2. Try SENSOR_FUEL_RATE if available and valid (±2-5%)
+        2. Try SENSOR_FUEL_RATE with range validation (0.5-5.0 GPH) and EMA smoothing
         3. Try CALCULATED_DELTA if time window sufficient (±5-10%)
         4. Fall back to FALLBACK_CONSENSUS (🆕 with temperature adjustment)
     """
@@ -225,16 +229,38 @@ def calculate_idle_consumption(
     # Engine is ON (rpm>0 or rpm=None means transmitting data)
 
     # METHOD 1: SENSOR_FUEL_RATE (priority)
+    # 🆕 v5.4.3: Added range validation and EMA smoothing
     if has_valid_fuel_rate and fuel_rate is not None:
         # Convert LPH to GPH (1 gal = 3.78541 L)
-        idle_gph = fuel_rate / 3.78541
+        idle_gph_raw = fuel_rate / 3.78541
 
-        logger.debug(
-            f"[{truck_id}] Idle via SENSOR: {idle_gph:.2f} gph "
-            f"(fuel_rate: {fuel_rate:.2f} LPH)"
-        )
+        # 🔧 Range validation: Class 8 idle should be 0.5-5.0 GPH
+        # Below 0.5: Sensor error (too low)
+        # Above 5.0: PTO/reefer or sensor error (out of idle range)
+        if 0.5 <= idle_gph_raw <= 5.0:
+            # 🔧 EMA smoothing to reduce noise: 30% new, 70% previous
+            # This filters minor sensor fluctuations while responding to real changes
+            if previous_idle_gph is not None and 0.5 <= previous_idle_gph <= 5.0:
+                idle_gph = 0.3 * idle_gph_raw + 0.7 * previous_idle_gph
+                logger.debug(
+                    f"[{truck_id}] Idle via SENSOR (EMA): {idle_gph:.2f} gph "
+                    f"(raw: {idle_gph_raw:.2f}, prev: {previous_idle_gph:.2f}, fuel_rate: {fuel_rate:.2f} LPH)"
+                )
+            else:
+                # First reading or previous was invalid - use raw value
+                idle_gph = idle_gph_raw
+                logger.debug(
+                    f"[{truck_id}] Idle via SENSOR: {idle_gph:.2f} gph "
+                    f"(fuel_rate: {fuel_rate:.2f} LPH, no EMA - first reading)"
+                )
 
-        return idle_gph, IdleMethod.SENSOR_FUEL_RATE
+            return idle_gph, IdleMethod.SENSOR_FUEL_RATE
+        else:
+            # Sensor out of valid idle range - fall through to next method
+            logger.debug(
+                f"[{truck_id}] fuel_rate {idle_gph_raw:.2f} GPH ({fuel_rate:.2f} LPH) "
+                f"out of valid idle range [0.5, 5.0] GPH - likely sensor error or PTO active"
+            )
     elif fuel_rate is not None:
         logger.debug(
             f"[{truck_id}] fuel_rate {fuel_rate:.2f} LPH out of valid range "

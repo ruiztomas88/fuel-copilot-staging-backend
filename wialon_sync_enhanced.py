@@ -1140,6 +1140,7 @@ def process_truck(
     if truck_status == "STOPPED":
         previous_fuel_L = None
         previous_idle_fuel = None  # 🆕 v5.3.3: Track previous ECU idle counter
+        previous_idle_gph = None  # 🆕 v5.4.3: For EMA smoothing
 
         if truck_id in state_manager.last_sensor_data:
             prev = state_manager.last_sensor_data[truck_id]
@@ -1147,6 +1148,8 @@ def process_truck(
                 previous_fuel_L = (prev["fuel_lvl"] / 100) * tank_capacity_liters
             # 🆕 v5.3.3: Get previous ECU idle fuel counter
             previous_idle_fuel = prev.get("total_idle_fuel")
+            # 🆕 v5.4.3: Get previous idle GPH for EMA smoothing
+            previous_idle_gph = prev.get("idle_gph")
 
         idle_gph, method_enum = calculate_idle_consumption(
             truck_status=truck_status,
@@ -1161,6 +1164,8 @@ def process_truck(
             # 🆕 v5.3.3: Pass ECU idle fuel counter for highest accuracy (±0.1%)
             total_idle_fuel=total_idle_fuel,
             previous_total_idle_fuel=previous_idle_fuel,
+            # 🆕 v5.4.3: Pass previous idle GPH for EMA smoothing
+            previous_idle_gph=previous_idle_gph,
         )
         idle_method = method_enum.value
         idle_mode_enum = detect_idle_mode(idle_gph, idle_config)
@@ -1196,6 +1201,8 @@ def process_truck(
             anchor_type = "MICRO"
 
     # Store last sensor data for next cycle
+    # 🆕 v5.4.3: Include idle_gph for EMA smoothing
+    sensor_data["idle_gph"] = idle_gph
     state_manager.last_sensor_data[truck_id] = sensor_data
 
     # Return complete metrics
