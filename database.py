@@ -557,7 +557,10 @@ class DatabaseManager:
                     # 🔧 v5.4.8: STOPPED trucks show idle consumption from SENSOR
                     if status == "STOPPED":
                         # Priority 1: Current idle_gph from sensor (BEST - real data!)
-                        if idle_gph_sensor is not None and 0.05 <= idle_gph_sensor <= 2.0:
+                        if (
+                            idle_gph_sensor is not None
+                            and 0.05 <= idle_gph_sensor <= 2.0
+                        ):
                             display_idle = round(idle_gph_sensor, 2)
                         # Priority 2: 24h average from idle_gph
                         elif avg_idle_gph_24h is not None and avg_idle_gph_24h > 0.05:

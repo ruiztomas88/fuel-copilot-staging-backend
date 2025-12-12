@@ -752,6 +752,7 @@ def execute_fuel_query(query: str, params: tuple = None) -> list:
     """
     try:
         from database_pool import execute_local_query
+
         return execute_local_query(query, params)
     except Exception as e:
         logger.warning(f"[V3] Fuel DB query error: {e}")

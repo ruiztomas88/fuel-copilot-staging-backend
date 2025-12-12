@@ -36,8 +36,9 @@ class TestLocalPoolConfiguration:
         import database_pool
 
         assert hasattr(database_pool, "LOCAL_DATABASE_URL")
-        assert "fuel_copilot" in database_pool.LOCAL_DATABASE_URL or "LOCAL_DB_NAME" in str(
-            database_pool.LOCAL_DATABASE_URL
+        assert (
+            "fuel_copilot" in database_pool.LOCAL_DATABASE_URL
+            or "LOCAL_DB_NAME" in str(database_pool.LOCAL_DATABASE_URL)
         )
 
     def test_local_pool_variables_initialized(self):

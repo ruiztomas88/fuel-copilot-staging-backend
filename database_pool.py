@@ -117,10 +117,10 @@ def get_session_maker():
 def get_local_engine():
     """
     Get or create the LOCAL SQLAlchemy engine (fuel_copilot database) with connection pooling.
-    
+
     This pool is for local MySQL queries (fuel_metrics, etc.)
     Separate from Wialon remote database pool.
-    
+
     Pool Configuration:
     - pool_size: 20 persistent connections
     - max_overflow: 30 additional connections under load
@@ -131,7 +131,9 @@ def get_local_engine():
     global _local_engine
 
     if _local_engine is None:
-        logger.info("🔌 Creating LOCAL SQLAlchemy engine (fuel_copilot) with connection pool...")
+        logger.info(
+            "🔌 Creating LOCAL SQLAlchemy engine (fuel_copilot) with connection pool..."
+        )
 
         _local_engine = create_engine(
             LOCAL_DATABASE_URL,
@@ -150,7 +152,9 @@ def get_local_engine():
         try:
             with _local_engine.connect() as conn:
                 result = conn.execute(text("SELECT 1"))
-                logger.info(f"✅ LOCAL database pool (fuel_copilot) initialized successfully")
+                logger.info(
+                    f"✅ LOCAL database pool (fuel_copilot) initialized successfully"
+                )
                 logger.info(f"   Pool size: 20 | Max overflow: 30 | Total max: 50")
         except Exception as e:
             logger.error(f"❌ Failed to connect to LOCAL MySQL (fuel_copilot): {e}")
@@ -166,7 +170,9 @@ def get_local_session_maker():
 
     if _LocalSessionLocal is None:
         engine = get_local_engine()
-        _LocalSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        _LocalSessionLocal = sessionmaker(
+            autocommit=False, autoflush=False, bind=engine
+        )
 
     return _LocalSessionLocal
 
@@ -199,7 +205,7 @@ def execute_local_query(query: str, params: tuple = None) -> list:
     """
     Execute query on fuel_copilot database using connection pool.
     Returns list of dict rows or empty list on error.
-    
+
     This replaces direct pymysql connections in predictive_maintenance_v3.py
     """
     try:
@@ -209,7 +215,7 @@ def execute_local_query(query: str, params: tuple = None) -> list:
                 result = conn.execute(text(query), dict(enumerate(params)))
             else:
                 result = conn.execute(text(query))
-            
+
             # Convert to list of dicts
             columns = result.keys()
             rows = [dict(zip(columns, row)) for row in result.fetchall()]
@@ -277,7 +283,7 @@ def get_pool_stats() -> dict:
         Dict with pool metrics for both Wialon and Local pools
     """
     stats = {}
-    
+
     try:
         engine = get_engine()
         stats["wialon"] = {
@@ -287,7 +293,7 @@ def get_pool_stats() -> dict:
         }
     except Exception as e:
         stats["wialon"] = {"status": "error", "error": str(e)}
-    
+
     try:
         local_engine = get_local_engine()
         stats["local"] = {
@@ -297,7 +303,7 @@ def get_pool_stats() -> dict:
         }
     except Exception as e:
         stats["local"] = {"status": "error", "error": str(e)}
-    
+
     return stats
 
 
