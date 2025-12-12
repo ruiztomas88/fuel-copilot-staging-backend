@@ -445,6 +445,8 @@ def get_truck_sensor_data(truck_id: str, days: int = 30) -> pd.DataFrame:
     from database_pool import get_engine
     from sqlalchemy import text
 
+    # 🔧 v5.5.2: Made query more flexible - don't require oil_pressure_psi to be NOT NULL
+    # The extract_features function handles NULL values with defaults
     query = """
         SELECT 
             timestamp_utc,
@@ -460,7 +462,6 @@ def get_truck_sensor_data(truck_id: str, days: int = 30) -> pd.DataFrame:
         FROM fuel_metrics
         WHERE truck_id = :truck_id
         AND timestamp_utc >= NOW() - INTERVAL :days DAY
-        AND oil_pressure_psi IS NOT NULL
         ORDER BY timestamp_utc
     """
 
@@ -470,7 +471,7 @@ def get_truck_sensor_data(truck_id: str, days: int = 30) -> pd.DataFrame:
             df = pd.read_sql(
                 text(query), conn, params={"truck_id": truck_id, "days": days}
             )
-        logger.debug(f"Fetched {len(df)} rows for {truck_id}")
+        logger.info(f"ML: Fetched {len(df)} rows for {truck_id} (last {days} days)")
         return df
     except Exception as e:
         logger.error(f"Error fetching data for {truck_id}: {e}")
@@ -488,6 +489,9 @@ def analyze_truck_anomaly(truck_id: str) -> Dict[str, Any]:
     Returns:
         Anomaly analysis result
     """
+    # 🔧 v5.5.2: Reduced minimum samples from 50 to 20 for better data availability
+    MIN_SAMPLES = 20
+    
     detector = EngineAnomalyDetector(contamination=0.05)
 
     # Try to load cached model
@@ -496,20 +500,20 @@ def analyze_truck_anomaly(truck_id: str) -> Dict[str, Any]:
     # Fetch data
     training_data = get_truck_sensor_data(truck_id, days=30)
 
-    if len(training_data) < 50:
+    if len(training_data) < MIN_SAMPLES:
         return {
             "truck_id": truck_id,
             "anomaly_score": 0,
             "is_anomaly": False,
             "status": "INSUFFICIENT_DATA",
             "anomalous_features": [],
-            "explanation": f"Need at least 50 data points, got {len(training_data)}",
+            "explanation": f"Need at least {MIN_SAMPLES} data points, got {len(training_data)}",
             "data_points_analyzed": len(training_data),
         }
 
     # Train if model not loaded or if we have significantly more data
     if not model_loaded:
-        success = detector.train(training_data)
+        success = detector.train(training_data, min_samples=MIN_SAMPLES)
         if success:
             detector.save_model(truck_id)
         else:
@@ -526,7 +530,7 @@ def analyze_truck_anomaly(truck_id: str) -> Dict[str, Any]:
     recent_data = get_truck_sensor_data(truck_id, days=1)
     if len(recent_data) < 5:
         # Use training data tail if recent is insufficient
-        recent_data = training_data.tail(50)
+        recent_data = training_data.tail(MIN_SAMPLES)
 
     # Predict
     result = detector.predict(recent_data)
