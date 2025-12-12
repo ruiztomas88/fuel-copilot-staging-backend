@@ -28,13 +28,13 @@ _cached_allowed_trucks: Optional[Set[str]] = None
 def get_allowed_trucks() -> Set[str]:
     """
     🆕 v5.4.2: Centralized function to get allowed truck IDs from tanks.yaml.
-    
+
     This is THE SINGLE SOURCE OF TRUTH for which trucks to show in all endpoints.
     Use this function instead of hardcoding truck lists.
-    
+
     Returns:
         Set of truck IDs (e.g., {"VD3579", "JC1282", ...})
-    
+
     Example:
         from config import get_allowed_trucks
         allowed = get_allowed_trucks()
@@ -42,11 +42,11 @@ def get_allowed_trucks() -> Set[str]:
             # process truck
     """
     global _cached_allowed_trucks
-    
+
     # Return cached value if available
     if _cached_allowed_trucks is not None:
         return _cached_allowed_trucks
-    
+
     try:
         tanks_path = Path(__file__).parent / "tanks.yaml"
         if tanks_path.exists():
@@ -54,21 +54,57 @@ def get_allowed_trucks() -> Set[str]:
                 tanks_config = yaml.safe_load(f)
                 if tanks_config and "trucks" in tanks_config:
                     _cached_allowed_trucks = set(tanks_config["trucks"].keys())
-                    logger.info(f"✅ Loaded {len(_cached_allowed_trucks)} trucks from tanks.yaml")
+                    logger.info(
+                        f"✅ Loaded {len(_cached_allowed_trucks)} trucks from tanks.yaml"
+                    )
                     return _cached_allowed_trucks
     except Exception as e:
         logger.warning(f"⚠️ Could not load tanks.yaml: {e}")
-    
+
     # Fallback: hardcoded list (same as database_mysql.py)
     logger.warning("⚠️ Using hardcoded fallback truck list")
     _cached_allowed_trucks = {
-        "VD3579", "JC1282", "JC9352", "NQ6975", "GP9677", "JB8004",
-        "FM2416", "FM3679", "FM9838", "JB6858", "JP3281", "JR7099",
-        "RA9250", "RH1522", "RR1272", "BV6395", "CO0681", "CS8087",
-        "DR6664", "DO9356", "DO9693", "FS7166", "MA8159", "MO0195",
-        "PC1280", "RD5229", "RR3094", "RT9127", "SG5760", "YM6023",
-        "MJ9547", "FM3363", "GC9751", "LV1422", "LC6799", "RC6625",
-        "FF7702", "OG2033", "OS3717", "EM8514", "MR7679",
+        "VD3579",
+        "JC1282",
+        "JC9352",
+        "NQ6975",
+        "GP9677",
+        "JB8004",
+        "FM2416",
+        "FM3679",
+        "FM9838",
+        "JB6858",
+        "JP3281",
+        "JR7099",
+        "RA9250",
+        "RH1522",
+        "RR1272",
+        "BV6395",
+        "CO0681",
+        "CS8087",
+        "DR6664",
+        "DO9356",
+        "DO9693",
+        "FS7166",
+        "MA8159",
+        "MO0195",
+        "PC1280",
+        "RD5229",
+        "RR3094",
+        "RT9127",
+        "SG5760",
+        "YM6023",
+        "MJ9547",
+        "FM3363",
+        "GC9751",
+        "LV1422",
+        "LC6799",
+        "RC6625",
+        "FF7702",
+        "OG2033",
+        "OS3717",
+        "EM8514",
+        "MR7679",
     }
     return _cached_allowed_trucks
 

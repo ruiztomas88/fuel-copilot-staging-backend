@@ -26,13 +26,16 @@ logger = logging.getLogger(__name__)
 # 🆕 v5.4.2: Centralized truck filtering
 try:
     from config import get_allowed_trucks
+
     CENTRALIZED_TRUCKS = True
 except ImportError:
     logger.warning("⚠️ Could not import get_allowed_trucks from config")
     CENTRALIZED_TRUCKS = False
+
     def get_allowed_trucks():
         # Fallback - will be replaced when config.py is available
         return set()
+
 
 # 🆕 v3.12.22: Memory cache for performance optimization
 try:
@@ -540,7 +543,7 @@ def get_fleet_summary() -> Dict[str, Any]:
     """
     # 🆕 v5.4.2: Use centralized truck filtering
     allowed_trucks = list(get_allowed_trucks())
-    
+
     if not allowed_trucks:
         logger.warning("⚠️ No allowed trucks found, using empty list")
         return _empty_fleet_summary()
