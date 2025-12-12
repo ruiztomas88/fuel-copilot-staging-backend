@@ -60,7 +60,6 @@ __all__ = [
     # "maintenance_router",
     # "fleet_router",
     # "analytics_router",
-    
     # 🆕 New routers - safe to use
     "ml_intelligence_router",
 ]
@@ -72,7 +71,7 @@ def include_all_routers(app, auth_dependency=None):
 
     NOTE: Legacy routers are DISABLED until we properly migrate from main.py
     The endpoints already exist in main.py - enabling routers creates duplicates.
-    
+
     NEW routers (ml_intelligence) are ENABLED - they don't exist in main.py
     """
     # 🔧 LEGACY - DISABLED - main.py has these endpoints already
@@ -80,6 +79,6 @@ def include_all_routers(app, auth_dependency=None):
     # app.include_router(maintenance_router)
     # app.include_router(fleet_router)
     # app.include_router(analytics_router)
-    
+
     # 🆕 NEW - ENABLED - these are new endpoints
     app.include_router(ml_intelligence_router)

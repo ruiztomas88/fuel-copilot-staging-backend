@@ -3744,9 +3744,27 @@ async def get_driver_leaderboard():
         engine = get_sqlalchemy_engine()
         gam_engine = GamificationEngine()
 
+        # 🔧 v5.5.1: Filter by allowed trucks from tanks.yaml
+        from config import get_allowed_trucks
+
+        allowed_trucks = get_allowed_trucks()
+
+        if not allowed_trucks:
+            logger.warning("No allowed trucks configured in tanks.yaml")
+            return {
+                "leaderboard": [],
+                "fleet_stats": {},
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+
+        # Build placeholders for IN clause
+        placeholders = ",".join([f":truck_{i}" for i in range(len(allowed_trucks))])
+        truck_params = {f"truck_{i}": t for i, t in enumerate(allowed_trucks)}
+
         # Get driver performance data from last 7 days
         # 🔧 v4.3: Fixed column name mpg -> mpg_current, speed -> speed_mph
-        query = """
+        # 🔧 v5.5.1: Added filter by allowed_trucks
+        query = f"""
             SELECT 
                 fm.truck_id,
                 AVG(CASE WHEN fm.mpg_current > 0 THEN fm.mpg_current END) as mpg,
@@ -3757,6 +3775,7 @@ async def get_driver_leaderboard():
                 COUNT(DISTINCT DATE(fm.timestamp_utc)) as active_days
             FROM fuel_metrics fm
             WHERE fm.timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+            AND fm.truck_id IN ({placeholders})
             GROUP BY fm.truck_id
             HAVING mpg IS NOT NULL
         """
@@ -3764,7 +3783,7 @@ async def get_driver_leaderboard():
         drivers_data = []
         try:
             with engine.connect() as conn:
-                result = conn.execute(text(query))
+                result = conn.execute(text(query), truck_params)
                 rows = result.fetchall()
 
             for row in rows:
@@ -3783,11 +3802,15 @@ async def get_driver_leaderboard():
             logger.warning(f"Leaderboard DB query failed: {db_err}")
 
         # 🆕 v4.3: Fallback - use current truck data if no historical data
+        # 🔧 v5.5.1: Filter by allowed trucks from tanks.yaml
         if not drivers_data:
             logger.info("No leaderboard data, generating from current trucks")
             try:
                 all_trucks = db.get_all_trucks()
-                for tid in all_trucks[:20]:
+                # Filter to only include trucks from tanks.yaml
+                fallback_allowed = get_allowed_trucks()
+                filtered_trucks = [t for t in all_trucks if t in fallback_allowed][:20]
+                for tid in filtered_trucks:
                     truck_data = db.get_truck_latest_record(tid)
                     if truck_data:
                         mpg = truck_data.get("mpg_current", 5.5) or 5.5
