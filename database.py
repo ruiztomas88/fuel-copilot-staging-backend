@@ -462,6 +462,7 @@ class DatabaseManager:
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
                 # 🔧 v3.15.1: Added gallons columns for dashboard display
+                # 🔧 v5.4.8: Added idle_gph for real sensor data
                 result = conn.execute(
                     text(
                         """
@@ -482,7 +483,9 @@ class DatabaseManager:
                         idle_avg.avg_idle_gph_24h,
                         -- 🆕 v3.15.1: Gallons for display
                         t1.estimated_gallons,
-                        t1.sensor_gallons
+                        t1.sensor_gallons,
+                        -- 🆕 v5.4.8: Real idle_gph from sensor
+                        t1.idle_gph
                     FROM fuel_metrics t1
                     INNER JOIN (
                         SELECT truck_id, MAX(timestamp_utc) as max_time
@@ -502,15 +505,16 @@ class DatabaseManager:
                         GROUP BY truck_id
                     ) mpg_avg ON t1.truck_id = mpg_avg.truck_id
                     -- Join with 24h idle averages
+                    -- 🔧 FIX v5.4.8: Use idle_gph column (real sensor data) instead of consumption_gph
                     LEFT JOIN (
                         SELECT 
                             truck_id,
-                            AVG(consumption_gph) as avg_idle_gph_24h
+                            AVG(idle_gph) as avg_idle_gph_24h
                         FROM fuel_metrics
                         WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
                           AND truck_status = 'STOPPED'
                           AND idle_method != 'NOT_IDLE'
-                          AND consumption_gph > 0.1 AND consumption_gph < 5.0
+                          AND idle_gph > 0.05 AND idle_gph < 2.0
                         GROUP BY truck_id
                     ) idle_avg ON t1.truck_id = idle_avg.truck_id
                     WHERE t1.truck_id IN ('VD3579', 'JC1282', 'JC9352', 'NQ6975', 'GP9677', 'JB8004', 'FM2416', 'FM3679', 'FM9838', 'JB6858', 'JP3281', 'JR7099', 'RA9250', 'RH1522', 'RR1272', 'BV6395', 'CO0681', 'CS8087', 'DR6664', 'DO9356', 'DO9693', 'FS7166', 'MA8159', 'MO0195', 'PC1280', 'RD5229', 'RR3094', 'RT9127', 'SG5760', 'YM6023', 'MJ9547', 'FM3363', 'GC9751', 'LV1422', 'LC6799', 'RC6625', 'FF7702', 'OG2033', 'OS3717', 'EM8514', 'MR7679')
@@ -537,6 +541,8 @@ class DatabaseManager:
                     # 🆕 v3.15.1: Gallons for dashboard display
                     estimated_gallons = row[13]
                     sensor_gallons = row[14]
+                    # 🆕 v5.4.8: Real idle_gph from sensor
+                    idle_gph_sensor = row[15]
 
                     # 🔧 v3.12.13: Display MPG only for MOVING, Idle only for STOPPED
                     display_mpg = None
@@ -548,23 +554,20 @@ class DatabaseManager:
                         if mpg_val is not None and 2.5 <= mpg_val <= 15:
                             display_mpg = round(mpg_val, 1)
 
-                    # 🔧 v3.12.13: STOPPED trucks show idle consumption
+                    # 🔧 v5.4.8: STOPPED trucks show idle consumption from SENSOR
                     if status == "STOPPED":
-                        # Priority 1: 24h average
-                        if avg_idle_gph_24h is not None and avg_idle_gph_24h > 0.1:
+                        # Priority 1: Current idle_gph from sensor (BEST - real data!)
+                        if idle_gph_sensor is not None and 0.05 <= idle_gph_sensor <= 2.0:
+                            display_idle = round(idle_gph_sensor, 2)
+                        # Priority 2: 24h average from idle_gph
+                        elif avg_idle_gph_24h is not None and avg_idle_gph_24h > 0.05:
                             display_idle = round(avg_idle_gph_24h, 2)
-                        # Priority 2: Current consumption
-                        elif (
-                            consumption_gph is not None
-                            and 0.1 <= consumption_gph <= 5.0
-                        ):
-                            display_idle = round(consumption_gph, 2)
-                        # Priority 3: Fallback if engine running
-                        elif (rpm and rpm > 0) or (
+                        # Priority 3: Fallback only if engine clearly running
+                        elif (rpm and rpm > 400) or (
                             idle_method
                             and idle_method not in ["NOT_IDLE", "ENGINE_OFF", None, ""]
                         ):
-                            display_idle = 0.8  # Default fallback
+                            display_idle = 0.5  # Conservative fallback (NOT 0.8!)
 
                     trucks.append(
                         {
