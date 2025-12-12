@@ -46,10 +46,10 @@ class IdleConfig:
     """Configuration for idle calculation"""
 
     # fuel_rate sensor validation
-    # 🔧 v3.10.7: Increased min from 0.3 to 1.5 LPH to filter noise
-    # Real idle consumption is 1.9-9.5 LPH (0.5-2.5 GPH)
-    # 0.3 LPH = 0.08 GPH which is too low and likely sensor noise
-    fuel_rate_min_lph: float = 1.5
+    # 🔧 v5.4.5: Reduced min from 1.5 to 0.4 LPH to accept low idle values
+    # Real low idle can be 0.5-1.0 LPH (0.13-0.26 GPH) from ECU sensors
+    # Values below 0.4 LPH (0.1 GPH) are likely engine off or sensor error
+    fuel_rate_min_lph: float = 0.4  # 0.1 GPH minimum
     fuel_rate_max_lph: float = 12.0
 
     # Delta calculation validation

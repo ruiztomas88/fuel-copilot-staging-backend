@@ -51,27 +51,29 @@ for truck_id, unit_id in TRUCK_UNIT_MAP.items():
             AND p = 'fuel_rate'
             AND m > UNIX_TIMESTAMP(NOW() - INTERVAL 7 DAY)
     """
-    
+
     cursor.execute(query, (unit_id,))
     result = cursor.fetchone()
-    
-    if result and result['sample_count'] > 0:
-        count = result['sample_count']
-        avg_lph = result['avg_value']
+
+    if result and result["sample_count"] > 0:
+        count = result["sample_count"]
+        avg_lph = result["avg_value"]
         avg_gph = avg_lph / 3.78541
-        min_lph = result['min_value']
-        max_lph = result['max_value']
-        last_seen = result['last_seen']
-        
+        min_lph = result["min_value"]
+        max_lph = result["max_value"]
+        last_seen = result["last_seen"]
+
         print(f"{truck_id} (unit {unit_id}):")
         print(f"  ✅ fuel_rate EXISTS - {count:,} samples in last 7 days")
-        print(f"  📈 Range: {min_lph:.2f} - {max_lph:.2f} LPH ({min_lph/3.78541:.2f} - {max_lph/3.78541:.2f} GPH)")
+        print(
+            f"  📈 Range: {min_lph:.2f} - {max_lph:.2f} LPH ({min_lph/3.78541:.2f} - {max_lph/3.78541:.2f} GPH)"
+        )
         print(f"  📊 Average: {avg_lph:.2f} LPH ({avg_gph:.2f} GPH)")
         print(f"  🕐 Last seen: {last_seen}")
     else:
         print(f"{truck_id} (unit {unit_id}):")
         print(f"  ❌ fuel_rate NOT FOUND (0 samples in last 7 days)")
-    
+
     print()
 
 print("=" * 80)
@@ -91,10 +93,10 @@ for truck_id, unit_id in TRUCK_UNIT_MAP.items():
         ORDER BY count DESC
         LIMIT 15
     """
-    
+
     cursor.execute(query, (unit_id,))
     results = cursor.fetchall()
-    
+
     print(f"\n{truck_id} (unit {unit_id}) - Top parameters:")
     for row in results:
         print(f"  {row['param']:20s} {row['count']:>6,} samples")

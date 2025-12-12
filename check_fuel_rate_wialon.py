@@ -40,7 +40,7 @@ query = """
 """
 
 cursor.execute(query)
-all_units = [row['unit'] for row in cursor.fetchall()]
+all_units = [row["unit"] for row in cursor.fetchall()]
 
 print(f"Units activos en últimas 24h: {len(all_units)} units")
 print(f"Sample: {all_units[:10]}")
@@ -69,20 +69,24 @@ cursor.execute(query)
 fuel_rate_units = cursor.fetchall()
 
 if fuel_rate_units:
-    print(f"\n✅ Encontrados {len(fuel_rate_units)} units con fuel_rate en última hora:\n")
-    
+    print(
+        f"\n✅ Encontrados {len(fuel_rate_units)} units con fuel_rate en última hora:\n"
+    )
+
     for row in fuel_rate_units:
-        unit = row['unit']
-        count = row['sample_count']
-        avg_lph = row['avg_lph']
+        unit = row["unit"]
+        count = row["sample_count"]
+        avg_lph = row["avg_lph"]
         avg_gph = avg_lph / 3.78541
-        min_lph = row['min_lph']
-        max_lph = row['max_lph']
-        last_seen = row['last_seen']
-        
+        min_lph = row["min_lph"]
+        max_lph = row["max_lph"]
+        last_seen = row["last_seen"]
+
         print(f"Unit {unit}:")
         print(f"  📈 {count:>4} samples")
-        print(f"  📊 Range: {min_lph:.2f} - {max_lph:.2f} LPH ({min_lph/3.78541:.2f} - {max_lph/3.78541:.2f} GPH)")
+        print(
+            f"  📊 Range: {min_lph:.2f} - {max_lph:.2f} LPH ({min_lph/3.78541:.2f} - {max_lph/3.78541:.2f} GPH)"
+        )
         print(f"  📊 Avg: {avg_lph:.2f} LPH ({avg_gph:.2f} GPH)")
         print(f"  🕐 Last: {last_seen}")
         print()
@@ -119,15 +123,15 @@ results = cursor.fetchall()
 
 current_unit = None
 for row in results:
-    if row['unit'] != current_unit:
-        current_unit = row['unit']
+    if row["unit"] != current_unit:
+        current_unit = row["unit"]
         print(f"\n📍 Unit {current_unit}:")
-    
-    param = row['param']
-    count = row['count']
-    
+
+    param = row["param"]
+    count = row["count"]
+
     # Highlight fuel_rate if found
-    if param == 'fuel_rate':
+    if param == "fuel_rate":
         print(f"  ✅ {param:20s} {count:>5,} samples  <-- FUEL_RATE!")
     else:
         print(f"     {param:20s} {count:>5,} samples")

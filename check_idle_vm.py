@@ -26,9 +26,9 @@ try:
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
     )
-    
+
     cursor = conn.cursor()
-    
+
     # Get latest idle readings for each truck
     query = """
         SELECT 
@@ -44,38 +44,40 @@ try:
             AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 10 MINUTE)
         ORDER BY truck_id, timestamp_utc DESC
     """
-    
+
     cursor.execute(query)
     rows = cursor.fetchall()
-    
+
     # Get latest per truck
     trucks = {}
     for row in rows:
-        if row['truck_id'] not in trucks:
-            trucks[row['truck_id']] = row
-    
+        if row["truck_id"] not in trucks:
+            trucks[row["truck_id"]] = row
+
     print("📊 CURRENT IDLE STATUS (fuel_copilot database)")
     print("-" * 80)
-    
-    for truck_id in ['RT9127', 'RT9129', 'RT9134', 'RT9135']:
+
+    for truck_id in ["RT9127", "RT9129", "RT9134", "RT9135"]:
         if truck_id in trucks:
             data = trucks[truck_id]
-            method = data['idle_method']
-            
-            if method == 'SENSOR_FUEL_RATE':
+            method = data["idle_method"]
+
+            if method == "SENSOR_FUEL_RATE":
                 icon = "✅"
-            elif method == 'FALLBACK_CONSENSUS':
+            elif method == "FALLBACK_CONSENSUS":
                 icon = "⚠️ "
             else:
                 icon = "❓"
-            
-            print(f"{truck_id}: {data['idle_gph']:.2f} GPH  {icon} {method}  "
-                  f"(RPM: {data['rpm'] or 'N/A'}, {data['age_seconds']}s ago)")
+
+            print(
+                f"{truck_id}: {data['idle_gph']:.2f} GPH  {icon} {method}  "
+                f"(RPM: {data['rpm'] or 'N/A'}, {data['age_seconds']}s ago)"
+            )
         else:
             print(f"{truck_id}: NO DATA (not stopped in last 10min)")
-    
+
     conn.close()
-    
+
 except Exception as e:
     print(f"❌ Error connecting to fuel_copilot DB: {e}")
 
@@ -94,19 +96,19 @@ try:
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
     )
-    
+
     cursor = wialon_conn.cursor()
-    
+
     print("🔬 WIALON fuel_rate SENSOR (last 5 minutes)")
     print("-" * 80)
-    
+
     unit_map = {
         "RT9127": 2201,
         "RT9129": 2202,
         "RT9134": 2203,
         "RT9135": 2204,
     }
-    
+
     for truck_id, unit_id in unit_map.items():
         # Check fuel_rate
         query = """
@@ -118,7 +120,7 @@ try:
         """
         cursor.execute(query, (unit_id,))
         fuel_rate_row = cursor.fetchone()
-        
+
         # Check RPM
         query = """
             SELECT value, FROM_UNIXTIME(m) as ts, TIMESTAMPDIFF(SECOND, FROM_UNIXTIME(m), NOW()) as age
@@ -129,29 +131,31 @@ try:
         """
         cursor.execute(query, (unit_id,))
         rpm_row = cursor.fetchone()
-        
+
         if fuel_rate_row:
-            lph = fuel_rate_row['value']
+            lph = fuel_rate_row["value"]
             gph = lph / 3.78541
-            age = fuel_rate_row['age']
-            
+            age = fuel_rate_row["age"]
+
             # Check if in valid range
             if 0.5 <= gph <= 5.0:
                 range_status = "✅ VALID"
             else:
                 range_status = f"⚠️  OUT OF RANGE (should be 0.5-5.0)"
-            
-            print(f"{truck_id}: fuel_rate = {lph:.2f} LPH ({gph:.2f} GPH)  {range_status}  ({age}s ago)")
+
+            print(
+                f"{truck_id}: fuel_rate = {lph:.2f} LPH ({gph:.2f} GPH)  {range_status}  ({age}s ago)"
+            )
         else:
             print(f"{truck_id}: fuel_rate = ❌ NOT FOUND")
-        
+
         if rpm_row:
-            rpm = rpm_row['value']
+            rpm = rpm_row["value"]
             state = "🟢 IDLE" if rpm < 1000 else "🔵 RUNNING"
             print(f"         rpm = {rpm:.0f}  {state}")
-    
+
     wialon_conn.close()
-    
+
 except Exception as e:
     print(f"❌ Error connecting to Wialon DB: {e}")
 

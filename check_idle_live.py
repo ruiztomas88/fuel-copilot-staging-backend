@@ -42,7 +42,9 @@ query = """
         AND truck_status = 'STOPPED'
         AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 15 MINUTE)
     ORDER BY truck_id, timestamp_utc DESC
-""" % ','.join(['%s'] * len(allowed_trucks))
+""" % ",".join(
+    ["%s"] * len(allowed_trucks)
+)
 
 cursor = conn.cursor()
 cursor.execute(query, allowed_trucks)
@@ -51,7 +53,7 @@ rows = cursor.fetchall()
 # Group by truck (get latest per truck)
 trucks_data = {}
 for row in rows:
-    truck_id = row['truck_id']
+    truck_id = row["truck_id"]
     if truck_id not in trucks_data:
         trucks_data[truck_id] = row
 
@@ -61,20 +63,22 @@ print("-" * 80)
 for truck_id in sorted(allowed_trucks):
     if truck_id in trucks_data:
         data = trucks_data[truck_id]
-        age = data['age_minutes']
-        
+        age = data["age_minutes"]
+
         # Color code based on method
-        if data['idle_method'] == 'SENSOR_FUEL_RATE':
+        if data["idle_method"] == "SENSOR_FUEL_RATE":
             status = "✅ SENSOR"
-        elif data['idle_method'] == 'ECU_IDLE_COUNTER':
+        elif data["idle_method"] == "ECU_IDLE_COUNTER":
             status = "✅ ECU"
-        elif data['idle_method'] == 'FALLBACK_CONSENSUS':
+        elif data["idle_method"] == "FALLBACK_CONSENSUS":
             status = "⚠️  FALLBACK"
         else:
             status = f"❓ {data['idle_method']}"
-        
-        print(f"{truck_id}  {data['idle_gph']:.2f} GPH  {status}  "
-              f"(RPM: {data['rpm'] or 'N/A'}, {age}min ago)")
+
+        print(
+            f"{truck_id}  {data['idle_gph']:.2f} GPH  {status}  "
+            f"(RPM: {data['rpm'] or 'N/A'}, {age}min ago)"
+        )
     else:
         print(f"{truck_id}  -- GPH  ❌ NO DATA (not stopped in last 15min)")
 
@@ -106,11 +110,11 @@ for truck_id in sorted(allowed_trucks):
         "RT9134": 2203,
         "RT9135": 2204,
     }
-    
+
     unit_id = unit_map.get(truck_id)
     if not unit_id:
         continue
-    
+
     query = """
         SELECT 
             p as param,
@@ -124,31 +128,33 @@ for truck_id in sorted(allowed_trucks):
         ORDER BY p, m DESC
         LIMIT 10
     """
-    
+
     wialon_cursor.execute(query, (unit_id,))
     sensor_rows = wialon_cursor.fetchall()
-    
+
     if sensor_rows:
         fuel_rate_found = False
         rpm_found = False
-        
+
         for row in sensor_rows:
-            if row['param'] == 'fuel_rate':
+            if row["param"] == "fuel_rate":
                 fuel_rate_found = True
-                lph = row['value']
+                lph = row["value"]
                 gph = lph / 3.78541
-                age = row['age_seconds']
-                print(f"{truck_id}  fuel_rate: {lph:.2f} LPH ({gph:.2f} GPH)  {age}s ago  ✅")
+                age = row["age_seconds"]
+                print(
+                    f"{truck_id}  fuel_rate: {lph:.2f} LPH ({gph:.2f} GPH)  {age}s ago  ✅"
+                )
                 break
-        
+
         if not fuel_rate_found:
             print(f"{truck_id}  fuel_rate: NOT FOUND in last 5min  ❌")
-        
+
         for row in sensor_rows:
-            if row['param'] == 'rpm':
+            if row["param"] == "rpm":
                 rpm_found = True
-                rpm = row['value']
-                age = row['age_seconds']
+                rpm = row["value"]
+                age = row["age_seconds"]
                 status = "idle" if rpm < 1000 else "running"
                 print(f"{truck_id}  rpm: {rpm:.0f} ({status})  {age}s ago")
                 break
