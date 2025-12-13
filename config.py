@@ -175,7 +175,7 @@ class DatabaseConfig:
     HOST: str = os.getenv("MYSQL_HOST", "localhost")
     PORT: int = int(os.getenv("MYSQL_PORT", "3306"))
     USER: str = os.getenv("MYSQL_USER", "fuel_admin")
-    PASSWORD: str = os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!")
+    PASSWORD: str = os.getenv("MYSQL_PASSWORD", "")  # Required - set via environment
     DATABASE: str = os.getenv("MYSQL_DATABASE", "fuel_copilot")
     CHARSET: str = "utf8mb4"
 

@@ -463,17 +463,21 @@ def detect_refuel(
     if sensor_pct is None or estimated_pct is None:
         return None
 
-    # Time gap validation (5 min to 72 hours)
+    # 🔧 FIX v5.6.1: Use configurable gap limit (was hardcoded 72h)
+    MAX_GAP_HOURS = float(os.getenv("MAX_REFUEL_GAP_HOURS", "96"))  # 4 days default
+
+    # Time gap validation (5 min to MAX_GAP_HOURS)
     # 🔧 v3.15.4: Extended from 2h to 24h for overnight refuels
     # 🔧 v5.5.3: Extended to 72h for weekend/holiday refuels (VD3579 missed refuel case)
+    # 🔧 v5.6.1: Extended to 96h (configurable) for JC1282 case
     if time_gap_hours < 5 / 60:
         return None
-    if time_gap_hours > 72:
+    if time_gap_hours > MAX_GAP_HOURS:
         # 🔧 v5.5.3: Log when rejecting due to large gap (for debugging)
         fuel_jump = sensor_pct - estimated_pct
-        if fuel_jump > 15:  # Would have been a refuel
+        if fuel_jump > 10:  # 🔧 v5.6.1: Lowered from 15 for better logging
             logger.warning(
-                f"⏭️ [{truck_id}] Potential refuel REJECTED: gap={time_gap_hours:.1f}h > 72h max, "
+                f"⏭️ [{truck_id}] Potential refuel REJECTED: gap={time_gap_hours:.1f}h > {MAX_GAP_HOURS}h max, "
                 f"jump={fuel_jump:.1f}% ({(fuel_jump/100)*tank_capacity_gal:.1f} gal)"
             )
         return None
@@ -482,10 +486,13 @@ def detect_refuel(
     # fuel_increase = current_sensor - kalman_estimate (what we expected)
     fuel_increase_pct = sensor_pct - estimated_pct
 
-    # Minimum thresholds
-    # 🔧 v3.12.16: 15% threshold reduces false positives from sensor noise
-    min_increase_pct = 15.0
-    min_increase_gal = 10.0
+    # 🔧 FIX v5.6.1: Use settings instead of hardcoded values
+    # This allows runtime configuration via environment variables
+    from settings import get_settings
+
+    _settings = get_settings()
+    min_increase_pct = _settings.fuel.min_refuel_jump_pct  # Default 10.0 (was 15.0)
+    min_increase_gal = _settings.fuel.min_refuel_gallons  # Default 5.0 (was 10.0)
 
     # 🔧 v3.12.28: Apply refuel_factor for sensor calibration
     refuel_factor = get_refuel_factor(truck_id)
@@ -496,10 +503,11 @@ def detect_refuel(
         # Extra safety: reject small jumps when tank is already nearly full
         # (likely sensor noise, not actual refuel)
         # 🔧 v3.15.3: Allow refuels >25 gal even near full tank (FF7702 case)
-        # A jump from 80%→99% is valid (~38 gal) even though <20% increase
-        if sensor_pct > 95 and fuel_increase_pct < 20 and increase_gal < 25:
+        # 🔧 FIX v5.6.1: Reduced from 25→15 gal threshold (JC1282 case)
+        # Now: reject only if BOTH <10% AND <15 gal (was <20% AND <25 gal)
+        if sensor_pct > 95 and fuel_increase_pct < 10 and increase_gal < 15:
             logger.debug(
-                f"⏭️ Skipping small near-full jump: {truck_id} +{fuel_increase_pct:.1f}% +{increase_gal:.1f}gal"
+                f"⏭️ Skipping tiny near-full jump: {truck_id} +{fuel_increase_pct:.1f}% +{increase_gal:.1f}gal"
             )
             return None
 

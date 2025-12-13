@@ -34,12 +34,17 @@ def get_db_connection():
 
     load_dotenv()
 
+    _password = os.getenv("LOCAL_DB_PASS")
+    if not _password:
+        logger.error("LOCAL_DB_PASS environment variable required")
+        return None
+
     try:
         conn = pymysql.connect(
             host=os.getenv("LOCAL_DB_HOST", "localhost"),
             port=int(os.getenv("LOCAL_DB_PORT", 3306)),
             user=os.getenv("LOCAL_DB_USER", "fuel_admin"),
-            password=os.getenv("LOCAL_DB_PASS", "FuelCopilot2025!"),
+            password=_password,
             database=os.getenv("LOCAL_DB_NAME", "fuel_copilot"),
             cursorclass=pymysql.cursors.DictCursor,
             connect_timeout=5,

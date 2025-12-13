@@ -351,17 +351,17 @@ def test_drift_warning():
 
 
 def test_large_gap_no_consumption():
-    """Large time gap reduces consumption (capped)"""
+    """Large time gap is skipped to prevent wild estimations"""
     est = make_estimator(50.0)
     initial_L = est.L
     assert initial_L is not None
 
-    # 2.5 hour gap - consumption may be capped
+    # 2.5 hour gap - should be skipped (> 1.0 hour threshold)
     est.predict(dt_hours=2.5, consumption_lph=20.0)
 
-    # Should consume something (capped max)
+    # Level should remain unchanged (gap skipped)
     assert est.L is not None
-    assert est.L < initial_L  # Some consumption happened
+    assert est.L == initial_L  # No consumption - gap was skipped
 
 
 def test_normal_gap_consumes():

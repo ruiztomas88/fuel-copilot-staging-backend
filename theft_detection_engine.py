@@ -232,11 +232,15 @@ CONFIG = TheftDetectionConfig()
 
 def get_wialon_connection():
     """Get connection to Wialon remote database (read-only sensor data)"""
+    _password = os.getenv("WIALON_DB_PASS") or os.getenv("DB_PASS")
+    if not _password:
+        raise ValueError("WIALON_DB_PASS or DB_PASS environment variable required")
+
     return pymysql.connect(
         host=os.getenv("WIALON_DB_HOST", os.getenv("DB_HOST", "20.127.200.135")),
         port=int(os.getenv("WIALON_DB_PORT", os.getenv("DB_PORT", "3306"))),
         user=os.getenv("WIALON_DB_USER", os.getenv("DB_USER", "tomas")),
-        password=os.getenv("WIALON_DB_PASS", os.getenv("DB_PASS", "Tomas2025")),
+        password=_password,
         database=os.getenv("WIALON_DB_NAME", os.getenv("DB_NAME", "wialon_collect")),
         cursorclass=pymysql.cursors.DictCursor,
     )

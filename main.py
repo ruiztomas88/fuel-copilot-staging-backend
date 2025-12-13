@@ -18,6 +18,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field  # 🆕 v5.5.4: For batch endpoint request model
@@ -346,6 +347,46 @@ All responses follow this structure:
             "name": "Export",
             "description": "Data export to CSV and Excel formats.",
         },
+        {
+            "name": "Authentication",
+            "description": "JWT authentication, login, and token management.",
+        },
+        {
+            "name": "Admin",
+            "description": "Administrative endpoints for carrier and user management.",
+        },
+        {
+            "name": "Cost Analysis",
+            "description": "Cost per mile calculations and speed impact analysis.",
+        },
+        {
+            "name": "Fleet Utilization",
+            "description": "Fleet utilization analysis and optimization recommendations.",
+        },
+        {
+            "name": "Gamification",
+            "description": "Driver leaderboards, badges, and performance gamification.",
+        },
+        {
+            "name": "Geofencing",
+            "description": "Geofence zones, events, and location history tracking.",
+        },
+        {
+            "name": "Engine Health",
+            "description": "Engine health monitoring, alerts, and maintenance predictions.",
+        },
+        {
+            "name": "Predictive Maintenance",
+            "description": "V3/V5 predictive maintenance with operational context.",
+        },
+        {
+            "name": "Refuels",
+            "description": "Refuel events, analytics, and theft detection.",
+        },
+        {
+            "name": "ML Intelligence",
+            "description": "Machine learning anomaly detection and driver clustering.",
+        },
     ],
     lifespan=lifespan,  # 🔧 FIX v3.9.3: Use lifespan instead of on_event
 )
@@ -533,6 +574,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 app.add_middleware(RateLimitMiddleware)
 logger.info("✅ Rate limiting middleware enabled")
 
+# 🆕 v5.6: GZip compression for large responses (>1KB)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+logger.info("✅ GZip compression middleware enabled")
+
 # CORS configuration - allow React frontend
 app.add_middleware(
     CORSMiddleware,
@@ -579,213 +624,217 @@ except Exception as e:
 # ============================================================================
 # 🆕 v3.10.8: AUTHENTICATION ENDPOINTS
 # ============================================================================
+# ⚠️ v5.6.0: MIGRATED TO routers/auth_router.py - DO NOT ENABLE
+# These endpoints are now served by the auth_router module
+# ============================================================================
+
+# @app.post(
+#     "/fuelAnalytics/api/auth/login", response_model=Token, tags=["Authentication"]
+# )
+# async def login(credentials: UserLogin):
+#     """
+#     Authenticate user and return JWT token.
+#
+#     Credentials:
+#     - admin / FuelAdmin2025! (super_admin - all carriers)
+#     - skylord / Skylord2025! (carrier_admin - skylord only)
+#     - skylord_viewer / SkylordView2025 (viewer - skylord read-only)
+#     """
+#     user = authenticate_user(credentials.username, credentials.password)
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Invalid username or password",
+#             headers={"WWW-Authenticate": "Bearer"},
+#         )
+#
+#     from datetime import timedelta
+#
+#     ACCESS_TOKEN_EXPIRE_HOURS = 24
+#
+#     access_token = create_access_token(
+#         user=user, expires_delta=timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+#     )
+#
+#     return Token(
+#         access_token=access_token,
+#         token_type="bearer",
+#         expires_in=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
+#         user={
+#             "username": user["username"],
+#             "name": user["name"],
+#             "carrier_id": user["carrier_id"],
+#             "role": user["role"],
+#             "email": user.get("email"),
+#         },
+#     )
 
 
-@app.post(
-    "/fuelAnalytics/api/auth/login", response_model=Token, tags=["Authentication"]
-)
-async def login(credentials: UserLogin):
-    """
-    Authenticate user and return JWT token.
-
-    Credentials:
-    - admin / FuelAdmin2025! (super_admin - all carriers)
-    - skylord / Skylord2025! (carrier_admin - skylord only)
-    - skylord_viewer / SkylordView2025 (viewer - skylord read-only)
-    """
-    user = authenticate_user(credentials.username, credentials.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    from datetime import timedelta
-
-    ACCESS_TOKEN_EXPIRE_HOURS = 24
-
-    access_token = create_access_token(
-        user=user, expires_delta=timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
-    )
-
-    return Token(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
-        user={
-            "username": user["username"],
-            "name": user["name"],
-            "carrier_id": user["carrier_id"],
-            "role": user["role"],
-            "email": user.get("email"),
-        },
-    )
+# @app.get("/fuelAnalytics/api/auth/me", tags=["Authentication"])
+# async def get_current_user_info(current_user: TokenData = Depends(require_auth)):
+#     """Get current authenticated user info."""
+#     user_data = USERS_DB.get(current_user.username, {})
+#     return {
+#         "username": current_user.username,
+#         "name": user_data.get("name", current_user.username),
+#         "carrier_id": current_user.carrier_id,
+#         "role": current_user.role,
+#         "email": user_data.get("email"),
+#         "permissions": {
+#             "can_view_all_carriers": current_user.carrier_id == "*",
+#             "can_edit": current_user.role in ["super_admin", "carrier_admin"],
+#             "can_manage_users": current_user.role == "super_admin",
+#         },
+#     }
 
 
-@app.get("/fuelAnalytics/api/auth/me", tags=["Authentication"])
-async def get_current_user_info(current_user: TokenData = Depends(require_auth)):
-    """Get current authenticated user info."""
-    user_data = USERS_DB.get(current_user.username, {})
-    return {
-        "username": current_user.username,
-        "name": user_data.get("name", current_user.username),
-        "carrier_id": current_user.carrier_id,
-        "role": current_user.role,
-        "email": user_data.get("email"),
-        "permissions": {
-            "can_view_all_carriers": current_user.carrier_id == "*",
-            "can_edit": current_user.role in ["super_admin", "carrier_admin"],
-            "can_manage_users": current_user.role == "super_admin",
-        },
-    }
-
-
-@app.post(
-    "/fuelAnalytics/api/auth/refresh", response_model=Token, tags=["Authentication"]
-)
-async def refresh_token(current_user: TokenData = Depends(require_auth)):
-    """Refresh JWT token before it expires."""
-    user_data = USERS_DB.get(current_user.username)
-    if not user_data:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    from datetime import timedelta
-
-    ACCESS_TOKEN_EXPIRE_HOURS = 24
-
-    new_token = create_access_token(
-        user=user_data, expires_delta=timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
-    )
-
-    return Token(
-        access_token=new_token,
-        token_type="bearer",
-        expires_in=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
-        user={
-            "username": user_data["username"],
-            "name": user_data["name"],
-            "carrier_id": user_data["carrier_id"],
-            "role": user_data["role"],
-            "email": user_data.get("email"),
-        },
-    )
+# @app.post(
+#     "/fuelAnalytics/api/auth/refresh", response_model=Token, tags=["Authentication"]
+# )
+# async def refresh_token(current_user: TokenData = Depends(require_auth)):
+#     """Refresh JWT token before it expires."""
+#     user_data = USERS_DB.get(current_user.username)
+#     if not user_data:
+#         raise HTTPException(status_code=401, detail="User not found")
+#
+#     from datetime import timedelta
+#
+#     ACCESS_TOKEN_EXPIRE_HOURS = 24
+#
+#     new_token = create_access_token(
+#         user=user_data, expires_delta=timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+#     )
+#
+#     return Token(
+#         access_token=new_token,
+#         token_type="bearer",
+#         expires_in=ACCESS_TOKEN_EXPIRE_HOURS * 3600,
+#         user={
+#             "username": user_data["username"],
+#             "name": user_data["name"],
+#             "carrier_id": user_data["carrier_id"],
+#             "role": user_data["role"],
+#             "email": user_data.get("email"),
+#         },
+#     )
 
 
 # ============================================================================
 # 🆕 v3.10.8: ADMIN ENDPOINTS (Super Admin Only)
 # ============================================================================
+# ⚠️ v5.6.0: MIGRATED TO routers/admin_router.py - DO NOT ENABLE
+# These endpoints are now served by the admin_router module
+# ============================================================================
+
+# @app.get("/fuelAnalytics/api/admin/carriers", tags=["Admin"])
+# async def list_carriers(current_user: TokenData = Depends(require_super_admin)):
+#     """
+#     List all carriers (super_admin only).
+#     Reads from MySQL carriers table.
+#     """
+#     try:
+#         from database_mysql import get_sqlalchemy_engine
+#         from sqlalchemy import text
+#
+#         engine = get_sqlalchemy_engine()
+#         with engine.connect() as conn:
+#             result = conn.execute(
+#                 text(
+#                     """
+#                 SELECT carrier_id, name, contact_email, timezone,
+#                        created_at, updated_at, active
+#                 FROM carriers
+#                 ORDER BY name
+#             """
+#                 )
+#             )
+#             carriers = [dict(row._mapping) for row in result]
+#
+#             # Add truck count for each carrier
+#             for carrier in carriers:
+#                 count_result = conn.execute(
+#                     text(
+#                         """
+#                     SELECT COUNT(DISTINCT truck_id) as truck_count
+#                     FROM fuel_metrics
+#                     WHERE carrier_id = :carrier_id
+#                 """
+#                     ),
+#                     {"carrier_id": carrier["carrier_id"]},
+#                 )
+#                 carrier["truck_count"] = count_result.scalar() or 0
+#
+#             return {"carriers": carriers, "total": len(carriers)}
+#     except Exception as e:
+#         logger.error(f"Error listing carriers: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/admin/carriers", tags=["Admin"])
-async def list_carriers(current_user: TokenData = Depends(require_super_admin)):
-    """
-    List all carriers (super_admin only).
-    Reads from MySQL carriers table.
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-        with engine.connect() as conn:
-            result = conn.execute(
-                text(
-                    """
-                SELECT carrier_id, name, contact_email, timezone, 
-                       created_at, updated_at, active
-                FROM carriers
-                ORDER BY name
-            """
-                )
-            )
-            carriers = [dict(row._mapping) for row in result]
-
-            # Add truck count for each carrier
-            for carrier in carriers:
-                count_result = conn.execute(
-                    text(
-                        """
-                    SELECT COUNT(DISTINCT truck_id) as truck_count
-                    FROM fuel_metrics
-                    WHERE carrier_id = :carrier_id
-                """
-                    ),
-                    {"carrier_id": carrier["carrier_id"]},
-                )
-                carrier["truck_count"] = count_result.scalar() or 0
-
-            return {"carriers": carriers, "total": len(carriers)}
-    except Exception as e:
-        logger.error(f"Error listing carriers: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# @app.get("/fuelAnalytics/api/admin/users", tags=["Admin"])
+# async def list_users(current_user: TokenData = Depends(require_super_admin)):
+#     """List all users (super_admin only)."""
+#     users = []
+#     for username, user_data in USERS_DB.items():
+#         users.append(
+#             {
+#                 "username": username,
+#                 "name": user_data["name"],
+#                 "carrier_id": user_data["carrier_id"],
+#                 "role": user_data["role"],
+#                 "email": user_data.get("email"),
+#                 "active": user_data.get("active", True),
+#             }
+#         )
+#     return {"users": users, "total": len(users)}
 
 
-@app.get("/fuelAnalytics/api/admin/users", tags=["Admin"])
-async def list_users(current_user: TokenData = Depends(require_super_admin)):
-    """List all users (super_admin only)."""
-    users = []
-    for username, user_data in USERS_DB.items():
-        users.append(
-            {
-                "username": username,
-                "name": user_data["name"],
-                "carrier_id": user_data["carrier_id"],
-                "role": user_data["role"],
-                "email": user_data.get("email"),
-                "active": user_data.get("active", True),
-            }
-        )
-    return {"users": users, "total": len(users)}
-
-
-@app.get("/fuelAnalytics/api/admin/stats", tags=["Admin"])
-async def get_admin_stats(current_user: TokenData = Depends(require_super_admin)):
-    """
-    Get system-wide statistics (super_admin only).
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-        with engine.connect() as conn:
-            # Total records
-            total_records = conn.execute(
-                text("SELECT COUNT(*) FROM fuel_metrics")
-            ).scalar()
-
-            # Records by carrier
-            carrier_stats = conn.execute(
-                text(
-                    """
-                SELECT carrier_id, 
-                       COUNT(*) as records,
-                       COUNT(DISTINCT truck_id) as trucks,
-                       MIN(timestamp_utc) as first_record,
-                       MAX(timestamp_utc) as last_record
-                FROM fuel_metrics
-                GROUP BY carrier_id
-            """
-                )
-            )
-
-            carriers = [dict(row._mapping) for row in carrier_stats]
-
-            # Total refuels
-            total_refuels = (
-                conn.execute(text("SELECT COUNT(*) FROM refuel_events")).scalar() or 0
-            )
-
-            return {
-                "total_records": total_records,
-                "total_refuels": total_refuels,
-                "carriers": carriers,
-                "users_count": len(USERS_DB),
-            }
-    except Exception as e:
-        logger.error(f"Error getting admin stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# @app.get("/fuelAnalytics/api/admin/stats", tags=["Admin"])
+# async def get_admin_stats(current_user: TokenData = Depends(require_super_admin)):
+#     """
+#     Get system-wide statistics (super_admin only).
+#     """
+#     try:
+#         from database_mysql import get_sqlalchemy_engine
+#         from sqlalchemy import text
+#
+#         engine = get_sqlalchemy_engine()
+#         with engine.connect() as conn:
+#             # Total records
+#             total_records = conn.execute(
+#                 text("SELECT COUNT(*) FROM fuel_metrics")
+#             ).scalar()
+#
+#             # Records by carrier
+#             carrier_stats = conn.execute(
+#                 text(
+#                     """
+#                 SELECT carrier_id,
+#                        COUNT(*) as records,
+#                        COUNT(DISTINCT truck_id) as trucks,
+#                        MIN(timestamp_utc) as first_record,
+#                        MAX(timestamp_utc) as last_record
+#                 FROM fuel_metrics
+#                 GROUP BY carrier_id
+#             """
+#                 )
+#             )
+#
+#             carriers = [dict(row._mapping) for row in carrier_stats]
+#
+#             # Total refuels
+#             total_refuels = (
+#                 conn.execute(text("SELECT COUNT(*) FROM refuel_events")).scalar() or 0
+#             )
+#
+#             return {
+#                 "total_records": total_records,
+#                 "total_refuels": total_refuels,
+#                 "carriers": carriers,
+#                 "users_count": len(USERS_DB),
+#             }
+#     except Exception as e:
+#         logger.error(f"Error getting admin stats: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
@@ -2564,89 +2613,89 @@ async def get_inefficiency_by_truck_endpoint(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@app.get("/fuelAnalytics/api/geofence/events")
-async def get_geofence_events_endpoint(
-    truck_id: Optional[str] = Query(None, description="Specific truck ID"),
-    hours: int = Query(24, ge=1, le=168, description="Hours of history"),
-):
-    """
-    Get geofence entry/exit events for trucks.
-
-    Tracks when trucks enter or exit defined zones.
-    Useful for monitoring:
-    - Fuel station visits
-    - Unauthorized stops
-    - Route compliance
-    """
-    try:
-        from database_mysql import get_geofence_events
-
-        result = get_geofence_events(truck_id=truck_id, hours_back=hours)
-        return result
-
-    except Exception as e:
-        logger.error(f"Geofence events error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/geofence/location-history/{truck_id}")
-async def get_location_history(
-    truck_id: str,
-    hours: int = Query(24, ge=1, le=168, description="Hours of history"),
-):
-    """
-    Get GPS location history for a truck (for map visualization).
-
-    Returns a list of location points with timestamps,
-    speed, status, and fuel level.
-    """
-    try:
-        from database_mysql import get_truck_location_history
-
-        result = get_truck_location_history(truck_id=truck_id, hours_back=hours)
-        return {"truck_id": truck_id, "hours": hours, "locations": result}
-
-    except Exception as e:
-        logger.error(f"Location history error for {truck_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/geofence/zones")
-async def get_geofence_zones():
-    """
-    Get list of defined geofence zones.
-
-    Returns zone configurations including:
-    - Zone ID and name
-    - Type (CIRCLE, POLYGON)
-    - Coordinates and radius
-    - Alert settings
-    """
-    try:
-        from database_mysql import GEOFENCE_ZONES
-
-        zones = []
-        for zone_id, zone in GEOFENCE_ZONES.items():
-            zones.append(
-                {
-                    "zone_id": zone_id,
-                    "name": zone["name"],
-                    "type": zone["type"],
-                    "latitude": zone.get("lat"),
-                    "longitude": zone.get("lon"),
-                    "radius_miles": zone.get("radius_miles"),
-                    "alert_on_enter": zone.get("alert_on_enter", False),
-                    "alert_on_exit": zone.get("alert_on_exit", False),
-                }
-            )
-
-        return {"zones": zones, "total": len(zones)}
-
-    except Exception as e:
-        logger.error(f"Get geofence zones error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/geofence/events")
+# MIGRATED_TO_ROUTER: async def get_geofence_events_endpoint(
+# MIGRATED_TO_ROUTER:     truck_id: Optional[str] = Query(None, description="Specific truck ID"),
+# MIGRATED_TO_ROUTER:     hours: int = Query(24, ge=1, le=168, description="Hours of history"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     Get geofence entry/exit events for trucks.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Tracks when trucks enter or exit defined zones.
+# MIGRATED_TO_ROUTER:     Useful for monitoring:
+# MIGRATED_TO_ROUTER:     - Fuel station visits
+# MIGRATED_TO_ROUTER:     - Unauthorized stops
+# MIGRATED_TO_ROUTER:     - Route compliance
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_geofence_events
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         result = get_geofence_events(truck_id=truck_id, hours_back=hours)
+# MIGRATED_TO_ROUTER:         return result
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Geofence events error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/geofence/location-history/{truck_id}")
+# MIGRATED_TO_ROUTER: async def get_location_history(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER:     hours: int = Query(24, ge=1, le=168, description="Hours of history"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     Get GPS location history for a truck (for map visualization).
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns a list of location points with timestamps,
+# MIGRATED_TO_ROUTER:     speed, status, and fuel level.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_truck_location_history
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         result = get_truck_location_history(truck_id=truck_id, hours_back=hours)
+# MIGRATED_TO_ROUTER:         return {"truck_id": truck_id, "hours": hours, "locations": result}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Location history error for {truck_id}: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/geofence/zones")
+# MIGRATED_TO_ROUTER: async def get_geofence_zones():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     Get list of defined geofence zones.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns zone configurations including:
+# MIGRATED_TO_ROUTER:     - Zone ID and name
+# MIGRATED_TO_ROUTER:     - Type (CIRCLE, POLYGON)
+# MIGRATED_TO_ROUTER:     - Coordinates and radius
+# MIGRATED_TO_ROUTER:     - Alert settings
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import GEOFENCE_ZONES
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         zones = []
+# MIGRATED_TO_ROUTER:         for zone_id, zone in GEOFENCE_ZONES.items():
+# MIGRATED_TO_ROUTER:             zones.append(
+# MIGRATED_TO_ROUTER:                 {
+# MIGRATED_TO_ROUTER:                     "zone_id": zone_id,
+# MIGRATED_TO_ROUTER:                     "name": zone["name"],
+# MIGRATED_TO_ROUTER:                     "type": zone["type"],
+# MIGRATED_TO_ROUTER:                     "latitude": zone.get("lat"),
+# MIGRATED_TO_ROUTER:                     "longitude": zone.get("lon"),
+# MIGRATED_TO_ROUTER:                     "radius_miles": zone.get("radius_miles"),
+# MIGRATED_TO_ROUTER:                     "alert_on_enter": zone.get("alert_on_enter", False),
+# MIGRATED_TO_ROUTER:                     "alert_on_exit": zone.get("alert_on_exit", False),
+# MIGRATED_TO_ROUTER:                 }
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {"zones": zones, "total": len(zones)}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Get geofence zones error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 PREDICTIVE ALERTS ENDPOINT (v3.12.0)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2760,482 +2809,482 @@ async def get_predictive_alerts(
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/analytics/next-refuel-prediction")
-async def get_next_refuel_prediction(
-    truck_id: Optional[str] = Query(
-        default=None, description="Specific truck or None for all"
-    ),
-):
-    """
-    🆕 v3.12.21: Predict when each truck needs its next refuel
-
-    Uses:
-    - Current fuel level (%)
-    - Average consumption rate (gal/hour moving, gal/hour idle)
-    - Historical refuel patterns
-    - Planned route (if available)
-
-    Returns:
-        - Estimated hours/miles until refuel needed
-        - Recommended refuel location (nearest fuel stops)
-        - Confidence level based on data quality
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/analytics/next-refuel-prediction")
+# MIGRATED_TO_ROUTER: async def get_next_refuel_prediction(
+# MIGRATED_TO_ROUTER:     truck_id: Optional[str] = Query(
+# MIGRATED_TO_ROUTER:         default=None, description="Specific truck or None for all"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Predict when each truck needs its next refuel
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Uses:
+# MIGRATED_TO_ROUTER:     - Current fuel level (%)
+# MIGRATED_TO_ROUTER:     - Average consumption rate (gal/hour moving, gal/hour idle)
+# MIGRATED_TO_ROUTER:     - Historical refuel patterns
+# MIGRATED_TO_ROUTER:     - Planned route (if available)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         - Estimated hours/miles until refuel needed
+# MIGRATED_TO_ROUTER:         - Recommended refuel location (nearest fuel stops)
+# MIGRATED_TO_ROUTER:         - Confidence level based on data quality
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
         # Query using fuel_metrics table (which exists)
         # Get latest data for each truck
-        query = """
-            SELECT 
-                fm.truck_id,
-                fm.sensor_pct as current_fuel_pct,
-                fm.estimated_pct as kalman_fuel_pct,
-                fm.mpg_current as avg_mpg_24h,
-                fm.consumption_gph as avg_consumption_gph_24h,
-                CASE WHEN fm.truck_status = 'IDLE' THEN fm.consumption_gph ELSE 0.8 END as avg_idle_gph_24h,
-                fm.truck_status,
-                fm.speed_mph as speed,
-                fm.timestamp_utc
-            FROM fuel_metrics fm
-            INNER JOIN (
-                SELECT truck_id, MAX(timestamp_utc) as max_ts
-                FROM fuel_metrics
-                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-                GROUP BY truck_id
-            ) latest ON fm.truck_id = latest.truck_id AND fm.timestamp_utc = latest.max_ts
-            WHERE fm.truck_id IS NOT NULL
-        """
-
-        if truck_id:
-            query += " AND fm.truck_id = :truck_id"
-
-        with engine.connect() as conn:
-            if truck_id:
-                result = conn.execute(text(query), {"truck_id": truck_id})
-            else:
-                result = conn.execute(text(query))
-
-            rows = result.fetchall()
-
-        predictions = []
-        for row in rows:
-            row_dict = dict(row._mapping)
-
-            current_pct = (
-                row_dict.get("kalman_fuel_pct")
-                or row_dict.get("current_fuel_pct")
-                or 50
-            )
-            consumption_gph = row_dict.get("avg_consumption_gph_24h") or 4.0
-            idle_gph = row_dict.get("avg_idle_gph_24h") or 0.8
-            avg_mpg = row_dict.get("avg_mpg_24h") or 5.7  # v3.12.31: updated baseline
-            status = row_dict.get("truck_status") or "STOPPED"
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 fm.truck_id,
+# MIGRATED_TO_ROUTER:                 fm.sensor_pct as current_fuel_pct,
+# MIGRATED_TO_ROUTER:                 fm.estimated_pct as kalman_fuel_pct,
+# MIGRATED_TO_ROUTER:                 fm.mpg_current as avg_mpg_24h,
+# MIGRATED_TO_ROUTER:                 fm.consumption_gph as avg_consumption_gph_24h,
+# MIGRATED_TO_ROUTER:                 CASE WHEN fm.truck_status = 'IDLE' THEN fm.consumption_gph ELSE 0.8 END as avg_idle_gph_24h,
+# MIGRATED_TO_ROUTER:                 fm.truck_status,
+# MIGRATED_TO_ROUTER:                 fm.speed_mph as speed,
+# MIGRATED_TO_ROUTER:                 fm.timestamp_utc
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics fm
+# MIGRATED_TO_ROUTER:             INNER JOIN (
+# MIGRATED_TO_ROUTER:                 SELECT truck_id, MAX(timestamp_utc) as max_ts
+# MIGRATED_TO_ROUTER:                 FROM fuel_metrics
+# MIGRATED_TO_ROUTER:                 WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
+# MIGRATED_TO_ROUTER:                 GROUP BY truck_id
+# MIGRATED_TO_ROUTER:             ) latest ON fm.truck_id = latest.truck_id AND fm.timestamp_utc = latest.max_ts
+# MIGRATED_TO_ROUTER:             WHERE fm.truck_id IS NOT NULL
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if truck_id:
+# MIGRATED_TO_ROUTER:             query += " AND fm.truck_id = :truck_id"
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             if truck_id:
+# MIGRATED_TO_ROUTER:                 result = conn.execute(text(query), {"truck_id": truck_id})
+# MIGRATED_TO_ROUTER:             else:
+# MIGRATED_TO_ROUTER:                 result = conn.execute(text(query))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             rows = result.fetchall()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         predictions = []
+# MIGRATED_TO_ROUTER:         for row in rows:
+# MIGRATED_TO_ROUTER:             row_dict = dict(row._mapping)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             current_pct = (
+# MIGRATED_TO_ROUTER:                 row_dict.get("kalman_fuel_pct")
+# MIGRATED_TO_ROUTER:                 or row_dict.get("current_fuel_pct")
+# MIGRATED_TO_ROUTER:                 or 50
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER:             consumption_gph = row_dict.get("avg_consumption_gph_24h") or 4.0
+# MIGRATED_TO_ROUTER:             idle_gph = row_dict.get("avg_idle_gph_24h") or 0.8
+# MIGRATED_TO_ROUTER:             avg_mpg = row_dict.get("avg_mpg_24h") or 5.7  # v3.12.31: updated baseline
+# MIGRATED_TO_ROUTER:             status = row_dict.get("truck_status") or "STOPPED"
+# MIGRATED_TO_ROUTER: 
             # Estimate tank capacity (assume 200 gal for now, could be from trucks table)
-            tank_capacity_gal = 200
-
+# MIGRATED_TO_ROUTER:             tank_capacity_gal = 200
+# MIGRATED_TO_ROUTER: 
             # Current gallons
-            current_gallons = (current_pct / 100) * tank_capacity_gal
-
+# MIGRATED_TO_ROUTER:             current_gallons = (current_pct / 100) * tank_capacity_gal
+# MIGRATED_TO_ROUTER: 
             # Gallons until low fuel (assume 15% threshold)
-            low_fuel_threshold_pct = 15
-            gallons_until_low = current_gallons - (
-                low_fuel_threshold_pct / 100 * tank_capacity_gal
-            )
-
-            if gallons_until_low <= 0:
-                hours_until_refuel = 0
-                miles_until_refuel = 0
-                urgency = "critical"
-            else:
+# MIGRATED_TO_ROUTER:             low_fuel_threshold_pct = 15
+# MIGRATED_TO_ROUTER:             gallons_until_low = current_gallons - (
+# MIGRATED_TO_ROUTER:                 low_fuel_threshold_pct / 100 * tank_capacity_gal
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             if gallons_until_low <= 0:
+# MIGRATED_TO_ROUTER:                 hours_until_refuel = 0
+# MIGRATED_TO_ROUTER:                 miles_until_refuel = 0
+# MIGRATED_TO_ROUTER:                 urgency = "critical"
+# MIGRATED_TO_ROUTER:             else:
                 # Calculate based on moving vs idle
-                if status == "MOVING":
-                    current_consumption = consumption_gph
-                else:
-                    current_consumption = idle_gph
-
+# MIGRATED_TO_ROUTER:                 if status == "MOVING":
+# MIGRATED_TO_ROUTER:                     current_consumption = consumption_gph
+# MIGRATED_TO_ROUTER:                 else:
+# MIGRATED_TO_ROUTER:                     current_consumption = idle_gph
+# MIGRATED_TO_ROUTER: 
                 # Weighted average assuming 70% moving, 30% idle
-                blended_consumption = (consumption_gph * 0.7) + (idle_gph * 0.3)
-
-                hours_until_refuel = (
-                    gallons_until_low / blended_consumption
-                    if blended_consumption > 0
-                    else 999
-                )
-                miles_until_refuel = (
-                    hours_until_refuel * 50 if avg_mpg and avg_mpg > 0 else 0
-                )  # Assume 50 mph avg
-
-                if hours_until_refuel < 4:
-                    urgency = "critical"
-                elif hours_until_refuel < 8:
-                    urgency = "warning"
-                elif hours_until_refuel < 24:
-                    urgency = "normal"
-                else:
-                    urgency = "good"
-
-            predictions.append(
-                {
-                    "truck_id": row_dict["truck_id"],
-                    "current_fuel_pct": round(current_pct, 1),
-                    "current_gallons": round(current_gallons, 1),
-                    "hours_until_refuel": (
-                        round(hours_until_refuel, 1)
-                        if hours_until_refuel < 999
-                        else None
-                    ),
-                    "miles_until_refuel": (
-                        round(miles_until_refuel, 0) if miles_until_refuel > 0 else None
-                    ),
-                    "urgency": urgency,
-                    "estimated_refuel_time": (
-                        (
-                            datetime.now() + timedelta(hours=hours_until_refuel)
-                        ).isoformat()
-                        if hours_until_refuel < 999
-                        else None
-                    ),
-                    "avg_consumption_gph": round(consumption_gph, 2),
-                    "confidence": (
-                        "high" if row_dict.get("avg_consumption_gph_24h") else "medium"
-                    ),
-                }
-            )
-
+# MIGRATED_TO_ROUTER:                 blended_consumption = (consumption_gph * 0.7) + (idle_gph * 0.3)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:                 hours_until_refuel = (
+# MIGRATED_TO_ROUTER:                     gallons_until_low / blended_consumption
+# MIGRATED_TO_ROUTER:                     if blended_consumption > 0
+# MIGRATED_TO_ROUTER:                     else 999
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER:                 miles_until_refuel = (
+# MIGRATED_TO_ROUTER:                     hours_until_refuel * 50 if avg_mpg and avg_mpg > 0 else 0
+# MIGRATED_TO_ROUTER:                 )  # Assume 50 mph avg
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:                 if hours_until_refuel < 4:
+# MIGRATED_TO_ROUTER:                     urgency = "critical"
+# MIGRATED_TO_ROUTER:                 elif hours_until_refuel < 8:
+# MIGRATED_TO_ROUTER:                     urgency = "warning"
+# MIGRATED_TO_ROUTER:                 elif hours_until_refuel < 24:
+# MIGRATED_TO_ROUTER:                     urgency = "normal"
+# MIGRATED_TO_ROUTER:                 else:
+# MIGRATED_TO_ROUTER:                     urgency = "good"
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             predictions.append(
+# MIGRATED_TO_ROUTER:                 {
+# MIGRATED_TO_ROUTER:                     "truck_id": row_dict["truck_id"],
+# MIGRATED_TO_ROUTER:                     "current_fuel_pct": round(current_pct, 1),
+# MIGRATED_TO_ROUTER:                     "current_gallons": round(current_gallons, 1),
+# MIGRATED_TO_ROUTER:                     "hours_until_refuel": (
+# MIGRATED_TO_ROUTER:                         round(hours_until_refuel, 1)
+# MIGRATED_TO_ROUTER:                         if hours_until_refuel < 999
+# MIGRATED_TO_ROUTER:                         else None
+# MIGRATED_TO_ROUTER:                     ),
+# MIGRATED_TO_ROUTER:                     "miles_until_refuel": (
+# MIGRATED_TO_ROUTER:                         round(miles_until_refuel, 0) if miles_until_refuel > 0 else None
+# MIGRATED_TO_ROUTER:                     ),
+# MIGRATED_TO_ROUTER:                     "urgency": urgency,
+# MIGRATED_TO_ROUTER:                     "estimated_refuel_time": (
+# MIGRATED_TO_ROUTER:                         (
+# MIGRATED_TO_ROUTER:                             datetime.now() + timedelta(hours=hours_until_refuel)
+# MIGRATED_TO_ROUTER:                         ).isoformat()
+# MIGRATED_TO_ROUTER:                         if hours_until_refuel < 999
+# MIGRATED_TO_ROUTER:                         else None
+# MIGRATED_TO_ROUTER:                     ),
+# MIGRATED_TO_ROUTER:                     "avg_consumption_gph": round(consumption_gph, 2),
+# MIGRATED_TO_ROUTER:                     "confidence": (
+# MIGRATED_TO_ROUTER:                         "high" if row_dict.get("avg_consumption_gph_24h") else "medium"
+# MIGRATED_TO_ROUTER:                     ),
+# MIGRATED_TO_ROUTER:                 }
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
         # Sort by urgency (critical first)
-        urgency_order = {"critical": 0, "warning": 1, "normal": 2, "good": 3}
-        predictions.sort(
-            key=lambda x: (
-                urgency_order.get(x["urgency"], 99),
-                x.get("hours_until_refuel") or 999,
-            )
-        )
-
-        return {
-            "predictions": predictions,
-            "count": len(predictions),
-            "critical_count": len(
-                [p for p in predictions if p["urgency"] == "critical"]
-            ),
-            "warning_count": len([p for p in predictions if p["urgency"] == "warning"]),
-            "timestamp": datetime.now().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Next refuel prediction error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER:         urgency_order = {"critical": 0, "warning": 1, "normal": 2, "good": 3}
+# MIGRATED_TO_ROUTER:         predictions.sort(
+# MIGRATED_TO_ROUTER:             key=lambda x: (
+# MIGRATED_TO_ROUTER:                 urgency_order.get(x["urgency"], 99),
+# MIGRATED_TO_ROUTER:                 x.get("hours_until_refuel") or 999,
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "predictions": predictions,
+# MIGRATED_TO_ROUTER:             "count": len(predictions),
+# MIGRATED_TO_ROUTER:             "critical_count": len(
+# MIGRATED_TO_ROUTER:                 [p for p in predictions if p["urgency"] == "critical"]
+# MIGRATED_TO_ROUTER:             ),
+# MIGRATED_TO_ROUTER:             "warning_count": len([p for p in predictions if p["urgency"] == "warning"]),
+# MIGRATED_TO_ROUTER:             "timestamp": datetime.now().isoformat(),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Next refuel prediction error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 FASE 2: EXPORT TO EXCEL/CSV v3.12.21
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/export/fleet-report")
-async def export_fleet_report(
-    format: str = Query(default="csv", description="Export format: csv or excel"),
-    days: int = Query(default=7, ge=1, le=90, description="Days to include"),
-):
-    """
-    🆕 v3.12.21: Export fleet data to CSV or Excel
-
-    Includes:
-    - All trucks with current status
-    - MPG, fuel consumption, idle metrics
-    - Refuel events
-    - Alerts/issues
-    """
-    try:
-        import io
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/export/fleet-report")
+# MIGRATED_TO_ROUTER: async def export_fleet_report(
+# MIGRATED_TO_ROUTER:     format: str = Query(default="csv", description="Export format: csv or excel"),
+# MIGRATED_TO_ROUTER:     days: int = Query(default=7, ge=1, le=90, description="Days to include"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Export fleet data to CSV or Excel
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Includes:
+# MIGRATED_TO_ROUTER:     - All trucks with current status
+# MIGRATED_TO_ROUTER:     - MPG, fuel consumption, idle metrics
+# MIGRATED_TO_ROUTER:     - Refuel events
+# MIGRATED_TO_ROUTER:     - Alerts/issues
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         import io
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
         # Get fleet data
-        query = """
-            SELECT 
-                truck_id,
-                truck_status as status,
-                COALESCE(sensor_pct, 0) as fuel_pct,
-                COALESCE(estimated_pct, 0) as estimated_fuel_pct,
-                COALESCE(drift_pct, 0) as drift_pct,
-                COALESCE(mpg_current, 0) as current_mpg,
-                COALESCE(avg_mpg_24h, 0) as avg_mpg_24h,
-                COALESCE(consumption_gph, 0) as consumption_gph,
-                COALESCE(idle_consumption_gph, 0) as idle_gph,
-                COALESCE(speed, 0) as speed_mph,
-                latitude,
-                longitude,
-                timestamp_utc as last_update
-            FROM truck_data_latest
-            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-            ORDER BY truck_id
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), {"days": days})
-            data = [dict(row._mapping) for row in result.fetchall()]
-
-        if not data:
-            raise HTTPException(
-                status_code=404, detail="No data found for the specified period"
-            )
-
-        df = pd.DataFrame(data)
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 truck_id,
+# MIGRATED_TO_ROUTER:                 truck_status as status,
+# MIGRATED_TO_ROUTER:                 COALESCE(sensor_pct, 0) as fuel_pct,
+# MIGRATED_TO_ROUTER:                 COALESCE(estimated_pct, 0) as estimated_fuel_pct,
+# MIGRATED_TO_ROUTER:                 COALESCE(drift_pct, 0) as drift_pct,
+# MIGRATED_TO_ROUTER:                 COALESCE(mpg_current, 0) as current_mpg,
+# MIGRATED_TO_ROUTER:                 COALESCE(avg_mpg_24h, 0) as avg_mpg_24h,
+# MIGRATED_TO_ROUTER:                 COALESCE(consumption_gph, 0) as consumption_gph,
+# MIGRATED_TO_ROUTER:                 COALESCE(idle_consumption_gph, 0) as idle_gph,
+# MIGRATED_TO_ROUTER:                 COALESCE(speed, 0) as speed_mph,
+# MIGRATED_TO_ROUTER:                 latitude,
+# MIGRATED_TO_ROUTER:                 longitude,
+# MIGRATED_TO_ROUTER:                 timestamp_utc as last_update
+# MIGRATED_TO_ROUTER:             FROM truck_data_latest
+# MIGRATED_TO_ROUTER:             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:             ORDER BY truck_id
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query), {"days": days})
+# MIGRATED_TO_ROUTER:             data = [dict(row._mapping) for row in result.fetchall()]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if not data:
+# MIGRATED_TO_ROUTER:             raise HTTPException(
+# MIGRATED_TO_ROUTER:                 status_code=404, detail="No data found for the specified period"
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         df = pd.DataFrame(data)
+# MIGRATED_TO_ROUTER: 
         # Format datetime columns
-        if "last_update" in df.columns:
-            df["last_update"] = pd.to_datetime(df["last_update"]).dt.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-
-        if format.lower() == "excel":
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df.to_excel(writer, sheet_name="Fleet Report", index=False)
-            output.seek(0)
-
-            filename = f"fleet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            return Response(
-                content=output.getvalue(),
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={filename}"},
-            )
-        else:
+# MIGRATED_TO_ROUTER:         if "last_update" in df.columns:
+# MIGRATED_TO_ROUTER:             df["last_update"] = pd.to_datetime(df["last_update"]).dt.strftime(
+# MIGRATED_TO_ROUTER:                 "%Y-%m-%d %H:%M:%S"
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if format.lower() == "excel":
+# MIGRATED_TO_ROUTER:             output = io.BytesIO()
+# MIGRATED_TO_ROUTER:             with pd.ExcelWriter(output, engine="openpyxl") as writer:
+# MIGRATED_TO_ROUTER:                 df.to_excel(writer, sheet_name="Fleet Report", index=False)
+# MIGRATED_TO_ROUTER:             output.seek(0)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             filename = f"fleet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+# MIGRATED_TO_ROUTER:             return Response(
+# MIGRATED_TO_ROUTER:                 content=output.getvalue(),
+# MIGRATED_TO_ROUTER:                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+# MIGRATED_TO_ROUTER:                 headers={"Content-Disposition": f"attachment; filename={filename}"},
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER:         else:
             # Default to CSV
-            output = io.StringIO()
-            df.to_csv(output, index=False)
-
-            filename = f"fleet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            return Response(
-                content=output.getvalue(),
-                media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename={filename}"},
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Export error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER:             output = io.StringIO()
+# MIGRATED_TO_ROUTER:             df.to_csv(output, index=False)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             filename = f"fleet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+# MIGRATED_TO_ROUTER:             return Response(
+# MIGRATED_TO_ROUTER:                 content=output.getvalue(),
+# MIGRATED_TO_ROUTER:                 media_type="text/csv",
+# MIGRATED_TO_ROUTER:                 headers={"Content-Disposition": f"attachment; filename={filename}"},
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Export error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v3.12.21: HISTORICAL COMPARISON ENDPOINTS (#12)
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/analytics/historical-comparison", tags=["Analytics"])
-async def get_historical_comparison(
-    period1_start: str = Query(..., description="Start date for period 1 (YYYY-MM-DD)"),
-    period1_end: str = Query(..., description="End date for period 1 (YYYY-MM-DD)"),
-    period2_start: str = Query(..., description="Start date for period 2 (YYYY-MM-DD)"),
-    period2_end: str = Query(..., description="End date for period 2 (YYYY-MM-DD)"),
-    truck_id: Optional[str] = Query(None, description="Specific truck ID (optional)"),
-):
-    """
-    🆕 v3.12.21: Compare fleet metrics between two time periods.
-
-    Useful for:
-    - Month-over-month comparison
-    - Before/after analysis (e.g., driver training impact)
-    - Seasonal patterns
-
-    Returns changes in:
-    - MPG, fuel consumption, idle time
-    - Cost metrics
-    - Refuel patterns
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/analytics/historical-comparison", tags=["Analytics"])
+# MIGRATED_TO_ROUTER: async def get_historical_comparison(
+# MIGRATED_TO_ROUTER:     period1_start: str = Query(..., description="Start date for period 1 (YYYY-MM-DD)"),
+# MIGRATED_TO_ROUTER:     period1_end: str = Query(..., description="End date for period 1 (YYYY-MM-DD)"),
+# MIGRATED_TO_ROUTER:     period2_start: str = Query(..., description="Start date for period 2 (YYYY-MM-DD)"),
+# MIGRATED_TO_ROUTER:     period2_end: str = Query(..., description="End date for period 2 (YYYY-MM-DD)"),
+# MIGRATED_TO_ROUTER:     truck_id: Optional[str] = Query(None, description="Specific truck ID (optional)"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Compare fleet metrics between two time periods.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Useful for:
+# MIGRATED_TO_ROUTER:     - Month-over-month comparison
+# MIGRATED_TO_ROUTER:     - Before/after analysis (e.g., driver training impact)
+# MIGRATED_TO_ROUTER:     - Seasonal patterns
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns changes in:
+# MIGRATED_TO_ROUTER:     - MPG, fuel consumption, idle time
+# MIGRATED_TO_ROUTER:     - Cost metrics
+# MIGRATED_TO_ROUTER:     - Refuel patterns
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
         # Build query for both periods
-        base_query = """
-            SELECT 
-                COUNT(DISTINCT truck_id) as truck_count,
-                AVG(mpg) as avg_mpg,
-                AVG(consumption_gph) as avg_consumption_gph,
-                AVG(idle_pct) as avg_idle_pct,
-                SUM(CASE WHEN event_type = 'REFUEL' THEN 1 ELSE 0 END) as refuel_count,
-                AVG(sensor_fuel_pct) as avg_fuel_level,
-                AVG(daily_miles) as avg_daily_miles,
-                SUM(fuel_consumed_gal) as total_fuel_consumed
-            FROM fuel_metrics
-            WHERE timestamp_utc BETWEEN :start_date AND :end_date
-        """
-
-        truck_filter = " AND truck_id = :truck_id" if truck_id else ""
-
-        with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:         base_query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 COUNT(DISTINCT truck_id) as truck_count,
+# MIGRATED_TO_ROUTER:                 AVG(mpg) as avg_mpg,
+# MIGRATED_TO_ROUTER:                 AVG(consumption_gph) as avg_consumption_gph,
+# MIGRATED_TO_ROUTER:                 AVG(idle_pct) as avg_idle_pct,
+# MIGRATED_TO_ROUTER:                 SUM(CASE WHEN event_type = 'REFUEL' THEN 1 ELSE 0 END) as refuel_count,
+# MIGRATED_TO_ROUTER:                 AVG(sensor_fuel_pct) as avg_fuel_level,
+# MIGRATED_TO_ROUTER:                 AVG(daily_miles) as avg_daily_miles,
+# MIGRATED_TO_ROUTER:                 SUM(fuel_consumed_gal) as total_fuel_consumed
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE timestamp_utc BETWEEN :start_date AND :end_date
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         truck_filter = " AND truck_id = :truck_id" if truck_id else ""
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
             # Period 1
-            params1 = {
-                "start_date": period1_start,
-                "end_date": period1_end,
-            }
-            if truck_id:
-                params1["truck_id"] = truck_id
-            result1 = (
-                conn.execute(text(base_query + truck_filter), params1)
-                .mappings()
-                .fetchone()
-            )
-
+# MIGRATED_TO_ROUTER:             params1 = {
+# MIGRATED_TO_ROUTER:                 "start_date": period1_start,
+# MIGRATED_TO_ROUTER:                 "end_date": period1_end,
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER:             if truck_id:
+# MIGRATED_TO_ROUTER:                 params1["truck_id"] = truck_id
+# MIGRATED_TO_ROUTER:             result1 = (
+# MIGRATED_TO_ROUTER:                 conn.execute(text(base_query + truck_filter), params1)
+# MIGRATED_TO_ROUTER:                 .mappings()
+# MIGRATED_TO_ROUTER:                 .fetchone()
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
             # Period 2
-            params2 = {
-                "start_date": period2_start,
-                "end_date": period2_end,
-            }
-            if truck_id:
-                params2["truck_id"] = truck_id
-            result2 = (
-                conn.execute(text(base_query + truck_filter), params2)
-                .mappings()
-                .fetchone()
-            )
-
-        def safe_pct_change(old, new):
-            if old and old > 0 and new:
-                return round(((new - old) / old) * 100, 1)
-            return None
-
-        def safe_val(val):
-            return round(float(val), 2) if val else 0
-
-        period1_data = dict(result1) if result1 else {}
-        period2_data = dict(result2) if result2 else {}
-
-        return {
-            "period1": {
-                "start": period1_start,
-                "end": period1_end,
-                "avg_mpg": safe_val(period1_data.get("avg_mpg")),
-                "avg_consumption_gph": safe_val(
-                    period1_data.get("avg_consumption_gph")
-                ),
-                "avg_idle_pct": safe_val(period1_data.get("avg_idle_pct")),
-                "refuel_count": int(period1_data.get("refuel_count") or 0),
-                "total_fuel_consumed": safe_val(
-                    period1_data.get("total_fuel_consumed")
-                ),
-            },
-            "period2": {
-                "start": period2_start,
-                "end": period2_end,
-                "avg_mpg": safe_val(period2_data.get("avg_mpg")),
-                "avg_consumption_gph": safe_val(
-                    period2_data.get("avg_consumption_gph")
-                ),
-                "avg_idle_pct": safe_val(period2_data.get("avg_idle_pct")),
-                "refuel_count": int(period2_data.get("refuel_count") or 0),
-                "total_fuel_consumed": safe_val(
-                    period2_data.get("total_fuel_consumed")
-                ),
-            },
-            "changes": {
-                "mpg_change_pct": safe_pct_change(
-                    period1_data.get("avg_mpg"), period2_data.get("avg_mpg")
-                ),
-                "consumption_change_pct": safe_pct_change(
-                    period1_data.get("avg_consumption_gph"),
-                    period2_data.get("avg_consumption_gph"),
-                ),
-                "idle_change_pct": safe_pct_change(
-                    period1_data.get("avg_idle_pct"), period2_data.get("avg_idle_pct")
-                ),
-                "fuel_consumed_change_pct": safe_pct_change(
-                    period1_data.get("total_fuel_consumed"),
-                    period2_data.get("total_fuel_consumed"),
-                ),
-            },
-            "truck_id": truck_id,
-            "generated_at": datetime.now().isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Historical comparison error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/analytics/trends", tags=["Analytics"])
-async def get_fleet_trends(
-    days: int = Query(30, ge=7, le=365, description="Days of history"),
-    metric: str = Query(
-        "mpg", description="Metric to trend: mpg, consumption, idle, fuel_level"
-    ),
-    truck_id: Optional[str] = Query(None, description="Specific truck ID (optional)"),
-):
-    """
-    🆕 v3.12.21: Get daily trends for a specific metric.
-
-    Returns daily averages for charting/visualization.
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
-        metric_map = {
-            "mpg": "AVG(mpg)",
-            "consumption": "AVG(consumption_gph)",
-            "idle": "AVG(idle_pct)",
-            "fuel_level": "AVG(sensor_fuel_pct)",
-        }
-
-        if metric not in metric_map:
-            raise HTTPException(status_code=400, detail=f"Invalid metric: {metric}")
-
-        query = f"""
-            SELECT 
-                DATE(timestamp_utc) as date,
-                {metric_map[metric]} as value,
-                COUNT(*) as sample_count
-            FROM fuel_metrics
-            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-            {"AND truck_id = :truck_id" if truck_id else ""}
-            GROUP BY DATE(timestamp_utc)
-            ORDER BY date ASC
-        """
-
-        params = {"days": days}
-        if truck_id:
-            params["truck_id"] = truck_id
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), params).mappings().fetchall()
-
-        trends = [
-            {
-                "date": str(row["date"]),
-                "value": round(float(row["value"]), 2) if row["value"] else None,
-                "sample_count": int(row["sample_count"]),
-            }
-            for row in result
-        ]
-
-        return {
-            "metric": metric,
-            "days": days,
-            "truck_id": truck_id,
-            "data": trends,
-            "count": len(trends),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Fleet trends error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER:             params2 = {
+# MIGRATED_TO_ROUTER:                 "start_date": period2_start,
+# MIGRATED_TO_ROUTER:                 "end_date": period2_end,
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER:             if truck_id:
+# MIGRATED_TO_ROUTER:                 params2["truck_id"] = truck_id
+# MIGRATED_TO_ROUTER:             result2 = (
+# MIGRATED_TO_ROUTER:                 conn.execute(text(base_query + truck_filter), params2)
+# MIGRATED_TO_ROUTER:                 .mappings()
+# MIGRATED_TO_ROUTER:                 .fetchone()
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         def safe_pct_change(old, new):
+# MIGRATED_TO_ROUTER:             if old and old > 0 and new:
+# MIGRATED_TO_ROUTER:                 return round(((new - old) / old) * 100, 1)
+# MIGRATED_TO_ROUTER:             return None
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         def safe_val(val):
+# MIGRATED_TO_ROUTER:             return round(float(val), 2) if val else 0
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         period1_data = dict(result1) if result1 else {}
+# MIGRATED_TO_ROUTER:         period2_data = dict(result2) if result2 else {}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "period1": {
+# MIGRATED_TO_ROUTER:                 "start": period1_start,
+# MIGRATED_TO_ROUTER:                 "end": period1_end,
+# MIGRATED_TO_ROUTER:                 "avg_mpg": safe_val(period1_data.get("avg_mpg")),
+# MIGRATED_TO_ROUTER:                 "avg_consumption_gph": safe_val(
+# MIGRATED_TO_ROUTER:                     period1_data.get("avg_consumption_gph")
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:                 "avg_idle_pct": safe_val(period1_data.get("avg_idle_pct")),
+# MIGRATED_TO_ROUTER:                 "refuel_count": int(period1_data.get("refuel_count") or 0),
+# MIGRATED_TO_ROUTER:                 "total_fuel_consumed": safe_val(
+# MIGRATED_TO_ROUTER:                     period1_data.get("total_fuel_consumed")
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             "period2": {
+# MIGRATED_TO_ROUTER:                 "start": period2_start,
+# MIGRATED_TO_ROUTER:                 "end": period2_end,
+# MIGRATED_TO_ROUTER:                 "avg_mpg": safe_val(period2_data.get("avg_mpg")),
+# MIGRATED_TO_ROUTER:                 "avg_consumption_gph": safe_val(
+# MIGRATED_TO_ROUTER:                     period2_data.get("avg_consumption_gph")
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:                 "avg_idle_pct": safe_val(period2_data.get("avg_idle_pct")),
+# MIGRATED_TO_ROUTER:                 "refuel_count": int(period2_data.get("refuel_count") or 0),
+# MIGRATED_TO_ROUTER:                 "total_fuel_consumed": safe_val(
+# MIGRATED_TO_ROUTER:                     period2_data.get("total_fuel_consumed")
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             "changes": {
+# MIGRATED_TO_ROUTER:                 "mpg_change_pct": safe_pct_change(
+# MIGRATED_TO_ROUTER:                     period1_data.get("avg_mpg"), period2_data.get("avg_mpg")
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:                 "consumption_change_pct": safe_pct_change(
+# MIGRATED_TO_ROUTER:                     period1_data.get("avg_consumption_gph"),
+# MIGRATED_TO_ROUTER:                     period2_data.get("avg_consumption_gph"),
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:                 "idle_change_pct": safe_pct_change(
+# MIGRATED_TO_ROUTER:                     period1_data.get("avg_idle_pct"), period2_data.get("avg_idle_pct")
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:                 "fuel_consumed_change_pct": safe_pct_change(
+# MIGRATED_TO_ROUTER:                     period1_data.get("total_fuel_consumed"),
+# MIGRATED_TO_ROUTER:                     period2_data.get("total_fuel_consumed"),
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             "truck_id": truck_id,
+# MIGRATED_TO_ROUTER:             "generated_at": datetime.now().isoformat(),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Historical comparison error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/analytics/trends", tags=["Analytics"])
+# MIGRATED_TO_ROUTER: async def get_fleet_trends(
+# MIGRATED_TO_ROUTER:     days: int = Query(30, ge=7, le=365, description="Days of history"),
+# MIGRATED_TO_ROUTER:     metric: str = Query(
+# MIGRATED_TO_ROUTER:         "mpg", description="Metric to trend: mpg, consumption, idle, fuel_level"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER:     truck_id: Optional[str] = Query(None, description="Specific truck ID (optional)"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get daily trends for a specific metric.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns daily averages for charting/visualization.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         metric_map = {
+# MIGRATED_TO_ROUTER:             "mpg": "AVG(mpg)",
+# MIGRATED_TO_ROUTER:             "consumption": "AVG(consumption_gph)",
+# MIGRATED_TO_ROUTER:             "idle": "AVG(idle_pct)",
+# MIGRATED_TO_ROUTER:             "fuel_level": "AVG(sensor_fuel_pct)",
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if metric not in metric_map:
+# MIGRATED_TO_ROUTER:             raise HTTPException(status_code=400, detail=f"Invalid metric: {metric}")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         query = f"""
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 DATE(timestamp_utc) as date,
+# MIGRATED_TO_ROUTER:                 {metric_map[metric]} as value,
+# MIGRATED_TO_ROUTER:                 COUNT(*) as sample_count
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:             {"AND truck_id = :truck_id" if truck_id else ""}
+# MIGRATED_TO_ROUTER:             GROUP BY DATE(timestamp_utc)
+# MIGRATED_TO_ROUTER:             ORDER BY date ASC
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         params = {"days": days}
+# MIGRATED_TO_ROUTER:         if truck_id:
+# MIGRATED_TO_ROUTER:             params["truck_id"] = truck_id
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query), params).mappings().fetchall()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         trends = [
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "date": str(row["date"]),
+# MIGRATED_TO_ROUTER:                 "value": round(float(row["value"]), 2) if row["value"] else None,
+# MIGRATED_TO_ROUTER:                 "sample_count": int(row["sample_count"]),
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER:             for row in result
+# MIGRATED_TO_ROUTER:         ]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "metric": metric,
+# MIGRATED_TO_ROUTER:             "days": days,
+# MIGRATED_TO_ROUTER:             "truck_id": truck_id,
+# MIGRATED_TO_ROUTER:             "data": trends,
+# MIGRATED_TO_ROUTER:             "count": len(trends),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Fleet trends error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v3.12.21: SCHEDULED REPORTS ENDPOINTS (#13)
 # ============================================================================
@@ -3244,1042 +3293,1056 @@ async def get_fleet_trends(
 _scheduled_reports: Dict[str, Dict] = {}
 
 
-@app.get("/fuelAnalytics/api/reports/schedules", tags=["Reports"])
-async def get_report_schedules():
-    """
-    🆕 v3.12.21: Get all scheduled reports.
-    """
-    return {
-        "schedules": list(_scheduled_reports.values()),
-        "count": len(_scheduled_reports),
-    }
-
-
-@app.post("/fuelAnalytics/api/reports/schedules", tags=["Reports"])
-async def create_report_schedule(
-    name: str = Query(..., description="Report name"),
-    report_type: str = Query(
-        ..., description="Type: daily_summary, weekly_kpis, monthly_analysis"
-    ),
-    frequency: str = Query(..., description="Frequency: daily, weekly, monthly"),
-    email_to: str = Query(..., description="Email recipient(s), comma-separated"),
-    include_trucks: Optional[str] = Query(
-        None, description="Truck IDs to include, comma-separated (all if empty)"
-    ),
-):
-    """
-    🆕 v3.12.21: Create a scheduled report.
-
-    Note: In production, this would be stored in database and processed by a scheduler.
-    """
-    import uuid
-
-    schedule_id = str(uuid.uuid4())[:8]
-
-    schedule = {
-        "id": schedule_id,
-        "name": name,
-        "report_type": report_type,
-        "frequency": frequency,
-        "email_to": [e.strip() for e in email_to.split(",")],
-        "include_trucks": (
-            [t.strip() for t in include_trucks.split(",")] if include_trucks else None
-        ),
-        "created_at": datetime.now().isoformat(),
-        "last_run": None,
-        "next_run": None,  # Would be calculated by scheduler
-        "status": "active",
-    }
-
-    _scheduled_reports[schedule_id] = schedule
-
-    return {
-        "success": True,
-        "schedule": schedule,
-        "message": f"Report schedule '{name}' created successfully",
-    }
-
-
-@app.delete("/fuelAnalytics/api/reports/schedules/{schedule_id}", tags=["Reports"])
-async def delete_report_schedule(schedule_id: str):
-    """
-    🆕 v3.12.21: Delete a scheduled report.
-    """
-    if schedule_id not in _scheduled_reports:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-
-    del _scheduled_reports[schedule_id]
-
-    return {
-        "success": True,
-        "message": f"Schedule {schedule_id} deleted",
-    }
-
-
-@app.post("/fuelAnalytics/api/reports/generate", tags=["Reports"])
-async def generate_report_now(
-    report_type: str = Query(
-        ..., description="Type: daily_summary, weekly_kpis, theft_analysis"
-    ),
-    days: int = Query(7, ge=1, le=90, description="Days to include"),
-    format: str = Query("json", description="Format: json, csv, excel"),
-):
-    """
-    🆕 v3.12.21: Generate a report immediately.
-
-    Returns the report data or file depending on format.
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-        import io
-
-        engine = get_sqlalchemy_engine()
-
-        if report_type == "daily_summary":
-            query = """
-                SELECT 
-                    truck_id,
-                    DATE(timestamp_utc) as date,
-                    AVG(mpg) as avg_mpg,
-                    AVG(consumption_gph) as avg_consumption,
-                    AVG(sensor_fuel_pct) as avg_fuel_level,
-                    MAX(daily_miles) as miles_driven,
-                    SUM(CASE WHEN event_type = 'REFUEL' THEN 1 ELSE 0 END) as refuel_count
-                FROM fuel_metrics
-                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-                GROUP BY truck_id, DATE(timestamp_utc)
-                ORDER BY date DESC, truck_id
-            """
-        elif report_type == "weekly_kpis":
-            query = """
-                SELECT 
-                    YEARWEEK(timestamp_utc) as week,
-                    COUNT(DISTINCT truck_id) as active_trucks,
-                    AVG(mpg) as fleet_avg_mpg,
-                    AVG(idle_pct) as fleet_avg_idle,
-                    SUM(fuel_consumed_gal) as total_fuel_gal,
-                    SUM(daily_miles) / COUNT(DISTINCT DATE(timestamp_utc)) as avg_daily_miles
-                FROM fuel_metrics
-                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-                GROUP BY YEARWEEK(timestamp_utc)
-                ORDER BY week DESC
-            """
-        elif report_type == "theft_analysis":
-            query = """
-                SELECT 
-                    truck_id,
-                    timestamp_utc,
-                    sensor_fuel_pct,
-                    estimated_fuel_pct,
-                    status,
-                    CASE 
-                        WHEN ABS(sensor_fuel_pct - estimated_fuel_pct) > 10 
-                        AND status = 'STOPPED' THEN 'SUSPICIOUS'
-                        ELSE 'NORMAL'
-                    END as alert_status
-                FROM fuel_metrics
-                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-                  AND ABS(sensor_fuel_pct - estimated_fuel_pct) > 5
-                ORDER BY timestamp_utc DESC
-                LIMIT 500
-            """
-        else:
-            raise HTTPException(
-                status_code=400, detail=f"Unknown report type: {report_type}"
-            )
-
-        with engine.connect() as conn:
-            df = pd.read_sql(text(query), conn, params={"days": days})
-
-        if format == "json":
-            return {
-                "report_type": report_type,
-                "days": days,
-                "generated_at": datetime.now().isoformat(),
-                "row_count": len(df),
-                "data": df.to_dict(orient="records"),
-            }
-        elif format == "excel":
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df.to_excel(writer, sheet_name=report_type, index=False)
-            output.seek(0)
-
-            filename = f"{report_type}_{datetime.now().strftime('%Y%m%d')}.xlsx"
-            return Response(
-                content=output.getvalue(),
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={filename}"},
-            )
-        else:  # CSV
-            output = io.StringIO()
-            df.to_csv(output, index=False)
-
-            filename = f"{report_type}_{datetime.now().strftime('%Y%m%d')}.csv"
-            return Response(
-                content=output.getvalue(),
-                media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename={filename}"},
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Report generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/reports/schedules", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def get_report_schedules():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get all scheduled reports.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     return {
+# MIGRATED_TO_ROUTER:         "schedules": list(_scheduled_reports.values()),
+# MIGRATED_TO_ROUTER:         "count": len(_scheduled_reports),
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/reports/schedules", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def create_report_schedule(
+# MIGRATED_TO_ROUTER:     name: str = Query(..., description="Report name"),
+# MIGRATED_TO_ROUTER:     report_type: str = Query(
+# MIGRATED_TO_ROUTER:         ..., description="Type: daily_summary, weekly_kpis, monthly_analysis"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER:     frequency: str = Query(..., description="Frequency: daily, weekly, monthly"),
+# MIGRATED_TO_ROUTER:     email_to: str = Query(..., description="Email recipient(s), comma-separated"),
+# MIGRATED_TO_ROUTER:     include_trucks: Optional[str] = Query(
+# MIGRATED_TO_ROUTER:         None, description="Truck IDs to include, comma-separated (all if empty)"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Create a scheduled report.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Note: In production, this would be stored in database and processed by a scheduler.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     import uuid
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     schedule_id = str(uuid.uuid4())[:8]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     schedule = {
+# MIGRATED_TO_ROUTER:         "id": schedule_id,
+# MIGRATED_TO_ROUTER:         "name": name,
+# MIGRATED_TO_ROUTER:         "report_type": report_type,
+# MIGRATED_TO_ROUTER:         "frequency": frequency,
+# MIGRATED_TO_ROUTER:         "email_to": [e.strip() for e in email_to.split(",")],
+# MIGRATED_TO_ROUTER:         "include_trucks": (
+# MIGRATED_TO_ROUTER:             [t.strip() for t in include_trucks.split(",")] if include_trucks else None
+# MIGRATED_TO_ROUTER:         ),
+# MIGRATED_TO_ROUTER:         "created_at": datetime.now().isoformat(),
+# MIGRATED_TO_ROUTER:         "last_run": None,
+# MIGRATED_TO_ROUTER:         "next_run": None,  # Would be calculated by scheduler
+# MIGRATED_TO_ROUTER:         "status": "active",
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     _scheduled_reports[schedule_id] = schedule
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {
+# MIGRATED_TO_ROUTER:         "success": True,
+# MIGRATED_TO_ROUTER:         "schedule": schedule,
+# MIGRATED_TO_ROUTER:         "message": f"Report schedule '{name}' created successfully",
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.delete("/fuelAnalytics/api/reports/schedules/{schedule_id}", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def delete_report_schedule(schedule_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Delete a scheduled report.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if schedule_id not in _scheduled_reports:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail="Schedule not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     del _scheduled_reports[schedule_id]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {
+# MIGRATED_TO_ROUTER:         "success": True,
+# MIGRATED_TO_ROUTER:         "message": f"Schedule {schedule_id} deleted",
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/reports/generate", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def generate_report_now(
+# MIGRATED_TO_ROUTER:     report_type: str = Query(
+# MIGRATED_TO_ROUTER:         ..., description="Type: daily_summary, weekly_kpis, theft_analysis"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER:     days: int = Query(7, ge=1, le=90, description="Days to include"),
+# MIGRATED_TO_ROUTER:     format: str = Query("json", description="Format: json, csv, excel"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Generate a report immediately.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns the report data or file depending on format.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER:         import io
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if report_type == "daily_summary":
+# MIGRATED_TO_ROUTER:             query = """
+# MIGRATED_TO_ROUTER:                 SELECT 
+# MIGRATED_TO_ROUTER:                     truck_id,
+# MIGRATED_TO_ROUTER:                     DATE(timestamp_utc) as date,
+# MIGRATED_TO_ROUTER:                     AVG(mpg) as avg_mpg,
+# MIGRATED_TO_ROUTER:                     AVG(consumption_gph) as avg_consumption,
+# MIGRATED_TO_ROUTER:                     AVG(sensor_fuel_pct) as avg_fuel_level,
+# MIGRATED_TO_ROUTER:                     MAX(daily_miles) as miles_driven,
+# MIGRATED_TO_ROUTER:                     SUM(CASE WHEN event_type = 'REFUEL' THEN 1 ELSE 0 END) as refuel_count
+# MIGRATED_TO_ROUTER:                 FROM fuel_metrics
+# MIGRATED_TO_ROUTER:                 WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:                 GROUP BY truck_id, DATE(timestamp_utc)
+# MIGRATED_TO_ROUTER:                 ORDER BY date DESC, truck_id
+# MIGRATED_TO_ROUTER:             """
+# MIGRATED_TO_ROUTER:         elif report_type == "weekly_kpis":
+# MIGRATED_TO_ROUTER:             query = """
+# MIGRATED_TO_ROUTER:                 SELECT 
+# MIGRATED_TO_ROUTER:                     YEARWEEK(timestamp_utc) as week,
+# MIGRATED_TO_ROUTER:                     COUNT(DISTINCT truck_id) as active_trucks,
+# MIGRATED_TO_ROUTER:                     AVG(mpg) as fleet_avg_mpg,
+# MIGRATED_TO_ROUTER:                     AVG(idle_pct) as fleet_avg_idle,
+# MIGRATED_TO_ROUTER:                     SUM(fuel_consumed_gal) as total_fuel_gal,
+# MIGRATED_TO_ROUTER:                     SUM(daily_miles) / COUNT(DISTINCT DATE(timestamp_utc)) as avg_daily_miles
+# MIGRATED_TO_ROUTER:                 FROM fuel_metrics
+# MIGRATED_TO_ROUTER:                 WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:                 GROUP BY YEARWEEK(timestamp_utc)
+# MIGRATED_TO_ROUTER:                 ORDER BY week DESC
+# MIGRATED_TO_ROUTER:             """
+# MIGRATED_TO_ROUTER:         elif report_type == "theft_analysis":
+# MIGRATED_TO_ROUTER:             query = """
+# MIGRATED_TO_ROUTER:                 SELECT 
+# MIGRATED_TO_ROUTER:                     truck_id,
+# MIGRATED_TO_ROUTER:                     timestamp_utc,
+# MIGRATED_TO_ROUTER:                     sensor_fuel_pct,
+# MIGRATED_TO_ROUTER:                     estimated_fuel_pct,
+# MIGRATED_TO_ROUTER:                     status,
+# MIGRATED_TO_ROUTER:                     CASE 
+# MIGRATED_TO_ROUTER:                         WHEN ABS(sensor_fuel_pct - estimated_fuel_pct) > 10 
+# MIGRATED_TO_ROUTER:                         AND status = 'STOPPED' THEN 'SUSPICIOUS'
+# MIGRATED_TO_ROUTER:                         ELSE 'NORMAL'
+# MIGRATED_TO_ROUTER:                     END as alert_status
+# MIGRATED_TO_ROUTER:                 FROM fuel_metrics
+# MIGRATED_TO_ROUTER:                 WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:                   AND ABS(sensor_fuel_pct - estimated_fuel_pct) > 5
+# MIGRATED_TO_ROUTER:                 ORDER BY timestamp_utc DESC
+# MIGRATED_TO_ROUTER:                 LIMIT 500
+# MIGRATED_TO_ROUTER:             """
+# MIGRATED_TO_ROUTER:         else:
+# MIGRATED_TO_ROUTER:             raise HTTPException(
+# MIGRATED_TO_ROUTER:                 status_code=400, detail=f"Unknown report type: {report_type}"
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             df = pd.read_sql(text(query), conn, params={"days": days})
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if format == "json":
+# MIGRATED_TO_ROUTER:             return {
+# MIGRATED_TO_ROUTER:                 "report_type": report_type,
+# MIGRATED_TO_ROUTER:                 "days": days,
+# MIGRATED_TO_ROUTER:                 "generated_at": datetime.now().isoformat(),
+# MIGRATED_TO_ROUTER:                 "row_count": len(df),
+# MIGRATED_TO_ROUTER:                 "data": df.to_dict(orient="records"),
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER:         elif format == "excel":
+# MIGRATED_TO_ROUTER:             output = io.BytesIO()
+# MIGRATED_TO_ROUTER:             with pd.ExcelWriter(output, engine="openpyxl") as writer:
+# MIGRATED_TO_ROUTER:                 df.to_excel(writer, sheet_name=report_type, index=False)
+# MIGRATED_TO_ROUTER:             output.seek(0)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             filename = f"{report_type}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+# MIGRATED_TO_ROUTER:             return Response(
+# MIGRATED_TO_ROUTER:                 content=output.getvalue(),
+# MIGRATED_TO_ROUTER:                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+# MIGRATED_TO_ROUTER:                 headers={"Content-Disposition": f"attachment; filename={filename}"},
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER:         else:  # CSV
+# MIGRATED_TO_ROUTER:             output = io.StringIO()
+# MIGRATED_TO_ROUTER:             df.to_csv(output, index=False)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             filename = f"{report_type}_{datetime.now().strftime('%Y%m%d')}.csv"
+# MIGRATED_TO_ROUTER:             return Response(
+# MIGRATED_TO_ROUTER:                 content=output.getvalue(),
+# MIGRATED_TO_ROUTER:                 media_type="text/csv",
+# MIGRATED_TO_ROUTER:                 headers={"Content-Disposition": f"attachment; filename={filename}"},
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Report generation error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v4.0: COST PER MILE ENDPOINTS (Geotab-inspired)
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/cost/per-mile", tags=["Cost Analysis"])
-async def get_fleet_cost_per_mile(
-    days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
-):
-    """
-    🆕 v4.0: Get cost per mile analysis for entire fleet.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Returns:
-        Fleet-wide cost analysis with individual truck breakdowns
-    """
-    try:
-        from cost_per_mile_engine import CostPerMileEngine
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-        cpm_engine = CostPerMileEngine()
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/cost/per-mile", tags=["Cost Analysis"])
+# MIGRATED_TO_ROUTER: async def get_fleet_cost_per_mile(
+# MIGRATED_TO_ROUTER:     days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v4.0: Get cost per mile analysis for entire fleet.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         Fleet-wide cost analysis with individual truck breakdowns
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from cost_per_mile_engine import CostPerMileEngine
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         cpm_engine = CostPerMileEngine()
+# MIGRATED_TO_ROUTER: 
         # Get fleet data for the period
         # 🔧 v4.3: Simplified query - calculate miles from odometer, gallons from miles/mpg
-        query = """
-            SELECT 
-                truck_id,
-                (MAX(odometer_mi) - MIN(odometer_mi)) as miles,
-                MAX(engine_hours) - MIN(engine_hours) as engine_hours,
-                AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg
-            FROM fuel_metrics
-            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-            GROUP BY truck_id
-            HAVING miles > 10
-        """
-
-        trucks_data = []
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text(query), {"days": days})
-                rows = result.fetchall()
-
-            for row in rows:
-                miles = float(row[1] or 0)
-                avg_mpg = float(row[3] or 5.5)
-                if avg_mpg < 3:
-                    avg_mpg = 5.5  # Fallback to reasonable default
-
-                trucks_data.append(
-                    {
-                        "truck_id": row[0],
-                        "miles": miles,
-                        "gallons": miles / avg_mpg if avg_mpg > 0 else 0,
-                        "engine_hours": float(row[2] or 0),
-                        "avg_mpg": avg_mpg,
-                    }
-                )
-        except Exception as db_err:
-            logger.warning(f"DB query failed, using fallback: {db_err}")
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 truck_id,
+# MIGRATED_TO_ROUTER:                 (MAX(odometer_mi) - MIN(odometer_mi)) as miles,
+# MIGRATED_TO_ROUTER:                 MAX(engine_hours) - MIN(engine_hours) as engine_hours,
+# MIGRATED_TO_ROUTER:                 AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:             GROUP BY truck_id
+# MIGRATED_TO_ROUTER:             HAVING miles > 10
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         trucks_data = []
+# MIGRATED_TO_ROUTER:         try:
+# MIGRATED_TO_ROUTER:             with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:                 result = conn.execute(text(query), {"days": days})
+# MIGRATED_TO_ROUTER:                 rows = result.fetchall()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             for row in rows:
+# MIGRATED_TO_ROUTER:                 miles = float(row[1] or 0)
+# MIGRATED_TO_ROUTER:                 avg_mpg = float(row[3] or 5.5)
+# MIGRATED_TO_ROUTER:                 if avg_mpg < 3:
+# MIGRATED_TO_ROUTER:                     avg_mpg = 5.5  # Fallback to reasonable default
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:                 trucks_data.append(
+# MIGRATED_TO_ROUTER:                     {
+# MIGRATED_TO_ROUTER:                         "truck_id": row[0],
+# MIGRATED_TO_ROUTER:                         "miles": miles,
+# MIGRATED_TO_ROUTER:                         "gallons": miles / avg_mpg if avg_mpg > 0 else 0,
+# MIGRATED_TO_ROUTER:                         "engine_hours": float(row[2] or 0),
+# MIGRATED_TO_ROUTER:                         "avg_mpg": avg_mpg,
+# MIGRATED_TO_ROUTER:                     }
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER:         except Exception as db_err:
+# MIGRATED_TO_ROUTER:             logger.warning(f"DB query failed, using fallback: {db_err}")
+# MIGRATED_TO_ROUTER: 
         # 🆕 v4.3: Fallback - use current truck data if no historical data
-        if not trucks_data:
-            logger.info("No historical data, using current truck data for estimates")
-            try:
-                all_trucks = db.get_all_trucks()
-                for tid in all_trucks[:20]:
-                    truck_data = db.get_truck_latest_record(tid)
-                    if truck_data:
-                        mpg = truck_data.get("mpg_current", 5.5) or 5.5
-                        if mpg < 3 or mpg > 12:
-                            mpg = 5.5
-                        miles = 8000  # Default monthly miles estimate
-                        trucks_data.append(
-                            {
-                                "truck_id": tid,
-                                "miles": miles,
-                                "gallons": miles / max(mpg, 1),
-                                "engine_hours": truck_data.get("engine_hours", 200)
-                                or 200,
-                                "avg_mpg": mpg,
-                            }
-                        )
-            except Exception as fallback_err:
-                logger.error(f"Fallback also failed: {fallback_err}")
-
+# MIGRATED_TO_ROUTER:         if not trucks_data:
+# MIGRATED_TO_ROUTER:             logger.info("No historical data, using current truck data for estimates")
+# MIGRATED_TO_ROUTER:             try:
+# MIGRATED_TO_ROUTER:                 all_trucks = db.get_all_trucks()
+# MIGRATED_TO_ROUTER:                 for tid in all_trucks[:20]:
+# MIGRATED_TO_ROUTER:                     truck_data = db.get_truck_latest_record(tid)
+# MIGRATED_TO_ROUTER:                     if truck_data:
+# MIGRATED_TO_ROUTER:                         mpg = truck_data.get("mpg_current", 5.5) or 5.5
+# MIGRATED_TO_ROUTER:                         if mpg < 3 or mpg > 12:
+# MIGRATED_TO_ROUTER:                             mpg = 5.5
+# MIGRATED_TO_ROUTER:                         miles = 8000  # Default monthly miles estimate
+# MIGRATED_TO_ROUTER:                         trucks_data.append(
+# MIGRATED_TO_ROUTER:                             {
+# MIGRATED_TO_ROUTER:                                 "truck_id": tid,
+# MIGRATED_TO_ROUTER:                                 "miles": miles,
+# MIGRATED_TO_ROUTER:                                 "gallons": miles / max(mpg, 1),
+# MIGRATED_TO_ROUTER:                                 "engine_hours": truck_data.get("engine_hours", 200)
+# MIGRATED_TO_ROUTER:                                 or 200,
+# MIGRATED_TO_ROUTER:                                 "avg_mpg": mpg,
+# MIGRATED_TO_ROUTER:                             }
+# MIGRATED_TO_ROUTER:                         )
+# MIGRATED_TO_ROUTER:             except Exception as fallback_err:
+# MIGRATED_TO_ROUTER:                 logger.error(f"Fallback also failed: {fallback_err}")
+# MIGRATED_TO_ROUTER: 
         # Final fallback - return demo data
-        if not trucks_data:
-            logger.warning("All data sources failed, returning demo data")
-            trucks_data = [
-                {
-                    "truck_id": "DEMO-001",
-                    "miles": 8000,
-                    "gallons": 1450,
-                    "engine_hours": 200,
-                    "avg_mpg": 5.5,
-                },
-                {
-                    "truck_id": "DEMO-002",
-                    "miles": 7500,
-                    "gallons": 1250,
-                    "engine_hours": 190,
-                    "avg_mpg": 6.0,
-                },
-            ]
-
-        report = cpm_engine.generate_cost_report(trucks_data, period_days=days)
-        return report
-
-    except Exception as e:
-        logger.error(f"Cost per mile analysis error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/cost/per-mile/{truck_id}", tags=["Cost Analysis"])
-async def get_truck_cost_per_mile(
-    truck_id: str,
-    days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
-):
-    """
-    🆕 v4.0: Get cost per mile analysis for a specific truck.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Returns:
-        Detailed cost breakdown and comparison for the specified truck
-    """
-    try:
-        from cost_per_mile_engine import CostPerMileEngine
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
+# MIGRATED_TO_ROUTER:         if not trucks_data:
+# MIGRATED_TO_ROUTER:             logger.warning("All data sources failed, returning demo data")
+# MIGRATED_TO_ROUTER:             trucks_data = [
+# MIGRATED_TO_ROUTER:                 {
+# MIGRATED_TO_ROUTER:                     "truck_id": "DEMO-001",
+# MIGRATED_TO_ROUTER:                     "miles": 8000,
+# MIGRATED_TO_ROUTER:                     "gallons": 1450,
+# MIGRATED_TO_ROUTER:                     "engine_hours": 200,
+# MIGRATED_TO_ROUTER:                     "avg_mpg": 5.5,
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:                 {
+# MIGRATED_TO_ROUTER:                     "truck_id": "DEMO-002",
+# MIGRATED_TO_ROUTER:                     "miles": 7500,
+# MIGRATED_TO_ROUTER:                     "gallons": 1250,
+# MIGRATED_TO_ROUTER:                     "engine_hours": 190,
+# MIGRATED_TO_ROUTER:                     "avg_mpg": 6.0,
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:             ]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         report = cpm_engine.generate_cost_report(trucks_data, period_days=days)
+# MIGRATED_TO_ROUTER:         return report
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Cost per mile analysis error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/cost/per-mile/{truck_id}", tags=["Cost Analysis"])
+# MIGRATED_TO_ROUTER: async def get_truck_cost_per_mile(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER:     days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v4.0: Get cost per mile analysis for a specific truck.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         Detailed cost breakdown and comparison for the specified truck
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from cost_per_mile_engine import CostPerMileEngine
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
         # Note: Access control by carrier_id (currently single carrier)
-
-        engine = get_sqlalchemy_engine()
-        cpm_engine = CostPerMileEngine()
-
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         cpm_engine = CostPerMileEngine()
+# MIGRATED_TO_ROUTER: 
         # Get truck data for the period
         # 🔧 v4.3: Fixed column names - use mpg_current, calculate miles from odometer
-        query = """
-            SELECT 
-                (MAX(odometer_mi) - MIN(odometer_mi)) as miles,
-                (MAX(odometer_mi) - MIN(odometer_mi)) / NULLIF(AVG(CASE WHEN mpg_current > 0 THEN mpg_current END), 0) as gallons,
-                MAX(engine_hours) - MIN(engine_hours) as engine_hours,
-                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg
-            FROM fuel_metrics
-            WHERE truck_id = :truck_id
-                AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-                AND mpg_current > 0
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), {"truck_id": truck_id, "days": days})
-            row = result.fetchone()
-
-        if not row or not row[0]:
-            raise HTTPException(
-                status_code=404, detail=f"No data found for truck {truck_id}"
-            )
-
-        truck_data = {
-            "miles": float(row[0] or 0),
-            "gallons": float(row[1] or 0),
-            "engine_hours": float(row[2] or 0),
-            "avg_mpg": float(row[3] or 0),
-        }
-
-        analysis = cpm_engine.analyze_truck_costs(
-            truck_id=truck_id,
-            period_days=days,
-            truck_data=truck_data,
-        )
-
-        return {
-            "status": "success",
-            "data": analysis.to_dict(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Truck cost analysis error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/cost/speed-impact", tags=["Cost Analysis"])
-async def get_speed_cost_impact(
-    avg_speed_mph: float = Query(65, ge=40, le=90, description="Average highway speed"),
-    monthly_miles: float = Query(8000, ge=1000, le=50000, description="Monthly miles"),
-):
-    """
-    🆕 v4.0: Calculate cost impact of speeding.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Based on DOE research: "Every 5 mph over 60 reduces fuel efficiency by ~0.7 MPG"
-
-    Returns:
-        Cost impact analysis showing potential savings from speed reduction
-    """
-    try:
-        from cost_per_mile_engine import calculate_speed_cost_impact
-
-        impact = calculate_speed_cost_impact(
-            avg_speed_mph=avg_speed_mph,
-            monthly_miles=monthly_miles,
-        )
-
-        return {
-            "status": "success",
-            "data": impact,
-        }
-
-    except Exception as e:
-        logger.error(f"Speed impact analysis error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 (MAX(odometer_mi) - MIN(odometer_mi)) as miles,
+# MIGRATED_TO_ROUTER:                 (MAX(odometer_mi) - MIN(odometer_mi)) / NULLIF(AVG(CASE WHEN mpg_current > 0 THEN mpg_current END), 0) as gallons,
+# MIGRATED_TO_ROUTER:                 MAX(engine_hours) - MIN(engine_hours) as engine_hours,
+# MIGRATED_TO_ROUTER:                 AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE truck_id = :truck_id
+# MIGRATED_TO_ROUTER:                 AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:                 AND mpg_current > 0
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query), {"truck_id": truck_id, "days": days})
+# MIGRATED_TO_ROUTER:             row = result.fetchone()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if not row or not row[0]:
+# MIGRATED_TO_ROUTER:             raise HTTPException(
+# MIGRATED_TO_ROUTER:                 status_code=404, detail=f"No data found for truck {truck_id}"
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         truck_data = {
+# MIGRATED_TO_ROUTER:             "miles": float(row[0] or 0),
+# MIGRATED_TO_ROUTER:             "gallons": float(row[1] or 0),
+# MIGRATED_TO_ROUTER:             "engine_hours": float(row[2] or 0),
+# MIGRATED_TO_ROUTER:             "avg_mpg": float(row[3] or 0),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         analysis = cpm_engine.analyze_truck_costs(
+# MIGRATED_TO_ROUTER:             truck_id=truck_id,
+# MIGRATED_TO_ROUTER:             period_days=days,
+# MIGRATED_TO_ROUTER:             truck_data=truck_data,
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "status": "success",
+# MIGRATED_TO_ROUTER:             "data": analysis.to_dict(),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Truck cost analysis error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/cost/speed-impact", tags=["Cost Analysis"])
+# MIGRATED_TO_ROUTER: async def get_speed_cost_impact(
+# MIGRATED_TO_ROUTER:     avg_speed_mph: float = Query(65, ge=40, le=90, description="Average highway speed"),
+# MIGRATED_TO_ROUTER:     monthly_miles: float = Query(8000, ge=1000, le=50000, description="Monthly miles"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v4.0: Calculate cost impact of speeding.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Based on DOE research: "Every 5 mph over 60 reduces fuel efficiency by ~0.7 MPG"
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         Cost impact analysis showing potential savings from speed reduction
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from cost_per_mile_engine import calculate_speed_cost_impact
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         impact = calculate_speed_cost_impact(
+# MIGRATED_TO_ROUTER:             avg_speed_mph=avg_speed_mph,
+# MIGRATED_TO_ROUTER:             monthly_miles=monthly_miles,
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "status": "success",
+# MIGRATED_TO_ROUTER:             "data": impact,
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Speed impact analysis error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v4.0: FLEET UTILIZATION ENDPOINTS (Geotab-inspired, target 95%)
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/utilization/fleet", tags=["Fleet Utilization"])
-async def get_fleet_utilization(
-    days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
-):
-    """
-    🆕 v4.0: Get fleet utilization analysis.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Calculates utilization rate (target: 95%) based on:
-    - Driving time vs Available time
-    - Productive idle (loading/unloading) vs Non-productive idle
-    - Engine off time
-
-    Returns:
-        Fleet-wide utilization metrics and individual truck breakdowns
-    """
-    try:
-        from fleet_utilization_engine import FleetUtilizationEngine
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-        util_engine = FleetUtilizationEngine()
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/utilization/fleet", tags=["Fleet Utilization"])
+# MIGRATED_TO_ROUTER: async def get_fleet_utilization(
+# MIGRATED_TO_ROUTER:     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v4.0: Get fleet utilization analysis.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Calculates utilization rate (target: 95%) based on:
+# MIGRATED_TO_ROUTER:     - Driving time vs Available time
+# MIGRATED_TO_ROUTER:     - Productive idle (loading/unloading) vs Non-productive idle
+# MIGRATED_TO_ROUTER:     - Engine off time
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         Fleet-wide utilization metrics and individual truck breakdowns
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from fleet_utilization_engine import FleetUtilizationEngine
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         util_engine = FleetUtilizationEngine()
+# MIGRATED_TO_ROUTER: 
         # Get activity data for the period
         # 🔧 v4.3: Fixed column name speed -> speed_mph
-        query = """
-            SELECT 
-                truck_id,
-                SUM(CASE 
-                    WHEN speed_mph > 5 THEN 0.0167  -- ~1 minute per reading when moving
-                    ELSE 0 
-                END) as driving_hours,
-                SUM(CASE 
-                    WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167  -- Idle
-                    ELSE 0 
-                END) as idle_hours,
-                COUNT(DISTINCT DATE(timestamp_utc)) as active_days,
-                COUNT(*) as readings
-            FROM fuel_metrics
-            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-            GROUP BY truck_id
-        """
-
-        trucks_data = []
-        total_hours = days * 24
-
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text(query), {"days": days})
-                rows = result.fetchall()
-
-            for row in rows:
-                driving = float(row[1] or 0)
-                idle = float(row[2] or 0)
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 truck_id,
+# MIGRATED_TO_ROUTER:                 SUM(CASE 
+# MIGRATED_TO_ROUTER:                     WHEN speed_mph > 5 THEN 0.0167  -- ~1 minute per reading when moving
+# MIGRATED_TO_ROUTER:                     ELSE 0 
+# MIGRATED_TO_ROUTER:                 END) as driving_hours,
+# MIGRATED_TO_ROUTER:                 SUM(CASE 
+# MIGRATED_TO_ROUTER:                     WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167  -- Idle
+# MIGRATED_TO_ROUTER:                     ELSE 0 
+# MIGRATED_TO_ROUTER:                 END) as idle_hours,
+# MIGRATED_TO_ROUTER:                 COUNT(DISTINCT DATE(timestamp_utc)) as active_days,
+# MIGRATED_TO_ROUTER:                 COUNT(*) as readings
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:             GROUP BY truck_id
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         trucks_data = []
+# MIGRATED_TO_ROUTER:         total_hours = days * 24
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         try:
+# MIGRATED_TO_ROUTER:             with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:                 result = conn.execute(text(query), {"days": days})
+# MIGRATED_TO_ROUTER:                 rows = result.fetchall()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             for row in rows:
+# MIGRATED_TO_ROUTER:                 driving = float(row[1] or 0)
+# MIGRATED_TO_ROUTER:                 idle = float(row[2] or 0)
                 # Estimate productive vs non-productive idle (assume 30% is productive)
-                productive_idle = idle * 0.3
-                non_productive_idle = idle * 0.7
-                engine_off = total_hours - driving - idle
-
-                trucks_data.append(
-                    {
-                        "truck_id": row[0],
-                        "driving_hours": driving,
-                        "productive_idle_hours": productive_idle,
-                        "non_productive_idle_hours": non_productive_idle,
-                        "engine_off_hours": max(0, engine_off),
-                    }
-                )
-        except Exception as db_err:
-            logger.warning(f"DB query failed for utilization: {db_err}")
-
+# MIGRATED_TO_ROUTER:                 productive_idle = idle * 0.3
+# MIGRATED_TO_ROUTER:                 non_productive_idle = idle * 0.7
+# MIGRATED_TO_ROUTER:                 engine_off = total_hours - driving - idle
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:                 trucks_data.append(
+# MIGRATED_TO_ROUTER:                     {
+# MIGRATED_TO_ROUTER:                         "truck_id": row[0],
+# MIGRATED_TO_ROUTER:                         "driving_hours": driving,
+# MIGRATED_TO_ROUTER:                         "productive_idle_hours": productive_idle,
+# MIGRATED_TO_ROUTER:                         "non_productive_idle_hours": non_productive_idle,
+# MIGRATED_TO_ROUTER:                         "engine_off_hours": max(0, engine_off),
+# MIGRATED_TO_ROUTER:                     }
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER:         except Exception as db_err:
+# MIGRATED_TO_ROUTER:             logger.warning(f"DB query failed for utilization: {db_err}")
+# MIGRATED_TO_ROUTER: 
         # 🆕 v4.3: Fallback - generate estimates from current truck list
-        if not trucks_data:
-            logger.info("No utilization data, generating estimates from truck list")
-            try:
-                all_trucks = db.get_all_trucks()
-                for tid in all_trucks[:20]:
+# MIGRATED_TO_ROUTER:         if not trucks_data:
+# MIGRATED_TO_ROUTER:             logger.info("No utilization data, generating estimates from truck list")
+# MIGRATED_TO_ROUTER:             try:
+# MIGRATED_TO_ROUTER:                 all_trucks = db.get_all_trucks()
+# MIGRATED_TO_ROUTER:                 for tid in all_trucks[:20]:
                     # Generate reasonable estimates based on typical fleet usage
-                    driving = 4.0 * days  # ~4 hours/day driving on average
-                    idle = 1.0 * days  # ~1 hour idle per day
-                    productive_idle = idle * 0.3
-                    non_productive_idle = idle * 0.7
-                    engine_off = max(0, total_hours - driving - idle)
-
-                    trucks_data.append(
-                        {
-                            "truck_id": tid,
-                            "driving_hours": driving,
-                            "productive_idle_hours": productive_idle,
-                            "non_productive_idle_hours": non_productive_idle,
-                            "engine_off_hours": engine_off,
-                        }
-                    )
-            except Exception as fallback_err:
-                logger.error(f"Utilization fallback failed: {fallback_err}")
-
+# MIGRATED_TO_ROUTER:                     driving = 4.0 * days  # ~4 hours/day driving on average
+# MIGRATED_TO_ROUTER:                     idle = 1.0 * days  # ~1 hour idle per day
+# MIGRATED_TO_ROUTER:                     productive_idle = idle * 0.3
+# MIGRATED_TO_ROUTER:                     non_productive_idle = idle * 0.7
+# MIGRATED_TO_ROUTER:                     engine_off = max(0, total_hours - driving - idle)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:                     trucks_data.append(
+# MIGRATED_TO_ROUTER:                         {
+# MIGRATED_TO_ROUTER:                             "truck_id": tid,
+# MIGRATED_TO_ROUTER:                             "driving_hours": driving,
+# MIGRATED_TO_ROUTER:                             "productive_idle_hours": productive_idle,
+# MIGRATED_TO_ROUTER:                             "non_productive_idle_hours": non_productive_idle,
+# MIGRATED_TO_ROUTER:                             "engine_off_hours": engine_off,
+# MIGRATED_TO_ROUTER:                         }
+# MIGRATED_TO_ROUTER:                     )
+# MIGRATED_TO_ROUTER:             except Exception as fallback_err:
+# MIGRATED_TO_ROUTER:                 logger.error(f"Utilization fallback failed: {fallback_err}")
+# MIGRATED_TO_ROUTER: 
         # Final fallback - return demo data
-        if not trucks_data:
-            logger.warning("All utilization sources failed, returning demo data")
-            for i in range(5):
-                driving = 4.0 * days
-                idle = 1.0 * days
-                trucks_data.append(
-                    {
-                        "truck_id": f"DEMO-{i+1:03d}",
-                        "driving_hours": driving,
-                        "productive_idle_hours": idle * 0.3,
-                        "non_productive_idle_hours": idle * 0.7,
-                        "engine_off_hours": max(0, total_hours - driving - idle),
-                    }
-                )
-
-        report = util_engine.generate_utilization_report(trucks_data, period_days=days)
-        return report
-
-    except Exception as e:
-        logger.error(f"Fleet utilization error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/utilization/{truck_id}", tags=["Fleet Utilization"])
-async def get_truck_utilization(
-    truck_id: str,
-    days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
-):
-    """
-    🆕 v4.0: Get utilization analysis for a specific truck.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Returns:
-        Detailed utilization metrics and recommendations for the specified truck
-    """
-    try:
-        from fleet_utilization_engine import FleetUtilizationEngine
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
+# MIGRATED_TO_ROUTER:         if not trucks_data:
+# MIGRATED_TO_ROUTER:             logger.warning("All utilization sources failed, returning demo data")
+# MIGRATED_TO_ROUTER:             for i in range(5):
+# MIGRATED_TO_ROUTER:                 driving = 4.0 * days
+# MIGRATED_TO_ROUTER:                 idle = 1.0 * days
+# MIGRATED_TO_ROUTER:                 trucks_data.append(
+# MIGRATED_TO_ROUTER:                     {
+# MIGRATED_TO_ROUTER:                         "truck_id": f"DEMO-{i+1:03d}",
+# MIGRATED_TO_ROUTER:                         "driving_hours": driving,
+# MIGRATED_TO_ROUTER:                         "productive_idle_hours": idle * 0.3,
+# MIGRATED_TO_ROUTER:                         "non_productive_idle_hours": idle * 0.7,
+# MIGRATED_TO_ROUTER:                         "engine_off_hours": max(0, total_hours - driving - idle),
+# MIGRATED_TO_ROUTER:                     }
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         report = util_engine.generate_utilization_report(trucks_data, period_days=days)
+# MIGRATED_TO_ROUTER:         return report
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Fleet utilization error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/utilization/{truck_id}", tags=["Fleet Utilization"])
+# MIGRATED_TO_ROUTER: async def get_truck_utilization(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER:     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v4.0: Get utilization analysis for a specific truck.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         Detailed utilization metrics and recommendations for the specified truck
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from fleet_utilization_engine import FleetUtilizationEngine
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
         # Note: Access control by carrier_id (currently single carrier)
-
-        engine = get_sqlalchemy_engine()
-        util_engine = FleetUtilizationEngine()
-
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         util_engine = FleetUtilizationEngine()
+# MIGRATED_TO_ROUTER: 
         # 🔧 v4.3: Fixed column name speed -> speed_mph
-        query = """
-            SELECT 
-                SUM(CASE 
-                    WHEN speed_mph > 5 THEN 0.0167
-                    ELSE 0 
-                END) as driving_hours,
-                SUM(CASE 
-                    WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167
-                    ELSE 0 
-                END) as idle_hours
-            FROM fuel_metrics
-            WHERE truck_id = :truck_id
-                AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), {"truck_id": truck_id, "days": days})
-            row = result.fetchone()
-
-        if not row:
-            raise HTTPException(
-                status_code=404, detail=f"No data found for truck {truck_id}"
-            )
-
-        total_hours = days * 24
-        driving = float(row[0] or 0)
-        idle = float(row[1] or 0)
-        productive_idle = idle * 0.3
-        non_productive_idle = idle * 0.7
-        engine_off = total_hours - driving - idle
-
-        truck_data = {
-            "driving_hours": driving,
-            "productive_idle_hours": productive_idle,
-            "non_productive_idle_hours": non_productive_idle,
-            "engine_off_hours": max(0, engine_off),
-        }
-
-        analysis = util_engine.analyze_truck_utilization(
-            truck_id=truck_id,
-            period_days=days,
-            truck_data=truck_data,
-        )
-
-        return {
-            "status": "success",
-            "data": analysis.to_dict(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Truck utilization error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/utilization/optimization", tags=["Fleet Utilization"])
-async def get_utilization_optimization(
-    days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
-):
-    """
-    🆕 v4.0: Get fleet optimization recommendations based on utilization.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Identifies:
-    - Underutilized trucks (candidates for reassignment)
-    - Fleet size recommendations
-    - Potential revenue recovery
-
-    Returns:
-        Optimization recommendations with financial impact
-    """
-    try:
-        from fleet_utilization_engine import FleetUtilizationEngine
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-        util_engine = FleetUtilizationEngine()
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 SUM(CASE 
+# MIGRATED_TO_ROUTER:                     WHEN speed_mph > 5 THEN 0.0167
+# MIGRATED_TO_ROUTER:                     ELSE 0 
+# MIGRATED_TO_ROUTER:                 END) as driving_hours,
+# MIGRATED_TO_ROUTER:                 SUM(CASE 
+# MIGRATED_TO_ROUTER:                     WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167
+# MIGRATED_TO_ROUTER:                     ELSE 0 
+# MIGRATED_TO_ROUTER:                 END) as idle_hours
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE truck_id = :truck_id
+# MIGRATED_TO_ROUTER:                 AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query), {"truck_id": truck_id, "days": days})
+# MIGRATED_TO_ROUTER:             row = result.fetchone()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if not row:
+# MIGRATED_TO_ROUTER:             raise HTTPException(
+# MIGRATED_TO_ROUTER:                 status_code=404, detail=f"No data found for truck {truck_id}"
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         total_hours = days * 24
+# MIGRATED_TO_ROUTER:         driving = float(row[0] or 0)
+# MIGRATED_TO_ROUTER:         idle = float(row[1] or 0)
+# MIGRATED_TO_ROUTER:         productive_idle = idle * 0.3
+# MIGRATED_TO_ROUTER:         non_productive_idle = idle * 0.7
+# MIGRATED_TO_ROUTER:         engine_off = total_hours - driving - idle
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         truck_data = {
+# MIGRATED_TO_ROUTER:             "driving_hours": driving,
+# MIGRATED_TO_ROUTER:             "productive_idle_hours": productive_idle,
+# MIGRATED_TO_ROUTER:             "non_productive_idle_hours": non_productive_idle,
+# MIGRATED_TO_ROUTER:             "engine_off_hours": max(0, engine_off),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         analysis = util_engine.analyze_truck_utilization(
+# MIGRATED_TO_ROUTER:             truck_id=truck_id,
+# MIGRATED_TO_ROUTER:             period_days=days,
+# MIGRATED_TO_ROUTER:             truck_data=truck_data,
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "status": "success",
+# MIGRATED_TO_ROUTER:             "data": analysis.to_dict(),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Truck utilization error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/utilization/optimization", tags=["Fleet Utilization"])
+# MIGRATED_TO_ROUTER: async def get_utilization_optimization(
+# MIGRATED_TO_ROUTER:     days: int = Query(7, ge=1, le=90, description="Analysis period in days"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v4.0: Get fleet optimization recommendations based on utilization.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Identifies:
+# MIGRATED_TO_ROUTER:     - Underutilized trucks (candidates for reassignment)
+# MIGRATED_TO_ROUTER:     - Fleet size recommendations
+# MIGRATED_TO_ROUTER:     - Potential revenue recovery
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         Optimization recommendations with financial impact
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from fleet_utilization_engine import FleetUtilizationEngine
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         util_engine = FleetUtilizationEngine()
+# MIGRATED_TO_ROUTER: 
         # Get utilization data (same as fleet endpoint)
         # 🔧 v4.3: Fixed column name speed -> speed_mph
-        query = """
-            SELECT 
-                truck_id,
-                SUM(CASE 
-                    WHEN speed_mph > 5 THEN 0.0167
-                    ELSE 0 
-                END) as driving_hours,
-                SUM(CASE 
-                    WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167
-                    ELSE 0 
-                END) as idle_hours
-            FROM fuel_metrics
-            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-            GROUP BY truck_id
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), {"days": days})
-            rows = result.fetchall()
-
-        trucks_data = []
-        total_hours = days * 24
-
-        for row in rows:
-            driving = float(row[1] or 0)
-            idle = float(row[2] or 0)
-            productive_idle = idle * 0.3
-            non_productive_idle = idle * 0.7
-            engine_off = total_hours - driving - idle
-
-            trucks_data.append(
-                {
-                    "truck_id": row[0],
-                    "driving_hours": driving,
-                    "productive_idle_hours": productive_idle,
-                    "non_productive_idle_hours": non_productive_idle,
-                    "engine_off_hours": max(0, engine_off),
-                }
-            )
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 truck_id,
+# MIGRATED_TO_ROUTER:                 SUM(CASE 
+# MIGRATED_TO_ROUTER:                     WHEN speed_mph > 5 THEN 0.0167
+# MIGRATED_TO_ROUTER:                     ELSE 0 
+# MIGRATED_TO_ROUTER:                 END) as driving_hours,
+# MIGRATED_TO_ROUTER:                 SUM(CASE 
+# MIGRATED_TO_ROUTER:                     WHEN speed_mph <= 5 AND rpm > 400 THEN 0.0167
+# MIGRATED_TO_ROUTER:                     ELSE 0 
+# MIGRATED_TO_ROUTER:                 END) as idle_hours
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:             GROUP BY truck_id
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query), {"days": days})
+# MIGRATED_TO_ROUTER:             rows = result.fetchall()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         trucks_data = []
+# MIGRATED_TO_ROUTER:         total_hours = days * 24
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         for row in rows:
+# MIGRATED_TO_ROUTER:             driving = float(row[1] or 0)
+# MIGRATED_TO_ROUTER:             idle = float(row[2] or 0)
+# MIGRATED_TO_ROUTER:             productive_idle = idle * 0.3
+# MIGRATED_TO_ROUTER:             non_productive_idle = idle * 0.7
+# MIGRATED_TO_ROUTER:             engine_off = total_hours - driving - idle
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             trucks_data.append(
+# MIGRATED_TO_ROUTER:                 {
+# MIGRATED_TO_ROUTER:                     "truck_id": row[0],
+# MIGRATED_TO_ROUTER:                     "driving_hours": driving,
+# MIGRATED_TO_ROUTER:                     "productive_idle_hours": productive_idle,
+# MIGRATED_TO_ROUTER:                     "non_productive_idle_hours": non_productive_idle,
+# MIGRATED_TO_ROUTER:                     "engine_off_hours": max(0, engine_off),
+# MIGRATED_TO_ROUTER:                 }
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
         # Note: Currently fleet is single-carrier, no filtering needed
-
+# MIGRATED_TO_ROUTER: 
         # Analyze fleet utilization
-        summary = util_engine.analyze_fleet_utilization(trucks_data, period_days=days)
-
-        if not summary:
-            return {
-                "status": "error",
-                "message": "No data available for optimization analysis",
-            }
-
+# MIGRATED_TO_ROUTER:         summary = util_engine.analyze_fleet_utilization(trucks_data, period_days=days)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if not summary:
+# MIGRATED_TO_ROUTER:             return {
+# MIGRATED_TO_ROUTER:                 "status": "error",
+# MIGRATED_TO_ROUTER:                 "message": "No data available for optimization analysis",
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER: 
         # Get optimization opportunities
-        opportunities = util_engine.identify_fleet_optimization_opportunities(summary)
-
-        return {
-            "status": "success",
-            "period_days": days,
-            "fleet_avg_utilization": round(summary.fleet_avg_utilization * 100, 1),
-            "target_utilization": 95,
-            "data": opportunities,
-        }
-
-    except Exception as e:
-        logger.error(f"Utilization optimization error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER:         opportunities = util_engine.identify_fleet_optimization_opportunities(summary)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "status": "success",
+# MIGRATED_TO_ROUTER:             "period_days": days,
+# MIGRATED_TO_ROUTER:             "fleet_avg_utilization": round(summary.fleet_avg_utilization * 100, 1),
+# MIGRATED_TO_ROUTER:             "target_utilization": 95,
+# MIGRATED_TO_ROUTER:             "data": opportunities,
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Utilization optimization error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v4.0: GAMIFICATION ENDPOINTS
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/gamification/leaderboard", tags=["Gamification"])
-async def get_driver_leaderboard():
-    """
-    🆕 v4.0: Get driver leaderboard with rankings, scores, and badges.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Features:
-    - Overall score based on MPG, idle, consistency, and improvement
-    - Trend indicators (↑↓) showing performance direction
-    - Badge counts and streak days
-    - Fleet statistics
-
-    Returns:
-        Leaderboard with all drivers ranked by performance
-    """
-    try:
-        from gamification_engine import GamificationEngine
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-        gam_engine = GamificationEngine()
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/gamification/leaderboard", tags=["Gamification"])
+# MIGRATED_TO_ROUTER: async def get_driver_leaderboard():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v4.0: Get driver leaderboard with rankings, scores, and badges.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Features:
+# MIGRATED_TO_ROUTER:     - Overall score based on MPG, idle, consistency, and improvement
+# MIGRATED_TO_ROUTER:     - Trend indicators (↑↓) showing performance direction
+# MIGRATED_TO_ROUTER:     - Badge counts and streak days
+# MIGRATED_TO_ROUTER:     - Fleet statistics
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         Leaderboard with all drivers ranked by performance
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from gamification_engine import GamificationEngine
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         gam_engine = GamificationEngine()
+# MIGRATED_TO_ROUTER: 
         # 🔧 v5.5.1: Filter by allowed trucks from tanks.yaml
-        from config import get_allowed_trucks
-
-        allowed_trucks = get_allowed_trucks()
-
-        if not allowed_trucks:
-            logger.warning("No allowed trucks configured in tanks.yaml")
-            return {
-                "leaderboard": [],
-                "fleet_stats": {},
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-
+# MIGRATED_TO_ROUTER:         from config import get_allowed_trucks
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         allowed_trucks = get_allowed_trucks()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if not allowed_trucks:
+# MIGRATED_TO_ROUTER:             logger.warning("No allowed trucks configured in tanks.yaml")
+# MIGRATED_TO_ROUTER:             return {
+# MIGRATED_TO_ROUTER:                 "leaderboard": [],
+# MIGRATED_TO_ROUTER:                 "fleet_stats": {},
+# MIGRATED_TO_ROUTER:                 "timestamp": datetime.utcnow().isoformat(),
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER: 
         # Build placeholders for IN clause
-        placeholders = ",".join([f":truck_{i}" for i in range(len(allowed_trucks))])
-        truck_params = {f"truck_{i}": t for i, t in enumerate(allowed_trucks)}
-
+# MIGRATED_TO_ROUTER:         placeholders = ",".join([f":truck_{i}" for i in range(len(allowed_trucks))])
+# MIGRATED_TO_ROUTER:         truck_params = {f"truck_{i}": t for i, t in enumerate(allowed_trucks)}
+# MIGRATED_TO_ROUTER: 
         # Get driver performance data from last 7 days
         # 🔧 v4.3: Fixed column name mpg -> mpg_current, speed -> speed_mph
         # 🔧 v5.5.1: Added filter by allowed_trucks
-        query = f"""
-            SELECT 
-                fm.truck_id,
-                AVG(CASE WHEN fm.mpg_current > 0 THEN fm.mpg_current END) as mpg,
-                AVG(CASE 
-                    WHEN fm.speed_mph <= 5 AND fm.rpm > 400 THEN 1.0
-                    ELSE 0.0
-                END) * 100 as idle_pct,
-                COUNT(DISTINCT DATE(fm.timestamp_utc)) as active_days
-            FROM fuel_metrics fm
-            WHERE fm.timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-            AND fm.truck_id IN ({placeholders})
-            GROUP BY fm.truck_id
-            HAVING mpg IS NOT NULL
-        """
-
-        drivers_data = []
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text(query), truck_params)
-                rows = result.fetchall()
-
-            for row in rows:
-                drivers_data.append(
-                    {
-                        "truck_id": row[0],
-                        "mpg": float(row[1] or 6.0),
-                        "idle_pct": float(row[2] or 12.0),
-                        "driver_name": f"Driver {row[0]}",
-                        "previous_score": 50,
-                        "streak_days": int(row[3] or 0),
-                        "badges_earned": 0,
-                    }
-                )
-        except Exception as db_err:
-            logger.warning(f"Leaderboard DB query failed: {db_err}")
-
+# MIGRATED_TO_ROUTER:         query = f"""
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 fm.truck_id,
+# MIGRATED_TO_ROUTER:                 AVG(CASE WHEN fm.mpg_current > 0 THEN fm.mpg_current END) as mpg,
+# MIGRATED_TO_ROUTER:                 AVG(CASE 
+# MIGRATED_TO_ROUTER:                     WHEN fm.speed_mph <= 5 AND fm.rpm > 400 THEN 1.0
+# MIGRATED_TO_ROUTER:                     ELSE 0.0
+# MIGRATED_TO_ROUTER:                 END) * 100 as idle_pct,
+# MIGRATED_TO_ROUTER:                 COUNT(DISTINCT DATE(fm.timestamp_utc)) as active_days
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics fm
+# MIGRATED_TO_ROUTER:             WHERE fm.timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+# MIGRATED_TO_ROUTER:             AND fm.truck_id IN ({placeholders})
+# MIGRATED_TO_ROUTER:             GROUP BY fm.truck_id
+# MIGRATED_TO_ROUTER:             HAVING mpg IS NOT NULL
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         drivers_data = []
+# MIGRATED_TO_ROUTER:         try:
+# MIGRATED_TO_ROUTER:             with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:                 result = conn.execute(text(query), truck_params)
+# MIGRATED_TO_ROUTER:                 rows = result.fetchall()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             for row in rows:
+# MIGRATED_TO_ROUTER:                 drivers_data.append(
+# MIGRATED_TO_ROUTER:                     {
+# MIGRATED_TO_ROUTER:                         "truck_id": row[0],
+# MIGRATED_TO_ROUTER:                         "mpg": float(row[1] or 6.0),
+# MIGRATED_TO_ROUTER:                         "idle_pct": float(row[2] or 12.0),
+# MIGRATED_TO_ROUTER:                         "driver_name": f"Driver {row[0]}",
+# MIGRATED_TO_ROUTER:                         "previous_score": 50,
+# MIGRATED_TO_ROUTER:                         "streak_days": int(row[3] or 0),
+# MIGRATED_TO_ROUTER:                         "badges_earned": 0,
+# MIGRATED_TO_ROUTER:                     }
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER:         except Exception as db_err:
+# MIGRATED_TO_ROUTER:             logger.warning(f"Leaderboard DB query failed: {db_err}")
+# MIGRATED_TO_ROUTER: 
         # 🆕 v4.3: Fallback - use current truck data if no historical data
         # 🔧 v5.5.1: Filter by allowed trucks from tanks.yaml
-        if not drivers_data:
-            logger.info("No leaderboard data, generating from current trucks")
-            try:
-                all_trucks = db.get_all_trucks()
+        # 🔧 v5.6.0: Fixed N+1 query - batch fetch truck data
+# MIGRATED_TO_ROUTER:         if not drivers_data:
+# MIGRATED_TO_ROUTER:             logger.info("No leaderboard data, generating from current trucks")
+# MIGRATED_TO_ROUTER:             try:
+# MIGRATED_TO_ROUTER:                 all_trucks = db.get_all_trucks()
                 # Filter to only include trucks from tanks.yaml
-                fallback_allowed = get_allowed_trucks()
-                filtered_trucks = [t for t in all_trucks if t in fallback_allowed][:20]
-                for tid in filtered_trucks:
-                    truck_data = db.get_truck_latest_record(tid)
-                    if truck_data:
-                        mpg = truck_data.get("mpg_current", 5.5) or 5.5
-                        if mpg < 3 or mpg > 12:
-                            mpg = 5.5
-                        drivers_data.append(
-                            {
-                                "truck_id": tid,
-                                "mpg": mpg,
-                                "idle_pct": 12.0,  # Default
-                                "driver_name": f"Driver {tid}",
-                                "previous_score": 50,
-                                "streak_days": 3,
-                                "badges_earned": 1,
-                            }
-                        )
-            except Exception as fallback_err:
-                logger.error(f"Leaderboard fallback failed: {fallback_err}")
-
+# MIGRATED_TO_ROUTER:                 fallback_allowed = get_allowed_trucks()
+# MIGRATED_TO_ROUTER:                 filtered_trucks = [t for t in all_trucks if t in fallback_allowed][:20]
+# MIGRATED_TO_ROUTER: 
+                # 🔧 v5.6.0: Batch query instead of N+1
+# MIGRATED_TO_ROUTER:                 trucks_data = (
+# MIGRATED_TO_ROUTER:                     db.get_trucks_batch(filtered_trucks)
+# MIGRATED_TO_ROUTER:                     if hasattr(db, "get_trucks_batch")
+# MIGRATED_TO_ROUTER:                     else {}
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:                 for tid in filtered_trucks:
+                    # Use batch data if available, otherwise fall back to individual query
+# MIGRATED_TO_ROUTER:                     truck_data = (
+# MIGRATED_TO_ROUTER:                         trucks_data.get(tid)
+# MIGRATED_TO_ROUTER:                         if trucks_data
+# MIGRATED_TO_ROUTER:                         else db.get_truck_latest_record(tid)
+# MIGRATED_TO_ROUTER:                     )
+# MIGRATED_TO_ROUTER:                     if truck_data:
+# MIGRATED_TO_ROUTER:                         mpg = truck_data.get("mpg_current", 5.5) or 5.5
+# MIGRATED_TO_ROUTER:                         if mpg < 3 or mpg > 12:
+# MIGRATED_TO_ROUTER:                             mpg = 5.5
+# MIGRATED_TO_ROUTER:                         drivers_data.append(
+# MIGRATED_TO_ROUTER:                             {
+# MIGRATED_TO_ROUTER:                                 "truck_id": tid,
+# MIGRATED_TO_ROUTER:                                 "mpg": mpg,
+# MIGRATED_TO_ROUTER:                                 "idle_pct": 12.0,  # Default
+# MIGRATED_TO_ROUTER:                                 "driver_name": f"Driver {tid}",
+# MIGRATED_TO_ROUTER:                                 "previous_score": 50,
+# MIGRATED_TO_ROUTER:                                 "streak_days": 3,
+# MIGRATED_TO_ROUTER:                                 "badges_earned": 1,
+# MIGRATED_TO_ROUTER:                             }
+# MIGRATED_TO_ROUTER:                         )
+# MIGRATED_TO_ROUTER:             except Exception as fallback_err:
+# MIGRATED_TO_ROUTER:                 logger.error(f"Leaderboard fallback failed: {fallback_err}")
+# MIGRATED_TO_ROUTER: 
         # Final fallback - return demo data
-        if not drivers_data:
-            logger.warning("All leaderboard sources failed, returning demo data")
-            for i in range(5):
-                drivers_data.append(
-                    {
-                        "truck_id": f"DEMO-{i+1:03d}",
-                        "mpg": 5.5 + i * 0.3,
-                        "idle_pct": 12.0 - i,
-                        "driver_name": f"Driver DEMO-{i+1:03d}",
-                        "previous_score": 50 + i * 5,
-                        "streak_days": i + 1,
-                        "badges_earned": i,
-                    }
-                )
-
-        report = gam_engine.generate_gamification_report(drivers_data)
-        return report
-
-    except Exception as e:
-        logger.error(f"Gamification leaderboard error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/gamification/badges/{truck_id}", tags=["Gamification"])
-async def get_driver_badges(
-    truck_id: str,
-):
-    """
-    🆕 v4.0: Get badges for a specific driver/truck.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Returns:
-        List of earned and in-progress badges with progress percentages
-    """
-    try:
-        from gamification_engine import GamificationEngine
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-        gam_engine = GamificationEngine()
-
+# MIGRATED_TO_ROUTER:         if not drivers_data:
+# MIGRATED_TO_ROUTER:             logger.warning("All leaderboard sources failed, returning demo data")
+# MIGRATED_TO_ROUTER:             for i in range(5):
+# MIGRATED_TO_ROUTER:                 drivers_data.append(
+# MIGRATED_TO_ROUTER:                     {
+# MIGRATED_TO_ROUTER:                         "truck_id": f"DEMO-{i+1:03d}",
+# MIGRATED_TO_ROUTER:                         "mpg": 5.5 + i * 0.3,
+# MIGRATED_TO_ROUTER:                         "idle_pct": 12.0 - i,
+# MIGRATED_TO_ROUTER:                         "driver_name": f"Driver DEMO-{i+1:03d}",
+# MIGRATED_TO_ROUTER:                         "previous_score": 50 + i * 5,
+# MIGRATED_TO_ROUTER:                         "streak_days": i + 1,
+# MIGRATED_TO_ROUTER:                         "badges_earned": i,
+# MIGRATED_TO_ROUTER:                     }
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         report = gam_engine.generate_gamification_report(drivers_data)
+# MIGRATED_TO_ROUTER:         return report
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Gamification leaderboard error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/gamification/badges/{truck_id}", tags=["Gamification"])
+# MIGRATED_TO_ROUTER: async def get_driver_badges(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v4.0: Get badges for a specific driver/truck.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:         List of earned and in-progress badges with progress percentages
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from gamification_engine import GamificationEngine
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         gam_engine = GamificationEngine()
+# MIGRATED_TO_ROUTER: 
         # Get driver's historical data for badge calculation
         # 🔧 v4.3: Fixed column names mpg -> mpg_current, speed -> speed_mph
-        query = """
-            SELECT 
-                DATE(timestamp_utc) as date,
-                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as mpg,
-                AVG(CASE 
-                    WHEN speed_mph <= 5 AND rpm > 400 THEN 1.0
-                    ELSE 0.0
-                END) * 100 as idle_pct
-            FROM fuel_metrics
-            WHERE truck_id = :truck_id
-                AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            GROUP BY DATE(timestamp_utc)
-            ORDER BY date DESC
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), {"truck_id": truck_id})
-            rows = result.fetchall()
-
-        if not rows:
-            raise HTTPException(
-                status_code=404, detail=f"No data found for truck {truck_id}"
-            )
-
-        mpg_history = [float(row[1] or 6.0) for row in rows]
-        idle_history = [float(row[2] or 12.0) for row in rows]
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 DATE(timestamp_utc) as date,
+# MIGRATED_TO_ROUTER:                 AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as mpg,
+# MIGRATED_TO_ROUTER:                 AVG(CASE 
+# MIGRATED_TO_ROUTER:                     WHEN speed_mph <= 5 AND rpm > 400 THEN 1.0
+# MIGRATED_TO_ROUTER:                     ELSE 0.0
+# MIGRATED_TO_ROUTER:                 END) * 100 as idle_pct
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE truck_id = :truck_id
+# MIGRATED_TO_ROUTER:                 AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+# MIGRATED_TO_ROUTER:             GROUP BY DATE(timestamp_utc)
+# MIGRATED_TO_ROUTER:             ORDER BY date DESC
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query), {"truck_id": truck_id})
+# MIGRATED_TO_ROUTER:             rows = result.fetchall()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if not rows:
+# MIGRATED_TO_ROUTER:             raise HTTPException(
+# MIGRATED_TO_ROUTER:                 status_code=404, detail=f"No data found for truck {truck_id}"
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         mpg_history = [float(row[1] or 6.0) for row in rows]
+# MIGRATED_TO_ROUTER:         idle_history = [float(row[2] or 12.0) for row in rows]
+# MIGRATED_TO_ROUTER: 
         # Get fleet average MPG
         # 🔧 v4.3: Fixed column name mpg -> mpg_current
-        avg_query = """
-            SELECT AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as fleet_avg
-            FROM fuel_metrics
-            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        """
-
-        with engine.connect() as conn:
-            avg_result = conn.execute(text(avg_query))
-            fleet_avg = avg_result.fetchone()
-            fleet_avg_mpg = float(fleet_avg[0] or 6.0) if fleet_avg else 6.0
-
-        driver_data = {
-            "mpg_history": mpg_history,
-            "idle_history": idle_history,
-            "rank": 5,  # Would come from leaderboard calculation
-            "total_trucks": 25,
-            "overall_score": 65,  # Calculated score
-        }
-
-        badges = gam_engine.get_driver_badges(truck_id, driver_data, fleet_avg_mpg)
-
-        return badges
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Driver badges error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER:         avg_query = """
+# MIGRATED_TO_ROUTER:             SELECT AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as fleet_avg
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             avg_result = conn.execute(text(avg_query))
+# MIGRATED_TO_ROUTER:             fleet_avg = avg_result.fetchone()
+# MIGRATED_TO_ROUTER:             fleet_avg_mpg = float(fleet_avg[0] or 6.0) if fleet_avg else 6.0
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         driver_data = {
+# MIGRATED_TO_ROUTER:             "mpg_history": mpg_history,
+# MIGRATED_TO_ROUTER:             "idle_history": idle_history,
+# MIGRATED_TO_ROUTER:             "rank": 5,  # Would come from leaderboard calculation
+# MIGRATED_TO_ROUTER:             "total_trucks": 25,
+# MIGRATED_TO_ROUTER:             "overall_score": 65,  # Calculated score
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         badges = gam_engine.get_driver_badges(truck_id, driver_data, fleet_avg_mpg)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return badges
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Driver badges error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v5.0: PREDICTIVE MAINTENANCE ENDPOINTS
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/maintenance/fleet-health", tags=["Predictive Maintenance"])
-async def get_fleet_health(
-    include_trends: bool = Query(False, description="Include 7-day trend analysis"),
-    include_anomalies: bool = Query(
-        False, description="Include Nelson Rules anomaly detection"
-    ),
-):
-    """
-    🆕 v5.0: Unified fleet health endpoint.
-    🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
-
-    Returns fleet health report with demo data if real data unavailable.
-    """
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/maintenance/fleet-health", tags=["Predictive Maintenance"])
+# MIGRATED_TO_ROUTER: async def get_fleet_health(
+# MIGRATED_TO_ROUTER:     include_trends: bool = Query(False, description="Include 7-day trend analysis"),
+# MIGRATED_TO_ROUTER:     include_anomalies: bool = Query(
+# MIGRATED_TO_ROUTER:         False, description="Include Nelson Rules anomaly detection"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v5.0: Unified fleet health endpoint.
+# MIGRATED_TO_ROUTER:     🔧 v4.3.2: Removed auth requirement for consistency with dashboard endpoints.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns fleet health report with demo data if real data unavailable.
+# MIGRATED_TO_ROUTER:     """
     # Default demo response - always works
-    demo_response = {
-        "status": "success",
-        "data_source": "demo",
-        "fleet_summary": {
-            "total_trucks": 3,
-            "healthy_count": 2,
-            "warning_count": 1,
-            "critical_count": 0,
-            "fleet_health_score": 85,
-            "data_freshness": "Demo data",
-        },
-        "alert_summary": {
-            "critical": 0,
-            "high": 1,
-            "medium": 2,
-            "low": 1,
-        },
-        "trucks": [
-            {
-                "truck_id": "T101",
-                "overall_score": 95,
-                "status": "healthy",
-                "current_values": {"oil_press": 45, "cool_temp": 195, "pwr_ext": 14.1},
-                "alerts": [],
-                "last_updated": datetime.now(timezone.utc).isoformat(),
-            },
-            {
-                "truck_id": "T102",
-                "overall_score": 72,
-                "status": "warning",
-                "current_values": {"oil_press": 28, "cool_temp": 215, "pwr_ext": 13.2},
-                "alerts": [
-                    {
-                        "category": "engine",
-                        "severity": "high",
-                        "title": "Low Oil Pressure",
-                        "message": "Oil pressure below normal range",
-                        "metric": "oil_press",
-                        "current_value": 28,
-                        "threshold": 30,
-                        "recommendation": "Check oil level and pressure sensor",
-                    }
-                ],
-                "last_updated": datetime.now(timezone.utc).isoformat(),
-            },
-            {
-                "truck_id": "T103",
-                "overall_score": 88,
-                "status": "healthy",
-                "current_values": {"oil_press": 52, "cool_temp": 188, "pwr_ext": 14.3},
-                "alerts": [],
-                "last_updated": datetime.now(timezone.utc).isoformat(),
-            },
-        ],
-        "alerts": [
-            {
-                "truck_id": "T102",
-                "category": "engine",
-                "severity": "high",
-                "title": "Low Oil Pressure",
-                "message": "Oil pressure 28 psi (threshold: 30 psi)",
-                "recommendation": "Check oil level and sensor",
-            }
-        ],
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-
+# MIGRATED_TO_ROUTER:     demo_response = {
+# MIGRATED_TO_ROUTER:         "status": "success",
+# MIGRATED_TO_ROUTER:         "data_source": "demo",
+# MIGRATED_TO_ROUTER:         "fleet_summary": {
+# MIGRATED_TO_ROUTER:             "total_trucks": 3,
+# MIGRATED_TO_ROUTER:             "healthy_count": 2,
+# MIGRATED_TO_ROUTER:             "warning_count": 1,
+# MIGRATED_TO_ROUTER:             "critical_count": 0,
+# MIGRATED_TO_ROUTER:             "fleet_health_score": 85,
+# MIGRATED_TO_ROUTER:             "data_freshness": "Demo data",
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         "alert_summary": {
+# MIGRATED_TO_ROUTER:             "critical": 0,
+# MIGRATED_TO_ROUTER:             "high": 1,
+# MIGRATED_TO_ROUTER:             "medium": 2,
+# MIGRATED_TO_ROUTER:             "low": 1,
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         "trucks": [
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "truck_id": "T101",
+# MIGRATED_TO_ROUTER:                 "overall_score": 95,
+# MIGRATED_TO_ROUTER:                 "status": "healthy",
+# MIGRATED_TO_ROUTER:                 "current_values": {"oil_press": 45, "cool_temp": 195, "pwr_ext": 14.1},
+# MIGRATED_TO_ROUTER:                 "alerts": [],
+# MIGRATED_TO_ROUTER:                 "last_updated": datetime.now(timezone.utc).isoformat(),
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "truck_id": "T102",
+# MIGRATED_TO_ROUTER:                 "overall_score": 72,
+# MIGRATED_TO_ROUTER:                 "status": "warning",
+# MIGRATED_TO_ROUTER:                 "current_values": {"oil_press": 28, "cool_temp": 215, "pwr_ext": 13.2},
+# MIGRATED_TO_ROUTER:                 "alerts": [
+# MIGRATED_TO_ROUTER:                     {
+# MIGRATED_TO_ROUTER:                         "category": "engine",
+# MIGRATED_TO_ROUTER:                         "severity": "high",
+# MIGRATED_TO_ROUTER:                         "title": "Low Oil Pressure",
+# MIGRATED_TO_ROUTER:                         "message": "Oil pressure below normal range",
+# MIGRATED_TO_ROUTER:                         "metric": "oil_press",
+# MIGRATED_TO_ROUTER:                         "current_value": 28,
+# MIGRATED_TO_ROUTER:                         "threshold": 30,
+# MIGRATED_TO_ROUTER:                         "recommendation": "Check oil level and pressure sensor",
+# MIGRATED_TO_ROUTER:                     }
+# MIGRATED_TO_ROUTER:                 ],
+# MIGRATED_TO_ROUTER:                 "last_updated": datetime.now(timezone.utc).isoformat(),
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "truck_id": "T103",
+# MIGRATED_TO_ROUTER:                 "overall_score": 88,
+# MIGRATED_TO_ROUTER:                 "status": "healthy",
+# MIGRATED_TO_ROUTER:                 "current_values": {"oil_press": 52, "cool_temp": 188, "pwr_ext": 14.3},
+# MIGRATED_TO_ROUTER:                 "alerts": [],
+# MIGRATED_TO_ROUTER:                 "last_updated": datetime.now(timezone.utc).isoformat(),
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:         ],
+# MIGRATED_TO_ROUTER:         "alerts": [
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "truck_id": "T102",
+# MIGRATED_TO_ROUTER:                 "category": "engine",
+# MIGRATED_TO_ROUTER:                 "severity": "high",
+# MIGRATED_TO_ROUTER:                 "title": "Low Oil Pressure",
+# MIGRATED_TO_ROUTER:                 "message": "Oil pressure 28 psi (threshold: 30 psi)",
+# MIGRATED_TO_ROUTER:                 "recommendation": "Check oil level and sensor",
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER:         ],
+# MIGRATED_TO_ROUTER:         "generated_at": datetime.now(timezone.utc).isoformat(),
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
     # 🔧 v5.1: TEMPORALMENTE usar solo demo data para evitar crashes
     # El import de routers.maintenance causaba crashes al conectar a Wialon
-    logger.info("Predictive Maintenance: Using demo data (Wialon integration disabled)")
-    return demo_response
-
-
-@app.get(
-    "/fuelAnalytics/api/maintenance/truck/{truck_id}", tags=["Predictive Maintenance"]
-)
-async def get_truck_health(
-    truck_id: str,
-    days: int = Query(7, ge=1, le=30, description="History days"),
-):
-    """
-    🆕 v5.0: Get detailed health analysis for a specific truck.
-    🔧 v5.1: Returns demo data (Wialon integration disabled).
-    """
+# MIGRATED_TO_ROUTER:     logger.info("Predictive Maintenance: Using demo data (Wialon integration disabled)")
+# MIGRATED_TO_ROUTER:     return demo_response
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/maintenance/truck/{truck_id}", tags=["Predictive Maintenance"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def get_truck_health(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER:     days: int = Query(7, ge=1, le=30, description="History days"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v5.0: Get detailed health analysis for a specific truck.
+# MIGRATED_TO_ROUTER:     🔧 v5.1: Returns demo data (Wialon integration disabled).
+# MIGRATED_TO_ROUTER:     """
     # 🔧 v5.1: Return demo data to avoid crashes
-    return {
-        "status": "success",
-        "data_source": "demo",
-        "truck_id": truck_id,
-        "overall_score": 85,
-        "status": "healthy",
-        "current_values": {"oil_press": 45, "cool_temp": 195, "pwr_ext": 14.1},
-        "alerts": [],
-        "trends": {},
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
+# MIGRATED_TO_ROUTER:     return {
+# MIGRATED_TO_ROUTER:         "status": "success",
+# MIGRATED_TO_ROUTER:         "data_source": "demo",
+# MIGRATED_TO_ROUTER:         "truck_id": truck_id,
+# MIGRATED_TO_ROUTER:         "overall_score": 85,
+# MIGRATED_TO_ROUTER:         "status": "healthy",
+# MIGRATED_TO_ROUTER:         "current_values": {"oil_press": 45, "cool_temp": 195, "pwr_ext": 14.1},
+# MIGRATED_TO_ROUTER:         "alerts": [],
+# MIGRATED_TO_ROUTER:         "trends": {},
+# MIGRATED_TO_ROUTER:         "generated_at": datetime.now(timezone.utc).isoformat(),
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v5.3.7: PREDICTIVE MAINTENANCE V5 WRAPPER
 # ============================================================================
@@ -4287,84 +4350,84 @@ async def get_truck_health(
 # The frontend's useFleetHealth.ts expects this endpoint format
 
 
-@app.get(
-    "/fuelAnalytics/api/v5/predictive-maintenance", tags=["Predictive Maintenance"]
-)
-async def get_predictive_maintenance_v5():
-    """
-    🆕 v5.3.7: Wrapper for V3 fleet health that filters by tanks.yaml.
-
-    This endpoint:
-    1. Calls the V3 analyze_fleet_health() function
-    2. Returns data in the format expected by useFleetHealth.ts frontend hook
-    3. Ensures only trucks in tanks.yaml are included (41 trucks)
-    """
-    try:
-        from predictive_maintenance_v3 import analyze_fleet_health
-
+# MIGRATED_TO_ROUTER: @app.get(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/v5/predictive-maintenance", tags=["Predictive Maintenance"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def get_predictive_maintenance_v5():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v5.3.7: Wrapper for V3 fleet health that filters by tanks.yaml.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     This endpoint:
+# MIGRATED_TO_ROUTER:     1. Calls the V3 analyze_fleet_health() function
+# MIGRATED_TO_ROUTER:     2. Returns data in the format expected by useFleetHealth.ts frontend hook
+# MIGRATED_TO_ROUTER:     3. Ensures only trucks in tanks.yaml are included (41 trucks)
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from predictive_maintenance_v3 import analyze_fleet_health
+# MIGRATED_TO_ROUTER: 
         # Get V3 report (already filtered by tanks.yaml)
-        report = analyze_fleet_health(include_trends=True, include_maintenance=True)
-        report_dict = report.to_dict()
-
+# MIGRATED_TO_ROUTER:         report = analyze_fleet_health(include_trends=True, include_maintenance=True)
+# MIGRATED_TO_ROUTER:         report_dict = report.to_dict()
+# MIGRATED_TO_ROUTER: 
         # Transform to V5 format expected by frontend
-        trucks_list = report_dict.get("trucks", [])
-
+# MIGRATED_TO_ROUTER:         trucks_list = report_dict.get("trucks", [])
+# MIGRATED_TO_ROUTER: 
         # Count status breakdown
-        status_breakdown = {"NORMAL": 0, "WARNING": 0, "WATCH": 0, "CRITICAL": 0}
-        for truck in trucks_list:
-            status = truck.get("status", "NORMAL").upper()
-            if status in status_breakdown:
-                status_breakdown[status] += 1
-            elif status == "HEALTHY":
-                status_breakdown["NORMAL"] += 1
-
-        return {
-            "success": True,
-            "source": "predictive_maintenance_v3",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "fleet_health": {
-                "total_trucks": len(trucks_list),
-                "average_health_score": report_dict.get("fleet_summary", {}).get(
-                    "average_score", 80
-                ),
-                "status_breakdown": status_breakdown,
-            },
-            "trucks": [
-                {
-                    "truck_id": t.get("truck_id"),
-                    "health_score": t.get("overall_score", 80),
-                    "status": t.get("status", "NORMAL"),
-                    "sensors": t.get("current_values", {}),
-                    "issues": [a.get("title", "") for a in t.get("alerts", [])],
-                    "last_updated": t.get(
-                        "last_updated", datetime.now(timezone.utc).isoformat()
-                    ),
-                }
-                for t in trucks_list
-            ],
-        }
-
-    except Exception as e:
-        logger.error(f"[V5] Predictive maintenance error: {e}")
+# MIGRATED_TO_ROUTER:         status_breakdown = {"NORMAL": 0, "WARNING": 0, "WATCH": 0, "CRITICAL": 0}
+# MIGRATED_TO_ROUTER:         for truck in trucks_list:
+# MIGRATED_TO_ROUTER:             status = truck.get("status", "NORMAL").upper()
+# MIGRATED_TO_ROUTER:             if status in status_breakdown:
+# MIGRATED_TO_ROUTER:                 status_breakdown[status] += 1
+# MIGRATED_TO_ROUTER:             elif status == "HEALTHY":
+# MIGRATED_TO_ROUTER:                 status_breakdown["NORMAL"] += 1
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "success": True,
+# MIGRATED_TO_ROUTER:             "source": "predictive_maintenance_v3",
+# MIGRATED_TO_ROUTER:             "timestamp": datetime.now(timezone.utc).isoformat(),
+# MIGRATED_TO_ROUTER:             "fleet_health": {
+# MIGRATED_TO_ROUTER:                 "total_trucks": len(trucks_list),
+# MIGRATED_TO_ROUTER:                 "average_health_score": report_dict.get("fleet_summary", {}).get(
+# MIGRATED_TO_ROUTER:                     "average_score", 80
+# MIGRATED_TO_ROUTER:                 ),
+# MIGRATED_TO_ROUTER:                 "status_breakdown": status_breakdown,
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             "trucks": [
+# MIGRATED_TO_ROUTER:                 {
+# MIGRATED_TO_ROUTER:                     "truck_id": t.get("truck_id"),
+# MIGRATED_TO_ROUTER:                     "health_score": t.get("overall_score", 80),
+# MIGRATED_TO_ROUTER:                     "status": t.get("status", "NORMAL"),
+# MIGRATED_TO_ROUTER:                     "sensors": t.get("current_values", {}),
+# MIGRATED_TO_ROUTER:                     "issues": [a.get("title", "") for a in t.get("alerts", [])],
+# MIGRATED_TO_ROUTER:                     "last_updated": t.get(
+# MIGRATED_TO_ROUTER:                         "last_updated", datetime.now(timezone.utc).isoformat()
+# MIGRATED_TO_ROUTER:                     ),
+# MIGRATED_TO_ROUTER:                 }
+# MIGRATED_TO_ROUTER:                 for t in trucks_list
+# MIGRATED_TO_ROUTER:             ],
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"[V5] Predictive maintenance error: {e}")
         # Return empty but valid response
-        return {
-            "success": True,
-            "source": "fallback",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "fleet_health": {
-                "total_trucks": 0,
-                "average_health_score": 0,
-                "status_breakdown": {
-                    "NORMAL": 0,
-                    "WARNING": 0,
-                    "WATCH": 0,
-                    "CRITICAL": 0,
-                },
-            },
-            "trucks": [],
-        }
-
-
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "success": True,
+# MIGRATED_TO_ROUTER:             "source": "fallback",
+# MIGRATED_TO_ROUTER:             "timestamp": datetime.now(timezone.utc).isoformat(),
+# MIGRATED_TO_ROUTER:             "fleet_health": {
+# MIGRATED_TO_ROUTER:                 "total_trucks": 0,
+# MIGRATED_TO_ROUTER:                 "average_health_score": 0,
+# MIGRATED_TO_ROUTER:                 "status_breakdown": {
+# MIGRATED_TO_ROUTER:                     "NORMAL": 0,
+# MIGRATED_TO_ROUTER:                     "WARNING": 0,
+# MIGRATED_TO_ROUTER:                     "WATCH": 0,
+# MIGRATED_TO_ROUTER:                     "CRITICAL": 0,
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             "trucks": [],
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v5.3.0: PREDICTIVE MAINTENANCE V3 - NEW IMPLEMENTATION
 # ============================================================================
@@ -4377,222 +4440,222 @@ async def get_predictive_maintenance_v5():
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/v3/fleet-health", tags=["Predictive Maintenance V3"])
-async def get_fleet_health_v3(
-    include_trends: bool = Query(True, description="Include 7-day trend analysis"),
-    include_maintenance: bool = Query(True, description="Include maintenance schedule"),
-):
-    """
-    🆕 v5.3.0: PREDICTIVE MAINTENANCE V3 - Complete fleet health analysis.
-
-    NEW FEATURES (competitive advantage over Geotab/Samsara):
-
-    1. **Operational Context**: Smart threshold adjustment based on conditions
-       - Climbing grade → allow higher temps
-       - Heavy haul → adjust oil pressure thresholds
-       - Idle → stricter cooling requirements
-
-    2. **Nelson Rules**: Statistical anomaly detection BEFORE thresholds
-       - Rule 1: Extreme outliers (3σ)
-       - Rule 2: Mean shift (9 consecutive above/below mean)
-       - Rule 3: Trends (6 consecutive increases/decreases)
-
-    3. **Suppressed Alerts Count**: Shows how many false positives were prevented
-       by operational context (alerts that Geotab/Samsara would have fired)
-
-    Returns:
-    - total_trucks, healthy/warning/critical counts
-    - average_score: Fleet-wide health score (0-100)
-    - total_potential_savings: Cost savings from preventive action
-    - trucks: Detailed health data with operational context
-    - all_alerts: Sorted by severity
-    - all_anomalies: Nelson rule violations (early warnings)
-    - suppressed_alerts_count: False positives prevented by context
-    """
-    try:
-        from predictive_maintenance_v3 import analyze_fleet_health, generate_demo_report
-
-        report = analyze_fleet_health(
-            include_trends=include_trends,
-            include_maintenance=include_maintenance,
-        )
-
-        return JSONResponse(
-            content=report.to_dict(),
-            headers={
-                "Cache-Control": "max-age=60",
-                "X-Predictive-V3": "true",
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"[V3] Fleet health error: {e}")
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/v3/fleet-health", tags=["Predictive Maintenance V3"])
+# MIGRATED_TO_ROUTER: async def get_fleet_health_v3(
+# MIGRATED_TO_ROUTER:     include_trends: bool = Query(True, description="Include 7-day trend analysis"),
+# MIGRATED_TO_ROUTER:     include_maintenance: bool = Query(True, description="Include maintenance schedule"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v5.3.0: PREDICTIVE MAINTENANCE V3 - Complete fleet health analysis.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     NEW FEATURES (competitive advantage over Geotab/Samsara):
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     1. **Operational Context**: Smart threshold adjustment based on conditions
+# MIGRATED_TO_ROUTER:        - Climbing grade → allow higher temps
+# MIGRATED_TO_ROUTER:        - Heavy haul → adjust oil pressure thresholds
+# MIGRATED_TO_ROUTER:        - Idle → stricter cooling requirements
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     2. **Nelson Rules**: Statistical anomaly detection BEFORE thresholds
+# MIGRATED_TO_ROUTER:        - Rule 1: Extreme outliers (3σ)
+# MIGRATED_TO_ROUTER:        - Rule 2: Mean shift (9 consecutive above/below mean)
+# MIGRATED_TO_ROUTER:        - Rule 3: Trends (6 consecutive increases/decreases)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     3. **Suppressed Alerts Count**: Shows how many false positives were prevented
+# MIGRATED_TO_ROUTER:        by operational context (alerts that Geotab/Samsara would have fired)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:     - total_trucks, healthy/warning/critical counts
+# MIGRATED_TO_ROUTER:     - average_score: Fleet-wide health score (0-100)
+# MIGRATED_TO_ROUTER:     - total_potential_savings: Cost savings from preventive action
+# MIGRATED_TO_ROUTER:     - trucks: Detailed health data with operational context
+# MIGRATED_TO_ROUTER:     - all_alerts: Sorted by severity
+# MIGRATED_TO_ROUTER:     - all_anomalies: Nelson rule violations (early warnings)
+# MIGRATED_TO_ROUTER:     - suppressed_alerts_count: False positives prevented by context
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from predictive_maintenance_v3 import analyze_fleet_health, generate_demo_report
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         report = analyze_fleet_health(
+# MIGRATED_TO_ROUTER:             include_trends=include_trends,
+# MIGRATED_TO_ROUTER:             include_maintenance=include_maintenance,
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return JSONResponse(
+# MIGRATED_TO_ROUTER:             content=report.to_dict(),
+# MIGRATED_TO_ROUTER:             headers={
+# MIGRATED_TO_ROUTER:                 "Cache-Control": "max-age=60",
+# MIGRATED_TO_ROUTER:                 "X-Predictive-V3": "true",
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"[V3] Fleet health error: {e}")
         # Never crash - return demo data
-        from predictive_maintenance_v3 import generate_demo_report
-
-        return JSONResponse(
-            content=generate_demo_report().to_dict(),
-            headers={
-                "X-Predictive-V3": "true",
-                "X-Data-Source": "demo",
-            },
-        )
-
-
-@app.get(
-    "/fuelAnalytics/api/v3/truck-health/{truck_id}", tags=["Predictive Maintenance V3"]
-)
-async def get_truck_health_v3(
-    truck_id: str,
-    include_trends: bool = Query(True, description="Include 7-day trend analysis"),
-    include_maintenance: bool = Query(True, description="Include maintenance schedule"),
-):
-    """
-    🆕 v5.3.0: Get detailed V3 health analysis for a single truck.
-
-    Includes operational context, Nelson violations, and maintenance schedule.
-    """
-    try:
-        from predictive_maintenance_v3 import analyze_single_truck
-
-        result = analyze_single_truck(
-            truck_id=truck_id,
-            include_trends=include_trends,
-            include_maintenance=include_maintenance,
-        )
-
-        if result is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Truck {truck_id} not found or no recent data available",
-            )
-
-        return JSONResponse(
-            content=result,
-            headers={
-                "Cache-Control": "max-age=30",
-                "X-Predictive-V3": "true",
-            },
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[V3] Truck health error for {truck_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Error analyzing truck {truck_id}: {str(e)}"
-        )
-
-
-@app.get(
-    "/fuelAnalytics/api/v3/kalman-recommendation/{truck_id}",
-    tags=["Predictive Maintenance V3"],
-)
-async def get_kalman_recommendation_v3(truck_id: str):
-    """
-    🆕 v5.3.0: Get recommended Kalman filter Q_r (process noise) for a truck.
-
-    Adaptive recommendations based on truck status:
-    - PARKED: Q_r = 0.01 (fuel shouldn't change)
-    - STOPPED: Q_r = 0.05 (engine running, stationary)
-    - IDLE: Q_r = 0.05 + consumption factor
-    - MOVING: Q_r = 0.1 + consumption factor
-
-    Use this to dynamically adjust Kalman filter sensitivity.
-    """
-    try:
-        from predictive_maintenance_v3 import get_recommended_Q_r
-
-        result = get_recommended_Q_r(truck_id)
-        return JSONResponse(content=result)
-
-    except Exception as e:
-        logger.error(f"[V3] Kalman recommendation error for {truck_id}: {e}")
-        return JSONResponse(
-            content={
-                "Q_r": 0.1,
-                "status": "UNKNOWN",
-                "reason": f"Could not determine truck status: {str(e)}",
-            }
-        )
-
-
-@app.get("/fuelAnalytics/api/v3/kalman-confidence", tags=["Predictive Maintenance V3"])
-async def get_kalman_confidence_v3(
-    P: float = Query(..., description="Kalman covariance (P) value"),
-):
-    """
-    🆕 v5.3.0: Convert Kalman covariance (P) to confidence level.
-
-    Lower P = higher confidence in the fuel estimate.
-
-    Returns: level (HIGH/MEDIUM/LOW/VERY_LOW), score (0-100), color, description
-    """
-    from predictive_maintenance_v3 import get_kalman_confidence
-
-    result = get_kalman_confidence(P)
-    return JSONResponse(content=result)
-
-
-@app.get("/fuelAnalytics/api/v3/context-info", tags=["Predictive Maintenance V3"])
-async def get_context_info_v3():
-    """
-    🆕 v5.3.0: Documentation for Operational Context feature.
-
-    Explains how your system differs from Geotab/Samsara:
-    - Traditional: Static thresholds (Coolant > 220°F = ALERT always)
-    - Your system: Context-aware thresholds that adjust based on conditions
-    """
-    return JSONResponse(
-        content={
-            "feature": "Operational Context",
-            "version": "V3",
-            "description": "Smart threshold adjustment based on driving conditions",
-            "competitive_advantage": "Unlike Geotab/Samsara, alerts are contextual not just threshold-based",
-            "supported_contexts": {
-                "grade_climbing": {
-                    "detection": "High load + low speed + altitude increasing",
-                    "adjustments": {
-                        "coolant_temp": "+15°F",
-                        "oil_temp": "+10°F",
-                        "oil_press": "-5 PSI",
-                    },
-                },
-                "heavy_haul": {
-                    "detection": "Very high engine load + moderate speed",
-                    "adjustments": {
-                        "coolant_temp": "+10°F",
-                        "oil_temp": "+8°F",
-                        "oil_press": "-3 PSI",
-                    },
-                },
-                "idle": {
-                    "detection": "Speed < 3 mph + RPM < 900",
-                    "adjustments": {"coolant_temp": "-5°F (stricter)"},
-                },
-                "cold_start": {
-                    "detection": "Coolant or oil temp below 160°F",
-                    "adjustments": {"oil_press": "+10 PSI"},
-                },
-                "hot_ambient": {
-                    "detection": "Ambient temp > 95°F",
-                    "adjustments": {"coolant_temp": "+8°F", "oil_temp": "+5°F"},
-                },
-                "normal": {
-                    "detection": "Default when no special conditions",
-                    "adjustments": "None",
-                },
-            },
-            "benefits": [
-                "Fewer false positive alerts",
-                "More actionable warnings",
-                "Reduced alert fatigue",
-                "Better than Geotab/Samsara static thresholds",
-            ],
-        }
-    )
-
-
+# MIGRATED_TO_ROUTER:         from predictive_maintenance_v3 import generate_demo_report
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return JSONResponse(
+# MIGRATED_TO_ROUTER:             content=generate_demo_report().to_dict(),
+# MIGRATED_TO_ROUTER:             headers={
+# MIGRATED_TO_ROUTER:                 "X-Predictive-V3": "true",
+# MIGRATED_TO_ROUTER:                 "X-Data-Source": "demo",
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/v3/truck-health/{truck_id}", tags=["Predictive Maintenance V3"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def get_truck_health_v3(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER:     include_trends: bool = Query(True, description="Include 7-day trend analysis"),
+# MIGRATED_TO_ROUTER:     include_maintenance: bool = Query(True, description="Include maintenance schedule"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v5.3.0: Get detailed V3 health analysis for a single truck.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Includes operational context, Nelson violations, and maintenance schedule.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from predictive_maintenance_v3 import analyze_single_truck
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         result = analyze_single_truck(
+# MIGRATED_TO_ROUTER:             truck_id=truck_id,
+# MIGRATED_TO_ROUTER:             include_trends=include_trends,
+# MIGRATED_TO_ROUTER:             include_maintenance=include_maintenance,
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if result is None:
+# MIGRATED_TO_ROUTER:             raise HTTPException(
+# MIGRATED_TO_ROUTER:                 status_code=404,
+# MIGRATED_TO_ROUTER:                 detail=f"Truck {truck_id} not found or no recent data available",
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return JSONResponse(
+# MIGRATED_TO_ROUTER:             content=result,
+# MIGRATED_TO_ROUTER:             headers={
+# MIGRATED_TO_ROUTER:                 "Cache-Control": "max-age=30",
+# MIGRATED_TO_ROUTER:                 "X-Predictive-V3": "true",
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"[V3] Truck health error for {truck_id}: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(
+# MIGRATED_TO_ROUTER:             status_code=500, detail=f"Error analyzing truck {truck_id}: {str(e)}"
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/v3/kalman-recommendation/{truck_id}",
+# MIGRATED_TO_ROUTER:     tags=["Predictive Maintenance V3"],
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def get_kalman_recommendation_v3(truck_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v5.3.0: Get recommended Kalman filter Q_r (process noise) for a truck.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Adaptive recommendations based on truck status:
+# MIGRATED_TO_ROUTER:     - PARKED: Q_r = 0.01 (fuel shouldn't change)
+# MIGRATED_TO_ROUTER:     - STOPPED: Q_r = 0.05 (engine running, stationary)
+# MIGRATED_TO_ROUTER:     - IDLE: Q_r = 0.05 + consumption factor
+# MIGRATED_TO_ROUTER:     - MOVING: Q_r = 0.1 + consumption factor
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Use this to dynamically adjust Kalman filter sensitivity.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from predictive_maintenance_v3 import get_recommended_Q_r
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         result = get_recommended_Q_r(truck_id)
+# MIGRATED_TO_ROUTER:         return JSONResponse(content=result)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"[V3] Kalman recommendation error for {truck_id}: {e}")
+# MIGRATED_TO_ROUTER:         return JSONResponse(
+# MIGRATED_TO_ROUTER:             content={
+# MIGRATED_TO_ROUTER:                 "Q_r": 0.1,
+# MIGRATED_TO_ROUTER:                 "status": "UNKNOWN",
+# MIGRATED_TO_ROUTER:                 "reason": f"Could not determine truck status: {str(e)}",
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/v3/kalman-confidence", tags=["Predictive Maintenance V3"])
+# MIGRATED_TO_ROUTER: async def get_kalman_confidence_v3(
+# MIGRATED_TO_ROUTER:     P: float = Query(..., description="Kalman covariance (P) value"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v5.3.0: Convert Kalman covariance (P) to confidence level.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Lower P = higher confidence in the fuel estimate.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns: level (HIGH/MEDIUM/LOW/VERY_LOW), score (0-100), color, description
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     from predictive_maintenance_v3 import get_kalman_confidence
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     result = get_kalman_confidence(P)
+# MIGRATED_TO_ROUTER:     return JSONResponse(content=result)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/v3/context-info", tags=["Predictive Maintenance V3"])
+# MIGRATED_TO_ROUTER: async def get_context_info_v3():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v5.3.0: Documentation for Operational Context feature.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Explains how your system differs from Geotab/Samsara:
+# MIGRATED_TO_ROUTER:     - Traditional: Static thresholds (Coolant > 220°F = ALERT always)
+# MIGRATED_TO_ROUTER:     - Your system: Context-aware thresholds that adjust based on conditions
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     return JSONResponse(
+# MIGRATED_TO_ROUTER:         content={
+# MIGRATED_TO_ROUTER:             "feature": "Operational Context",
+# MIGRATED_TO_ROUTER:             "version": "V3",
+# MIGRATED_TO_ROUTER:             "description": "Smart threshold adjustment based on driving conditions",
+# MIGRATED_TO_ROUTER:             "competitive_advantage": "Unlike Geotab/Samsara, alerts are contextual not just threshold-based",
+# MIGRATED_TO_ROUTER:             "supported_contexts": {
+# MIGRATED_TO_ROUTER:                 "grade_climbing": {
+# MIGRATED_TO_ROUTER:                     "detection": "High load + low speed + altitude increasing",
+# MIGRATED_TO_ROUTER:                     "adjustments": {
+# MIGRATED_TO_ROUTER:                         "coolant_temp": "+15°F",
+# MIGRATED_TO_ROUTER:                         "oil_temp": "+10°F",
+# MIGRATED_TO_ROUTER:                         "oil_press": "-5 PSI",
+# MIGRATED_TO_ROUTER:                     },
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:                 "heavy_haul": {
+# MIGRATED_TO_ROUTER:                     "detection": "Very high engine load + moderate speed",
+# MIGRATED_TO_ROUTER:                     "adjustments": {
+# MIGRATED_TO_ROUTER:                         "coolant_temp": "+10°F",
+# MIGRATED_TO_ROUTER:                         "oil_temp": "+8°F",
+# MIGRATED_TO_ROUTER:                         "oil_press": "-3 PSI",
+# MIGRATED_TO_ROUTER:                     },
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:                 "idle": {
+# MIGRATED_TO_ROUTER:                     "detection": "Speed < 3 mph + RPM < 900",
+# MIGRATED_TO_ROUTER:                     "adjustments": {"coolant_temp": "-5°F (stricter)"},
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:                 "cold_start": {
+# MIGRATED_TO_ROUTER:                     "detection": "Coolant or oil temp below 160°F",
+# MIGRATED_TO_ROUTER:                     "adjustments": {"oil_press": "+10 PSI"},
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:                 "hot_ambient": {
+# MIGRATED_TO_ROUTER:                     "detection": "Ambient temp > 95°F",
+# MIGRATED_TO_ROUTER:                     "adjustments": {"coolant_temp": "+8°F", "oil_temp": "+5°F"},
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:                 "normal": {
+# MIGRATED_TO_ROUTER:                     "detection": "Default when no special conditions",
+# MIGRATED_TO_ROUTER:                     "adjustments": "None",
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             "benefits": [
+# MIGRATED_TO_ROUTER:                 "Fewer false positive alerts",
+# MIGRATED_TO_ROUTER:                 "More actionable warnings",
+# MIGRATED_TO_ROUTER:                 "Reduced alert fatigue",
+# MIGRATED_TO_ROUTER:                 "Better than Geotab/Samsara static thresholds",
+# MIGRATED_TO_ROUTER:             ],
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER:     )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 @app.post("/fuelAnalytics/api/alerts/test", tags=["Alerts"])
 async def send_test_alert(
     alert_type: str = Query(
@@ -4652,88 +4715,88 @@ async def send_test_alert(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/fuelAnalytics/api/export/refuels")
-async def export_refuels_report(
-    format: str = Query(default="csv", description="Export format: csv or excel"),
-    days: int = Query(default=30, ge=1, le=365, description="Days to include"),
-    truck_id: Optional[str] = Query(default=None, description="Filter by truck"),
-):
-    """
-    🆕 v3.12.21: Export refuel events to CSV or Excel
-    """
-    try:
-        import io
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
-        query = """
-            SELECT 
-                truck_id,
-                timestamp_utc as refuel_time,
-                fuel_before,
-                fuel_after,
-                gallons_added,
-                refuel_type,
-                latitude,
-                longitude,
-                validated
-            FROM refuel_events
-            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-        """
-
-        params = {"days": days}
-        if truck_id:
-            query += " AND truck_id = :truck_id"
-            params["truck_id"] = truck_id
-
-        query += " ORDER BY timestamp_utc DESC"
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), params)
-            data = [dict(row._mapping) for row in result.fetchall()]
-
-        if not data:
-            raise HTTPException(status_code=404, detail="No refuel events found")
-
-        df = pd.DataFrame(data)
-
-        if "refuel_time" in df.columns:
-            df["refuel_time"] = pd.to_datetime(df["refuel_time"]).dt.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-
-        if format.lower() == "excel":
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df.to_excel(writer, sheet_name="Refuel Events", index=False)
-            output.seek(0)
-
-            filename = f"refuels_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            return Response(
-                content=output.getvalue(),
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={filename}"},
-            )
-        else:
-            output = io.StringIO()
-            df.to_csv(output, index=False)
-
-            filename = f"refuels_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            return Response(
-                content=output.getvalue(),
-                media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename={filename}"},
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Export refuels error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/export/refuels")
+# MIGRATED_TO_ROUTER: async def export_refuels_report(
+# MIGRATED_TO_ROUTER:     format: str = Query(default="csv", description="Export format: csv or excel"),
+# MIGRATED_TO_ROUTER:     days: int = Query(default=30, ge=1, le=365, description="Days to include"),
+# MIGRATED_TO_ROUTER:     truck_id: Optional[str] = Query(default=None, description="Filter by truck"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Export refuel events to CSV or Excel
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         import io
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 truck_id,
+# MIGRATED_TO_ROUTER:                 timestamp_utc as refuel_time,
+# MIGRATED_TO_ROUTER:                 fuel_before,
+# MIGRATED_TO_ROUTER:                 fuel_after,
+# MIGRATED_TO_ROUTER:                 gallons_added,
+# MIGRATED_TO_ROUTER:                 refuel_type,
+# MIGRATED_TO_ROUTER:                 latitude,
+# MIGRATED_TO_ROUTER:                 longitude,
+# MIGRATED_TO_ROUTER:                 validated
+# MIGRATED_TO_ROUTER:             FROM refuel_events
+# MIGRATED_TO_ROUTER:             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         params = {"days": days}
+# MIGRATED_TO_ROUTER:         if truck_id:
+# MIGRATED_TO_ROUTER:             query += " AND truck_id = :truck_id"
+# MIGRATED_TO_ROUTER:             params["truck_id"] = truck_id
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         query += " ORDER BY timestamp_utc DESC"
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query), params)
+# MIGRATED_TO_ROUTER:             data = [dict(row._mapping) for row in result.fetchall()]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if not data:
+# MIGRATED_TO_ROUTER:             raise HTTPException(status_code=404, detail="No refuel events found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         df = pd.DataFrame(data)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if "refuel_time" in df.columns:
+# MIGRATED_TO_ROUTER:             df["refuel_time"] = pd.to_datetime(df["refuel_time"]).dt.strftime(
+# MIGRATED_TO_ROUTER:                 "%Y-%m-%d %H:%M:%S"
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if format.lower() == "excel":
+# MIGRATED_TO_ROUTER:             output = io.BytesIO()
+# MIGRATED_TO_ROUTER:             with pd.ExcelWriter(output, engine="openpyxl") as writer:
+# MIGRATED_TO_ROUTER:                 df.to_excel(writer, sheet_name="Refuel Events", index=False)
+# MIGRATED_TO_ROUTER:             output.seek(0)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             filename = f"refuels_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+# MIGRATED_TO_ROUTER:             return Response(
+# MIGRATED_TO_ROUTER:                 content=output.getvalue(),
+# MIGRATED_TO_ROUTER:                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+# MIGRATED_TO_ROUTER:                 headers={"Content-Disposition": f"attachment; filename={filename}"},
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER:         else:
+# MIGRATED_TO_ROUTER:             output = io.StringIO()
+# MIGRATED_TO_ROUTER:             df.to_csv(output, index=False)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             filename = f"refuels_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+# MIGRATED_TO_ROUTER:             return Response(
+# MIGRATED_TO_ROUTER:                 content=output.getvalue(),
+# MIGRATED_TO_ROUTER:                 media_type="text/csv",
+# MIGRATED_TO_ROUTER:                 headers={"Content-Disposition": f"attachment; filename={filename}"},
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Export refuels error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v3.12.21: DASHBOARD CUSTOMIZATION ENDPOINTS (#11)
 # ============================================================================
@@ -4744,406 +4807,406 @@ _user_preferences: Dict[str, Dict] = {}
 _scheduled_reports: Dict[str, Dict] = {}
 
 
-@app.get("/fuelAnalytics/api/dashboard/widgets/available", tags=["Dashboard"])
-async def get_available_widgets():
-    """
-    🆕 v3.12.21: Get list of available widget types for dashboard customization.
-    """
-    from models import WidgetType, WidgetSize
-
-    widgets = [
-        {
-            "type": WidgetType.FLEET_SUMMARY.value,
-            "name": "Fleet Summary",
-            "description": "Overview of fleet status, active/offline trucks",
-            "default_size": WidgetSize.LARGE.value,
-            "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
-            "config_options": ["showOffline", "showAlerts"],
-        },
-        {
-            "type": WidgetType.TRUCK_MAP.value,
-            "name": "Truck Map",
-            "description": "Real-time GPS locations of all trucks",
-            "default_size": WidgetSize.LARGE.value,
-            "available_sizes": [WidgetSize.LARGE.value, WidgetSize.FULL_WIDTH.value],
-            "config_options": ["showLabels", "clusterMarkers"],
-        },
-        {
-            "type": WidgetType.EFFICIENCY_CHART.value,
-            "name": "Efficiency Chart",
-            "description": "MPG and fuel consumption trends",
-            "default_size": WidgetSize.MEDIUM.value,
-            "available_sizes": [
-                WidgetSize.SMALL.value,
-                WidgetSize.MEDIUM.value,
-                WidgetSize.LARGE.value,
-            ],
-            "config_options": ["period", "showTrend"],
-        },
-        {
-            "type": WidgetType.FUEL_LEVELS.value,
-            "name": "Fuel Levels",
-            "description": "Current fuel levels across fleet",
-            "default_size": WidgetSize.MEDIUM.value,
-            "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
-            "config_options": ["sortBy", "lowFuelThreshold"],
-        },
-        {
-            "type": WidgetType.ALERTS.value,
-            "name": "Alerts",
-            "description": "Active alerts and notifications",
-            "default_size": WidgetSize.SMALL.value,
-            "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
-            "config_options": ["severityFilter", "limit"],
-        },
-        {
-            "type": WidgetType.MPG_RANKING.value,
-            "name": "MPG Ranking",
-            "description": "Top/bottom performers by MPG",
-            "default_size": WidgetSize.SMALL.value,
-            "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
-            "config_options": ["topN", "showBottom"],
-        },
-        {
-            "type": WidgetType.IDLE_TRACKING.value,
-            "name": "Idle Tracking",
-            "description": "Idle time and consumption analysis",
-            "default_size": WidgetSize.MEDIUM.value,
-            "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
-            "config_options": ["period", "threshold"],
-        },
-        {
-            "type": WidgetType.REFUEL_HISTORY.value,
-            "name": "Refuel History",
-            "description": "Recent refueling events",
-            "default_size": WidgetSize.MEDIUM.value,
-            "available_sizes": [
-                WidgetSize.SMALL.value,
-                WidgetSize.MEDIUM.value,
-                WidgetSize.LARGE.value,
-            ],
-            "config_options": ["limit", "showCost"],
-        },
-        {
-            "type": WidgetType.PREDICTIONS.value,
-            "name": "Predictions",
-            "description": "Fuel consumption and empty tank predictions",
-            "default_size": WidgetSize.MEDIUM.value,
-            "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
-            "config_options": ["predictionHours", "showRange"],
-        },
-        {
-            "type": WidgetType.HEALTH_MONITOR.value,
-            "name": "Health Monitor",
-            "description": "Truck health scores and anomaly detection",
-            "default_size": WidgetSize.LARGE.value,
-            "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
-            "config_options": ["alertsOnly", "showTrends"],
-        },
-    ]
-
-    return {"widgets": widgets, "total": len(widgets)}
-
-
-@app.get("/fuelAnalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
-async def get_dashboard_layout(user_id: str):
-    """
-    🆕 v3.12.21: Get user's dashboard layout configuration.
-    """
-    if user_id in _user_dashboards:
-        return _user_dashboards[user_id]
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/dashboard/widgets/available", tags=["Dashboard"])
+# MIGRATED_TO_ROUTER: async def get_available_widgets():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get list of available widget types for dashboard customization.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     from models import WidgetType, WidgetSize
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     widgets = [
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.FLEET_SUMMARY.value,
+# MIGRATED_TO_ROUTER:             "name": "Fleet Summary",
+# MIGRATED_TO_ROUTER:             "description": "Overview of fleet status, active/offline trucks",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.LARGE.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
+# MIGRATED_TO_ROUTER:             "config_options": ["showOffline", "showAlerts"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.TRUCK_MAP.value,
+# MIGRATED_TO_ROUTER:             "name": "Truck Map",
+# MIGRATED_TO_ROUTER:             "description": "Real-time GPS locations of all trucks",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.LARGE.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [WidgetSize.LARGE.value, WidgetSize.FULL_WIDTH.value],
+# MIGRATED_TO_ROUTER:             "config_options": ["showLabels", "clusterMarkers"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.EFFICIENCY_CHART.value,
+# MIGRATED_TO_ROUTER:             "name": "Efficiency Chart",
+# MIGRATED_TO_ROUTER:             "description": "MPG and fuel consumption trends",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.MEDIUM.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [
+# MIGRATED_TO_ROUTER:                 WidgetSize.SMALL.value,
+# MIGRATED_TO_ROUTER:                 WidgetSize.MEDIUM.value,
+# MIGRATED_TO_ROUTER:                 WidgetSize.LARGE.value,
+# MIGRATED_TO_ROUTER:             ],
+# MIGRATED_TO_ROUTER:             "config_options": ["period", "showTrend"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.FUEL_LEVELS.value,
+# MIGRATED_TO_ROUTER:             "name": "Fuel Levels",
+# MIGRATED_TO_ROUTER:             "description": "Current fuel levels across fleet",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.MEDIUM.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
+# MIGRATED_TO_ROUTER:             "config_options": ["sortBy", "lowFuelThreshold"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.ALERTS.value,
+# MIGRATED_TO_ROUTER:             "name": "Alerts",
+# MIGRATED_TO_ROUTER:             "description": "Active alerts and notifications",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.SMALL.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
+# MIGRATED_TO_ROUTER:             "config_options": ["severityFilter", "limit"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.MPG_RANKING.value,
+# MIGRATED_TO_ROUTER:             "name": "MPG Ranking",
+# MIGRATED_TO_ROUTER:             "description": "Top/bottom performers by MPG",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.SMALL.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
+# MIGRATED_TO_ROUTER:             "config_options": ["topN", "showBottom"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.IDLE_TRACKING.value,
+# MIGRATED_TO_ROUTER:             "name": "Idle Tracking",
+# MIGRATED_TO_ROUTER:             "description": "Idle time and consumption analysis",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.MEDIUM.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [WidgetSize.SMALL.value, WidgetSize.MEDIUM.value],
+# MIGRATED_TO_ROUTER:             "config_options": ["period", "threshold"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.REFUEL_HISTORY.value,
+# MIGRATED_TO_ROUTER:             "name": "Refuel History",
+# MIGRATED_TO_ROUTER:             "description": "Recent refueling events",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.MEDIUM.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [
+# MIGRATED_TO_ROUTER:                 WidgetSize.SMALL.value,
+# MIGRATED_TO_ROUTER:                 WidgetSize.MEDIUM.value,
+# MIGRATED_TO_ROUTER:                 WidgetSize.LARGE.value,
+# MIGRATED_TO_ROUTER:             ],
+# MIGRATED_TO_ROUTER:             "config_options": ["limit", "showCost"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.PREDICTIONS.value,
+# MIGRATED_TO_ROUTER:             "name": "Predictions",
+# MIGRATED_TO_ROUTER:             "description": "Fuel consumption and empty tank predictions",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.MEDIUM.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
+# MIGRATED_TO_ROUTER:             "config_options": ["predictionHours", "showRange"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         {
+# MIGRATED_TO_ROUTER:             "type": WidgetType.HEALTH_MONITOR.value,
+# MIGRATED_TO_ROUTER:             "name": "Health Monitor",
+# MIGRATED_TO_ROUTER:             "description": "Truck health scores and anomaly detection",
+# MIGRATED_TO_ROUTER:             "default_size": WidgetSize.LARGE.value,
+# MIGRATED_TO_ROUTER:             "available_sizes": [WidgetSize.MEDIUM.value, WidgetSize.LARGE.value],
+# MIGRATED_TO_ROUTER:             "config_options": ["alertsOnly", "showTrends"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:     ]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"widgets": widgets, "total": len(widgets)}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
+# MIGRATED_TO_ROUTER: async def get_dashboard_layout(user_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get user's dashboard layout configuration.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if user_id in _user_dashboards:
+# MIGRATED_TO_ROUTER:         return _user_dashboards[user_id]
+# MIGRATED_TO_ROUTER: 
     # Return default layout
-    from models import WidgetType, WidgetSize
-
-    default_layout = {
-        "user_id": user_id,
-        "name": "Default Dashboard",
-        "columns": 4,
-        "theme": "dark",
-        "widgets": [
-            {
-                "id": "widget-1",
-                "widget_type": WidgetType.FLEET_SUMMARY.value,
-                "title": "Fleet Overview",
-                "size": WidgetSize.LARGE.value,
-                "position": {"x": 0, "y": 0},
-                "config": {},
-                "visible": True,
-            },
-            {
-                "id": "widget-2",
-                "widget_type": WidgetType.ALERTS.value,
-                "title": "Active Alerts",
-                "size": WidgetSize.SMALL.value,
-                "position": {"x": 2, "y": 0},
-                "config": {"limit": 5},
-                "visible": True,
-            },
-            {
-                "id": "widget-3",
-                "widget_type": WidgetType.EFFICIENCY_CHART.value,
-                "title": "Fleet Efficiency",
-                "size": WidgetSize.MEDIUM.value,
-                "position": {"x": 0, "y": 2},
-                "config": {"period": "24h"},
-                "visible": True,
-            },
-            {
-                "id": "widget-4",
-                "widget_type": WidgetType.MPG_RANKING.value,
-                "title": "Top Performers",
-                "size": WidgetSize.SMALL.value,
-                "position": {"x": 2, "y": 2},
-                "config": {"topN": 5},
-                "visible": True,
-            },
-        ],
-        "created_at": utc_now().isoformat(),
-        "updated_at": utc_now().isoformat(),
-    }
-
-    return default_layout
-
-
-@app.post("/fuelAnalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
-async def save_dashboard_layout(user_id: str, layout: Dict[str, Any]):
-    """
-    🆕 v3.12.21: Save user's dashboard layout configuration.
-    """
-    layout["user_id"] = user_id
-    layout["updated_at"] = utc_now().isoformat()
-
-    if user_id not in _user_dashboards:
-        layout["created_at"] = utc_now().isoformat()
-    else:
-        layout["created_at"] = _user_dashboards[user_id].get(
-            "created_at", utc_now().isoformat()
-        )
-
-    _user_dashboards[user_id] = layout
-
-    logger.info(f"📊 Dashboard layout saved for user {user_id}")
-
-    return {"status": "saved", "layout": layout}
-
-
-@app.put(
-    "/fuelAnalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
-)
-async def update_widget(user_id: str, widget_id: str, widget_config: Dict[str, Any]):
-    """
-    🆕 v3.12.21: Update a specific widget's configuration.
-    """
-    if user_id not in _user_dashboards:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
-
-    dashboard = _user_dashboards[user_id]
-    widget_found = False
-
-    for widget in dashboard.get("widgets", []):
-        if widget["id"] == widget_id:
-            widget.update(widget_config)
-            widget_found = True
-            break
-
-    if not widget_found:
-        raise HTTPException(status_code=404, detail=f"Widget {widget_id} not found")
-
-    dashboard["updated_at"] = utc_now().isoformat()
-
-    return {"status": "updated", "widget_id": widget_id}
-
-
-@app.delete(
-    "/fuelAnalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
-)
-async def delete_widget(user_id: str, widget_id: str):
-    """
-    🆕 v3.12.21: Remove a widget from user's dashboard.
-    """
-    if user_id not in _user_dashboards:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
-
-    dashboard = _user_dashboards[user_id]
-    original_count = len(dashboard.get("widgets", []))
-
-    dashboard["widgets"] = [
-        w for w in dashboard.get("widgets", []) if w["id"] != widget_id
-    ]
-
-    if len(dashboard["widgets"]) == original_count:
-        raise HTTPException(status_code=404, detail=f"Widget {widget_id} not found")
-
-    dashboard["updated_at"] = utc_now().isoformat()
-
-    return {"status": "deleted", "widget_id": widget_id}
-
-
-@app.get("/fuelAnalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
-async def get_user_preferences(user_id: str):
-    """
-    🆕 v3.12.21: Get user preferences.
-    """
-    if user_id in _user_preferences:
-        return _user_preferences[user_id]
-
+# MIGRATED_TO_ROUTER:     from models import WidgetType, WidgetSize
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     default_layout = {
+# MIGRATED_TO_ROUTER:         "user_id": user_id,
+# MIGRATED_TO_ROUTER:         "name": "Default Dashboard",
+# MIGRATED_TO_ROUTER:         "columns": 4,
+# MIGRATED_TO_ROUTER:         "theme": "dark",
+# MIGRATED_TO_ROUTER:         "widgets": [
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "id": "widget-1",
+# MIGRATED_TO_ROUTER:                 "widget_type": WidgetType.FLEET_SUMMARY.value,
+# MIGRATED_TO_ROUTER:                 "title": "Fleet Overview",
+# MIGRATED_TO_ROUTER:                 "size": WidgetSize.LARGE.value,
+# MIGRATED_TO_ROUTER:                 "position": {"x": 0, "y": 0},
+# MIGRATED_TO_ROUTER:                 "config": {},
+# MIGRATED_TO_ROUTER:                 "visible": True,
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "id": "widget-2",
+# MIGRATED_TO_ROUTER:                 "widget_type": WidgetType.ALERTS.value,
+# MIGRATED_TO_ROUTER:                 "title": "Active Alerts",
+# MIGRATED_TO_ROUTER:                 "size": WidgetSize.SMALL.value,
+# MIGRATED_TO_ROUTER:                 "position": {"x": 2, "y": 0},
+# MIGRATED_TO_ROUTER:                 "config": {"limit": 5},
+# MIGRATED_TO_ROUTER:                 "visible": True,
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "id": "widget-3",
+# MIGRATED_TO_ROUTER:                 "widget_type": WidgetType.EFFICIENCY_CHART.value,
+# MIGRATED_TO_ROUTER:                 "title": "Fleet Efficiency",
+# MIGRATED_TO_ROUTER:                 "size": WidgetSize.MEDIUM.value,
+# MIGRATED_TO_ROUTER:                 "position": {"x": 0, "y": 2},
+# MIGRATED_TO_ROUTER:                 "config": {"period": "24h"},
+# MIGRATED_TO_ROUTER:                 "visible": True,
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:             {
+# MIGRATED_TO_ROUTER:                 "id": "widget-4",
+# MIGRATED_TO_ROUTER:                 "widget_type": WidgetType.MPG_RANKING.value,
+# MIGRATED_TO_ROUTER:                 "title": "Top Performers",
+# MIGRATED_TO_ROUTER:                 "size": WidgetSize.SMALL.value,
+# MIGRATED_TO_ROUTER:                 "position": {"x": 2, "y": 2},
+# MIGRATED_TO_ROUTER:                 "config": {"topN": 5},
+# MIGRATED_TO_ROUTER:                 "visible": True,
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:         ],
+# MIGRATED_TO_ROUTER:         "created_at": utc_now().isoformat(),
+# MIGRATED_TO_ROUTER:         "updated_at": utc_now().isoformat(),
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return default_layout
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/dashboard/layout/{user_id}", tags=["Dashboard"])
+# MIGRATED_TO_ROUTER: async def save_dashboard_layout(user_id: str, layout: Dict[str, Any]):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Save user's dashboard layout configuration.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     layout["user_id"] = user_id
+# MIGRATED_TO_ROUTER:     layout["updated_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     if user_id not in _user_dashboards:
+# MIGRATED_TO_ROUTER:         layout["created_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER:     else:
+# MIGRATED_TO_ROUTER:         layout["created_at"] = _user_dashboards[user_id].get(
+# MIGRATED_TO_ROUTER:             "created_at", utc_now().isoformat()
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     _user_dashboards[user_id] = layout
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     logger.info(f"📊 Dashboard layout saved for user {user_id}")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "saved", "layout": layout}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.put(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def update_widget(user_id: str, widget_id: str, widget_config: Dict[str, Any]):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Update a specific widget's configuration.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if user_id not in _user_dashboards:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail="Dashboard not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     dashboard = _user_dashboards[user_id]
+# MIGRATED_TO_ROUTER:     widget_found = False
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     for widget in dashboard.get("widgets", []):
+# MIGRATED_TO_ROUTER:         if widget["id"] == widget_id:
+# MIGRATED_TO_ROUTER:             widget.update(widget_config)
+# MIGRATED_TO_ROUTER:             widget_found = True
+# MIGRATED_TO_ROUTER:             break
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     if not widget_found:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail=f"Widget {widget_id} not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     dashboard["updated_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "updated", "widget_id": widget_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.delete(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/dashboard/widget/{user_id}/{widget_id}", tags=["Dashboard"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def delete_widget(user_id: str, widget_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Remove a widget from user's dashboard.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if user_id not in _user_dashboards:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail="Dashboard not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     dashboard = _user_dashboards[user_id]
+# MIGRATED_TO_ROUTER:     original_count = len(dashboard.get("widgets", []))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     dashboard["widgets"] = [
+# MIGRATED_TO_ROUTER:         w for w in dashboard.get("widgets", []) if w["id"] != widget_id
+# MIGRATED_TO_ROUTER:     ]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     if len(dashboard["widgets"]) == original_count:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail=f"Widget {widget_id} not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     dashboard["updated_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "deleted", "widget_id": widget_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
+# MIGRATED_TO_ROUTER: async def get_user_preferences(user_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get user preferences.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if user_id in _user_preferences:
+# MIGRATED_TO_ROUTER:         return _user_preferences[user_id]
+# MIGRATED_TO_ROUTER: 
     # Default preferences
-    return {
-        "user_id": user_id,
-        "default_dashboard": None,
-        "favorite_trucks": [],
-        "alert_settings": {
-            "email_alerts": False,
-            "sms_alerts": False,
-            "push_notifications": True,
-            "severity_filter": ["critical", "warning"],
-        },
-        "timezone": "America/Chicago",
-        "units": "imperial",
-        "notifications_enabled": True,
-        "email_reports": False,
-        "report_frequency": "daily",
-    }
-
-
-@app.put("/fuelAnalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
-async def update_user_preferences(user_id: str, preferences: Dict[str, Any]):
-    """
-    🆕 v3.12.21: Update user preferences.
-    """
-    preferences["user_id"] = user_id
-    _user_preferences[user_id] = preferences
-
-    logger.info(f"⚙️ Preferences updated for user {user_id}")
-
-    return {"status": "updated", "preferences": preferences}
-
-
+# MIGRATED_TO_ROUTER:     return {
+# MIGRATED_TO_ROUTER:         "user_id": user_id,
+# MIGRATED_TO_ROUTER:         "default_dashboard": None,
+# MIGRATED_TO_ROUTER:         "favorite_trucks": [],
+# MIGRATED_TO_ROUTER:         "alert_settings": {
+# MIGRATED_TO_ROUTER:             "email_alerts": False,
+# MIGRATED_TO_ROUTER:             "sms_alerts": False,
+# MIGRATED_TO_ROUTER:             "push_notifications": True,
+# MIGRATED_TO_ROUTER:             "severity_filter": ["critical", "warning"],
+# MIGRATED_TO_ROUTER:         },
+# MIGRATED_TO_ROUTER:         "timezone": "America/Chicago",
+# MIGRATED_TO_ROUTER:         "units": "imperial",
+# MIGRATED_TO_ROUTER:         "notifications_enabled": True,
+# MIGRATED_TO_ROUTER:         "email_reports": False,
+# MIGRATED_TO_ROUTER:         "report_frequency": "daily",
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.put("/fuelAnalytics/api/user/preferences/{user_id}", tags=["Dashboard"])
+# MIGRATED_TO_ROUTER: async def update_user_preferences(user_id: str, preferences: Dict[str, Any]):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Update user preferences.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     preferences["user_id"] = user_id
+# MIGRATED_TO_ROUTER:     _user_preferences[user_id] = preferences
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     logger.info(f"⚙️ Preferences updated for user {user_id}")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "updated", "preferences": preferences}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v3.12.21: SCHEDULED REPORTS ENDPOINTS (#13)
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/reports/scheduled/{user_id}", tags=["Reports"])
-async def get_scheduled_reports(user_id: str):
-    """
-    🆕 v3.12.21: Get user's scheduled reports.
-    """
-    user_reports = [
-        r for r in _scheduled_reports.values() if r.get("user_id") == user_id
-    ]
-
-    return {"reports": user_reports, "total": len(user_reports)}
-
-
-@app.post("/fuelAnalytics/api/reports/schedule", tags=["Reports"])
-async def create_scheduled_report(report: Dict[str, Any]):
-    """
-    🆕 v3.12.21: Create a new scheduled report.
-    """
-    import uuid
-
-    report_id = f"report-{uuid.uuid4().hex[:8]}"
-    report["id"] = report_id
-    report["created_at"] = utc_now().isoformat()
-    report["enabled"] = True
-    report["last_run"] = None
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/reports/scheduled/{user_id}", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def get_scheduled_reports(user_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get user's scheduled reports.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     user_reports = [
+# MIGRATED_TO_ROUTER:         r for r in _scheduled_reports.values() if r.get("user_id") == user_id
+# MIGRATED_TO_ROUTER:     ]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"reports": user_reports, "total": len(user_reports)}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/reports/schedule", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def create_scheduled_report(report: Dict[str, Any]):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Create a new scheduled report.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     import uuid
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     report_id = f"report-{uuid.uuid4().hex[:8]}"
+# MIGRATED_TO_ROUTER:     report["id"] = report_id
+# MIGRATED_TO_ROUTER:     report["created_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER:     report["enabled"] = True
+# MIGRATED_TO_ROUTER:     report["last_run"] = None
+# MIGRATED_TO_ROUTER: 
     # Calculate next run based on schedule
-    schedule = report.get("schedule", "daily")
-    if schedule == "daily":
-        report["next_run"] = (
-            (utc_now() + timedelta(days=1))
-            .replace(hour=6, minute=0, second=0)
-            .isoformat()
-        )
-    elif schedule == "weekly":
-        report["next_run"] = (
-            (utc_now() + timedelta(days=7))
-            .replace(hour=6, minute=0, second=0)
-            .isoformat()
-        )
-    elif schedule == "monthly":
-        report["next_run"] = (
-            (utc_now() + timedelta(days=30))
-            .replace(hour=6, minute=0, second=0)
-            .isoformat()
-        )
-
-    _scheduled_reports[report_id] = report
-
-    logger.info(f"📅 Scheduled report created: {report_id}")
-
-    return {"status": "created", "report": report}
-
-
-@app.put("/fuelAnalytics/api/reports/schedule/{report_id}", tags=["Reports"])
-async def update_scheduled_report(report_id: str, updates: Dict[str, Any]):
-    """
-    🆕 v3.12.21: Update a scheduled report.
-    """
-    if report_id not in _scheduled_reports:
-        raise HTTPException(status_code=404, detail="Report not found")
-
-    report = _scheduled_reports[report_id]
-    report.update(updates)
-    report["updated_at"] = utc_now().isoformat()
-
-    return {"status": "updated", "report": report}
-
-
-@app.delete("/fuelAnalytics/api/reports/schedule/{report_id}", tags=["Reports"])
-async def delete_scheduled_report(report_id: str):
-    """
-    🆕 v3.12.21: Delete a scheduled report.
-    """
-    if report_id not in _scheduled_reports:
-        raise HTTPException(status_code=404, detail="Report not found")
-
-    del _scheduled_reports[report_id]
-
-    logger.info(f"🗑️ Scheduled report deleted: {report_id}")
-
-    return {"status": "deleted", "report_id": report_id}
-
-
-@app.post("/fuelAnalytics/api/reports/run/{report_id}", tags=["Reports"])
-async def run_report_now(report_id: str):
-    """
-    🆕 v3.12.21: Run a scheduled report immediately.
-    """
-    if report_id not in _scheduled_reports:
-        raise HTTPException(status_code=404, detail="Report not found")
-
-    report = _scheduled_reports[report_id]
-    report_type = report.get("report_type", "fleet_summary")
-
+# MIGRATED_TO_ROUTER:     schedule = report.get("schedule", "daily")
+# MIGRATED_TO_ROUTER:     if schedule == "daily":
+# MIGRATED_TO_ROUTER:         report["next_run"] = (
+# MIGRATED_TO_ROUTER:             (utc_now() + timedelta(days=1))
+# MIGRATED_TO_ROUTER:             .replace(hour=6, minute=0, second=0)
+# MIGRATED_TO_ROUTER:             .isoformat()
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER:     elif schedule == "weekly":
+# MIGRATED_TO_ROUTER:         report["next_run"] = (
+# MIGRATED_TO_ROUTER:             (utc_now() + timedelta(days=7))
+# MIGRATED_TO_ROUTER:             .replace(hour=6, minute=0, second=0)
+# MIGRATED_TO_ROUTER:             .isoformat()
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER:     elif schedule == "monthly":
+# MIGRATED_TO_ROUTER:         report["next_run"] = (
+# MIGRATED_TO_ROUTER:             (utc_now() + timedelta(days=30))
+# MIGRATED_TO_ROUTER:             .replace(hour=6, minute=0, second=0)
+# MIGRATED_TO_ROUTER:             .isoformat()
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     _scheduled_reports[report_id] = report
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     logger.info(f"📅 Scheduled report created: {report_id}")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "created", "report": report}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.put("/fuelAnalytics/api/reports/schedule/{report_id}", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def update_scheduled_report(report_id: str, updates: Dict[str, Any]):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Update a scheduled report.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if report_id not in _scheduled_reports:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail="Report not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     report = _scheduled_reports[report_id]
+# MIGRATED_TO_ROUTER:     report.update(updates)
+# MIGRATED_TO_ROUTER:     report["updated_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "updated", "report": report}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.delete("/fuelAnalytics/api/reports/schedule/{report_id}", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def delete_scheduled_report(report_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Delete a scheduled report.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if report_id not in _scheduled_reports:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail="Report not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     del _scheduled_reports[report_id]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     logger.info(f"🗑️ Scheduled report deleted: {report_id}")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "deleted", "report_id": report_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/reports/run/{report_id}", tags=["Reports"])
+# MIGRATED_TO_ROUTER: async def run_report_now(report_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Run a scheduled report immediately.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if report_id not in _scheduled_reports:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail="Report not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     report = _scheduled_reports[report_id]
+# MIGRATED_TO_ROUTER:     report_type = report.get("report_type", "fleet_summary")
+# MIGRATED_TO_ROUTER: 
     # Generate report based on type
-    try:
-        if report_type == "fleet_summary":
-            data = await get_fleet_summary()
-        elif report_type == "efficiency":
-            data = await get_efficiency_rankings()
-        elif report_type == "fuel_usage":
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         if report_type == "fleet_summary":
+# MIGRATED_TO_ROUTER:             data = await get_fleet_summary()
+# MIGRATED_TO_ROUTER:         elif report_type == "efficiency":
+# MIGRATED_TO_ROUTER:             data = await get_efficiency_rankings()
+# MIGRATED_TO_ROUTER:         elif report_type == "fuel_usage":
             # Get fuel consumption data
-            data = {"message": "Fuel usage report generated"}
-        else:
-            data = {"message": f"Report type '{report_type}' generated"}
-
-        report["last_run"] = utc_now().isoformat()
-
-        return {
-            "status": "success",
-            "report_id": report_id,
-            "generated_at": report["last_run"],
-            "data_preview": str(data)[:500] if data else None,
-        }
-    except Exception as e:
-        logger.error(f"Report generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER:             data = {"message": "Fuel usage report generated"}
+# MIGRATED_TO_ROUTER:         else:
+# MIGRATED_TO_ROUTER:             data = {"message": f"Report type '{report_type}' generated"}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         report["last_run"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "status": "success",
+# MIGRATED_TO_ROUTER:             "report_id": report_id,
+# MIGRATED_TO_ROUTER:             "generated_at": report["last_run"],
+# MIGRATED_TO_ROUTER:             "data_preview": str(data)[:500] if data else None,
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Report generation error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v3.12.21: GPS TRACKING ENDPOINTS (#17)
 # ============================================================================
@@ -5153,128 +5216,128 @@ _gps_tracking_data: Dict[str, Dict] = {}
 _geofences: Dict[str, Dict] = {}
 
 
-@app.get("/fuelAnalytics/api/gps/trucks", tags=["GPS"])
-async def get_gps_truck_positions():
-    """
-    🆕 v3.12.21: Get real-time GPS positions for all trucks.
-    """
-    try:
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/gps/trucks", tags=["GPS"])
+# MIGRATED_TO_ROUTER: async def get_gps_truck_positions():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get real-time GPS positions for all trucks.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
         # Get truck data from database
-        fleet = await get_fleet_summary()
-        trucks = fleet.get("truck_details", []) if isinstance(fleet, dict) else []
-
-        positions = []
-        for truck in trucks:
-            truck_id = truck.get("truck_id", "")
-            positions.append(
-                {
-                    "truck_id": truck_id,
-                    "latitude": truck.get("latitude"),
-                    "longitude": truck.get("longitude"),
-                    "speed_mph": truck.get("speed_mph", 0),
-                    "heading": truck.get("heading", 0),
-                    "status": truck.get("status", "UNKNOWN"),
-                    "last_update": truck.get("last_update") or utc_now().isoformat(),
-                    "address": _gps_tracking_data.get(truck_id, {}).get("last_address"),
-                }
-            )
-
-        return {
-            "trucks": positions,
-            "total": len(positions),
-            "timestamp": utc_now().isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"GPS positions error: {e}")
-        return {"trucks": [], "total": 0, "error": str(e)}
-
-
-@app.get("/fuelAnalytics/api/gps/truck/{truck_id}/history", tags=["GPS"])
-async def get_truck_route_history(
-    truck_id: str,
-    hours: int = Query(24, ge=1, le=168, description="Hours of history to retrieve"),
-):
-    """
-    🆕 v3.12.21: Get GPS route history for a specific truck.
-    """
-    try:
+# MIGRATED_TO_ROUTER:         fleet = await get_fleet_summary()
+# MIGRATED_TO_ROUTER:         trucks = fleet.get("truck_details", []) if isinstance(fleet, dict) else []
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         positions = []
+# MIGRATED_TO_ROUTER:         for truck in trucks:
+# MIGRATED_TO_ROUTER:             truck_id = truck.get("truck_id", "")
+# MIGRATED_TO_ROUTER:             positions.append(
+# MIGRATED_TO_ROUTER:                 {
+# MIGRATED_TO_ROUTER:                     "truck_id": truck_id,
+# MIGRATED_TO_ROUTER:                     "latitude": truck.get("latitude"),
+# MIGRATED_TO_ROUTER:                     "longitude": truck.get("longitude"),
+# MIGRATED_TO_ROUTER:                     "speed_mph": truck.get("speed_mph", 0),
+# MIGRATED_TO_ROUTER:                     "heading": truck.get("heading", 0),
+# MIGRATED_TO_ROUTER:                     "status": truck.get("status", "UNKNOWN"),
+# MIGRATED_TO_ROUTER:                     "last_update": truck.get("last_update") or utc_now().isoformat(),
+# MIGRATED_TO_ROUTER:                     "address": _gps_tracking_data.get(truck_id, {}).get("last_address"),
+# MIGRATED_TO_ROUTER:                 }
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "trucks": positions,
+# MIGRATED_TO_ROUTER:             "total": len(positions),
+# MIGRATED_TO_ROUTER:             "timestamp": utc_now().isoformat(),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"GPS positions error: {e}")
+# MIGRATED_TO_ROUTER:         return {"trucks": [], "total": 0, "error": str(e)}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/gps/truck/{truck_id}/history", tags=["GPS"])
+# MIGRATED_TO_ROUTER: async def get_truck_route_history(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER:     hours: int = Query(24, ge=1, le=168, description="Hours of history to retrieve"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get GPS route history for a specific truck.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
         # In production, this would query MySQL historical GPS data
         # For now, return sample data structure
-        return {
-            "truck_id": truck_id,
-            "period_hours": hours,
-            "route": [],  # Would contain [{lat, lon, timestamp, speed}]
-            "total_distance_miles": 0,
-            "stops": [],  # Detected stops/rest areas
-            "geofence_events": [],
-        }
-    except Exception as e:
-        logger.error(f"Route history error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/gps/geofences", tags=["GPS"])
-async def get_geofences():
-    """
-    🆕 v3.12.21: Get all configured geofences.
-    """
-    return {"geofences": list(_geofences.values()), "total": len(_geofences)}
-
-
-@app.post("/fuelAnalytics/api/gps/geofence", tags=["GPS"])
-async def create_geofence(geofence: Dict[str, Any]):
-    """
-    🆕 v3.12.21: Create a new geofence zone.
-
-    Types: circle (center + radius) or polygon (list of coordinates)
-    """
-    import uuid
-
-    geofence_id = f"geofence-{uuid.uuid4().hex[:8]}"
-    geofence["id"] = geofence_id
-    geofence["created_at"] = utc_now().isoformat()
-    geofence["active"] = True
-
-    _geofences[geofence_id] = geofence
-
-    logger.info(f"📍 Geofence created: {geofence.get('name', geofence_id)}")
-
-    return {"status": "created", "geofence": geofence}
-
-
-@app.delete("/fuelAnalytics/api/gps/geofence/{geofence_id}", tags=["GPS"])
-async def delete_geofence(geofence_id: str):
-    """
-    🆕 v3.12.21: Delete a geofence.
-    """
-    if geofence_id not in _geofences:
-        raise HTTPException(status_code=404, detail="Geofence not found")
-
-    del _geofences[geofence_id]
-    return {"status": "deleted", "geofence_id": geofence_id}
-
-
-@app.get("/fuelAnalytics/api/gps/geofence/{geofence_id}/events", tags=["GPS"])
-async def get_geofence_events(
-    geofence_id: str,
-    hours: int = Query(24, ge=1, le=168),
-):
-    """
-    🆕 v3.12.21: Get entry/exit events for a geofence.
-    """
-    if geofence_id not in _geofences:
-        raise HTTPException(status_code=404, detail="Geofence not found")
-
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "truck_id": truck_id,
+# MIGRATED_TO_ROUTER:             "period_hours": hours,
+# MIGRATED_TO_ROUTER:             "route": [],  # Would contain [{lat, lon, timestamp, speed}]
+# MIGRATED_TO_ROUTER:             "total_distance_miles": 0,
+# MIGRATED_TO_ROUTER:             "stops": [],  # Detected stops/rest areas
+# MIGRATED_TO_ROUTER:             "geofence_events": [],
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Route history error: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/gps/geofences", tags=["GPS"])
+# MIGRATED_TO_ROUTER: async def get_geofences():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get all configured geofences.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     return {"geofences": list(_geofences.values()), "total": len(_geofences)}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/gps/geofence", tags=["GPS"])
+# MIGRATED_TO_ROUTER: async def create_geofence(geofence: Dict[str, Any]):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Create a new geofence zone.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Types: circle (center + radius) or polygon (list of coordinates)
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     import uuid
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     geofence_id = f"geofence-{uuid.uuid4().hex[:8]}"
+# MIGRATED_TO_ROUTER:     geofence["id"] = geofence_id
+# MIGRATED_TO_ROUTER:     geofence["created_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER:     geofence["active"] = True
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     _geofences[geofence_id] = geofence
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     logger.info(f"📍 Geofence created: {geofence.get('name', geofence_id)}")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "created", "geofence": geofence}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.delete("/fuelAnalytics/api/gps/geofence/{geofence_id}", tags=["GPS"])
+# MIGRATED_TO_ROUTER: async def delete_geofence(geofence_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Delete a geofence.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if geofence_id not in _geofences:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail="Geofence not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     del _geofences[geofence_id]
+# MIGRATED_TO_ROUTER:     return {"status": "deleted", "geofence_id": geofence_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/gps/geofence/{geofence_id}/events", tags=["GPS"])
+# MIGRATED_TO_ROUTER: async def get_geofence_events(
+# MIGRATED_TO_ROUTER:     geofence_id: str,
+# MIGRATED_TO_ROUTER:     hours: int = Query(24, ge=1, le=168),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get entry/exit events for a geofence.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if geofence_id not in _geofences:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=404, detail="Geofence not found")
+# MIGRATED_TO_ROUTER: 
     # In production, query historical events from database
-    return {
-        "geofence_id": geofence_id,
-        "geofence_name": _geofences[geofence_id].get("name"),
-        "period_hours": hours,
-        "events": [],  # Would contain [{truck_id, event_type, timestamp}]
-        "summary": {"total_entries": 0, "total_exits": 0, "unique_trucks": 0},
-    }
-
-
+# MIGRATED_TO_ROUTER:     return {
+# MIGRATED_TO_ROUTER:         "geofence_id": geofence_id,
+# MIGRATED_TO_ROUTER:         "geofence_name": _geofences[geofence_id].get("name"),
+# MIGRATED_TO_ROUTER:         "period_hours": hours,
+# MIGRATED_TO_ROUTER:         "events": [],  # Would contain [{truck_id, event_type, timestamp}]
+# MIGRATED_TO_ROUTER:         "summary": {"total_entries": 0, "total_exits": 0, "unique_trucks": 0},
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 v3.12.21: PUSH NOTIFICATIONS ENDPOINTS (#19)
 # ============================================================================
@@ -5284,802 +5347,802 @@ _push_subscriptions: Dict[str, Dict] = {}
 _notification_queue: List[Dict] = []
 
 
-@app.post("/fuelAnalytics/api/notifications/subscribe", tags=["Notifications"])
-async def subscribe_to_push(subscription: Dict[str, Any]):
-    """
-    🆕 v3.12.21: Subscribe a device to push notifications.
-    """
-    user_id = subscription.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=400, detail="user_id is required")
-
-    subscription["subscribed_at"] = utc_now().isoformat()
-    subscription["active"] = True
-
-    _push_subscriptions[user_id] = subscription
-
-    logger.info(f"🔔 Push subscription added for user {user_id}")
-
-    return {"status": "subscribed", "user_id": user_id}
-
-
-@app.delete(
-    "/fuelAnalytics/api/notifications/unsubscribe/{user_id}", tags=["Notifications"]
-)
-async def unsubscribe_from_push(user_id: str):
-    """
-    🆕 v3.12.21: Unsubscribe a device from push notifications.
-    """
-    if user_id in _push_subscriptions:
-        del _push_subscriptions[user_id]
-
-    return {"status": "unsubscribed", "user_id": user_id}
-
-
-@app.get("/fuelAnalytics/api/notifications/{user_id}", tags=["Notifications"])
-async def get_user_notifications(
-    user_id: str,
-    limit: int = Query(20, ge=1, le=100),
-    unread_only: bool = Query(False),
-):
-    """
-    🆕 v3.12.21: Get notifications for a user.
-    """
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/notifications/subscribe", tags=["Notifications"])
+# MIGRATED_TO_ROUTER: async def subscribe_to_push(subscription: Dict[str, Any]):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Subscribe a device to push notifications.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     user_id = subscription.get("user_id")
+# MIGRATED_TO_ROUTER:     if not user_id:
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=400, detail="user_id is required")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     subscription["subscribed_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER:     subscription["active"] = True
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     _push_subscriptions[user_id] = subscription
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     logger.info(f"🔔 Push subscription added for user {user_id}")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "subscribed", "user_id": user_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.delete(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/notifications/unsubscribe/{user_id}", tags=["Notifications"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def unsubscribe_from_push(user_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Unsubscribe a device from push notifications.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     if user_id in _push_subscriptions:
+# MIGRATED_TO_ROUTER:         del _push_subscriptions[user_id]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "unsubscribed", "user_id": user_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/notifications/{user_id}", tags=["Notifications"])
+# MIGRATED_TO_ROUTER: async def get_user_notifications(
+# MIGRATED_TO_ROUTER:     user_id: str,
+# MIGRATED_TO_ROUTER:     limit: int = Query(20, ge=1, le=100),
+# MIGRATED_TO_ROUTER:     unread_only: bool = Query(False),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Get notifications for a user.
+# MIGRATED_TO_ROUTER:     """
     # Filter notifications for this user
-    user_notifications = [
-        n
-        for n in _notification_queue
-        if n.get("user_id") == user_id or n.get("broadcast", False)
-    ]
-
-    if unread_only:
-        user_notifications = [n for n in user_notifications if not n.get("read", False)]
-
-    return {
-        "notifications": user_notifications[-limit:],
-        "total": len(user_notifications),
-        "unread_count": len(
-            [n for n in user_notifications if not n.get("read", False)]
-        ),
-    }
-
-
-@app.post("/fuelAnalytics/api/notifications/send", tags=["Notifications"])
-async def send_notification(notification: Dict[str, Any]):
-    """
-    🆕 v3.12.21: Send a push notification.
-
-    For internal/admin use to send alerts to users.
-    """
-    import uuid
-
-    notification["id"] = f"notif-{uuid.uuid4().hex[:8]}"
-    notification["created_at"] = utc_now().isoformat()
-    notification["read"] = False
-
-    _notification_queue.append(notification)
-
+# MIGRATED_TO_ROUTER:     user_notifications = [
+# MIGRATED_TO_ROUTER:         n
+# MIGRATED_TO_ROUTER:         for n in _notification_queue
+# MIGRATED_TO_ROUTER:         if n.get("user_id") == user_id or n.get("broadcast", False)
+# MIGRATED_TO_ROUTER:     ]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     if unread_only:
+# MIGRATED_TO_ROUTER:         user_notifications = [n for n in user_notifications if not n.get("read", False)]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {
+# MIGRATED_TO_ROUTER:         "notifications": user_notifications[-limit:],
+# MIGRATED_TO_ROUTER:         "total": len(user_notifications),
+# MIGRATED_TO_ROUTER:         "unread_count": len(
+# MIGRATED_TO_ROUTER:             [n for n in user_notifications if not n.get("read", False)]
+# MIGRATED_TO_ROUTER:         ),
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/notifications/send", tags=["Notifications"])
+# MIGRATED_TO_ROUTER: async def send_notification(notification: Dict[str, Any]):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Send a push notification.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     For internal/admin use to send alerts to users.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     import uuid
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     notification["id"] = f"notif-{uuid.uuid4().hex[:8]}"
+# MIGRATED_TO_ROUTER:     notification["created_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER:     notification["read"] = False
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     _notification_queue.append(notification)
+# MIGRATED_TO_ROUTER: 
     # Limit queue size
-    if len(_notification_queue) > 1000:
-        _notification_queue.pop(0)
-
+# MIGRATED_TO_ROUTER:     if len(_notification_queue) > 1000:
+# MIGRATED_TO_ROUTER:         _notification_queue.pop(0)
+# MIGRATED_TO_ROUTER: 
     # In production, this would trigger actual push via FCM/APNs
-    target = notification.get("user_id", "broadcast")
-    logger.info(
-        f"📨 Notification sent to {target}: {notification.get('title', 'No title')}"
-    )
-
-    return {"status": "sent", "notification_id": notification["id"]}
-
-
-@app.put(
-    "/fuelAnalytics/api/notifications/{notification_id}/read", tags=["Notifications"]
-)
-async def mark_notification_read(notification_id: str):
-    """
-    🆕 v3.12.21: Mark a notification as read.
-    """
-    for notification in _notification_queue:
-        if notification.get("id") == notification_id:
-            notification["read"] = True
-            notification["read_at"] = utc_now().isoformat()
-            return {"status": "marked_read", "notification_id": notification_id}
-
-    raise HTTPException(status_code=404, detail="Notification not found")
-
-
-@app.post("/fuelAnalytics/api/notifications/{user_id}/read-all", tags=["Notifications"])
-async def mark_all_notifications_read(user_id: str):
-    """
-    🆕 v3.12.21: Mark all notifications as read for a user.
-    """
-    count = 0
-    for notification in _notification_queue:
-        if notification.get("user_id") == user_id or notification.get(
-            "broadcast", False
-        ):
-            if not notification.get("read", False):
-                notification["read"] = True
-                notification["read_at"] = utc_now().isoformat()
-                count += 1
-
-    return {"status": "success", "marked_read": count}
-
-
+# MIGRATED_TO_ROUTER:     target = notification.get("user_id", "broadcast")
+# MIGRATED_TO_ROUTER:     logger.info(
+# MIGRATED_TO_ROUTER:         f"📨 Notification sent to {target}: {notification.get('title', 'No title')}"
+# MIGRATED_TO_ROUTER:     )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "sent", "notification_id": notification["id"]}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.put(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/notifications/{notification_id}/read", tags=["Notifications"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def mark_notification_read(notification_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Mark a notification as read.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     for notification in _notification_queue:
+# MIGRATED_TO_ROUTER:         if notification.get("id") == notification_id:
+# MIGRATED_TO_ROUTER:             notification["read"] = True
+# MIGRATED_TO_ROUTER:             notification["read_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER:             return {"status": "marked_read", "notification_id": notification_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     raise HTTPException(status_code=404, detail="Notification not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/notifications/{user_id}/read-all", tags=["Notifications"])
+# MIGRATED_TO_ROUTER: async def mark_all_notifications_read(user_id: str):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.12.21: Mark all notifications as read for a user.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     count = 0
+# MIGRATED_TO_ROUTER:     for notification in _notification_queue:
+# MIGRATED_TO_ROUTER:         if notification.get("user_id") == user_id or notification.get(
+# MIGRATED_TO_ROUTER:             "broadcast", False
+# MIGRATED_TO_ROUTER:         ):
+# MIGRATED_TO_ROUTER:             if not notification.get("read", False):
+# MIGRATED_TO_ROUTER:                 notification["read"] = True
+# MIGRATED_TO_ROUTER:                 notification["read_at"] = utc_now().isoformat()
+# MIGRATED_TO_ROUTER:                 count += 1
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {"status": "success", "marked_read": count}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # 🆕 ENGINE HEALTH MONITORING ENDPOINTS - v3.13.0
 # ============================================================================
 
 
-@app.get("/fuelAnalytics/api/engine-health/fleet-summary", tags=["Engine Health"])
-async def get_engine_health_fleet_summary():
-    """
-    🆕 v3.13.0: Get fleet-wide engine health summary.
-
-    Returns:
-    - Count of healthy/warning/critical/offline trucks
-    - Top critical and warning alerts
-    - Sensor coverage statistics
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-        from engine_health_engine import EngineHealthAnalyzer, FleetHealthSummary
-
-        engine = get_sqlalchemy_engine()
-        analyzer = EngineHealthAnalyzer()
-
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/engine-health/fleet-summary", tags=["Engine Health"])
+# MIGRATED_TO_ROUTER: async def get_engine_health_fleet_summary():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Get fleet-wide engine health summary.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:     - Count of healthy/warning/critical/offline trucks
+# MIGRATED_TO_ROUTER:     - Top critical and warning alerts
+# MIGRATED_TO_ROUTER:     - Sensor coverage statistics
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER:         from engine_health_engine import EngineHealthAnalyzer, FleetHealthSummary
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         analyzer = EngineHealthAnalyzer()
+# MIGRATED_TO_ROUTER: 
         # Get latest reading for each truck
-        query = """
-            SELECT 
-                fm.truck_id,
-                fm.timestamp_utc,
-                fm.oil_pressure_psi,
-                fm.coolant_temp_f,
-                fm.oil_temp_f,
-                fm.battery_voltage,
-                fm.def_level_pct,
-                fm.engine_load_pct,
-                fm.rpm,
-                fm.speed_mph,
-                fm.truck_status
-            FROM fuel_metrics fm
-            INNER JOIN (
-                SELECT truck_id, MAX(timestamp_utc) as max_ts
-                FROM fuel_metrics
-                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)
-                GROUP BY truck_id
-            ) latest ON fm.truck_id = latest.truck_id 
-                     AND fm.timestamp_utc = latest.max_ts
-            ORDER BY fm.truck_id
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query))
-            rows = result.fetchall()
-            columns = result.keys()
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 fm.truck_id,
+# MIGRATED_TO_ROUTER:                 fm.timestamp_utc,
+# MIGRATED_TO_ROUTER:                 fm.oil_pressure_psi,
+# MIGRATED_TO_ROUTER:                 fm.coolant_temp_f,
+# MIGRATED_TO_ROUTER:                 fm.oil_temp_f,
+# MIGRATED_TO_ROUTER:                 fm.battery_voltage,
+# MIGRATED_TO_ROUTER:                 fm.def_level_pct,
+# MIGRATED_TO_ROUTER:                 fm.engine_load_pct,
+# MIGRATED_TO_ROUTER:                 fm.rpm,
+# MIGRATED_TO_ROUTER:                 fm.speed_mph,
+# MIGRATED_TO_ROUTER:                 fm.truck_status
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics fm
+# MIGRATED_TO_ROUTER:             INNER JOIN (
+# MIGRATED_TO_ROUTER:                 SELECT truck_id, MAX(timestamp_utc) as max_ts
+# MIGRATED_TO_ROUTER:                 FROM fuel_metrics
+# MIGRATED_TO_ROUTER:                 WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+# MIGRATED_TO_ROUTER:                 GROUP BY truck_id
+# MIGRATED_TO_ROUTER:             ) latest ON fm.truck_id = latest.truck_id 
+# MIGRATED_TO_ROUTER:                      AND fm.timestamp_utc = latest.max_ts
+# MIGRATED_TO_ROUTER:             ORDER BY fm.truck_id
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query))
+# MIGRATED_TO_ROUTER:             rows = result.fetchall()
+# MIGRATED_TO_ROUTER:             columns = result.keys()
+# MIGRATED_TO_ROUTER: 
         # Convert to list of dicts
-        fleet_data = [dict(zip(columns, row)) for row in rows]
-
+# MIGRATED_TO_ROUTER:         fleet_data = [dict(zip(columns, row)) for row in rows]
+# MIGRATED_TO_ROUTER: 
         # Analyze fleet health
-        summary = analyzer.analyze_fleet_health(fleet_data)
-
-        return summary.to_dict()
-
-    except ImportError as e:
-        logger.warning(f"Engine health module not available: {e}")
-        return {
-            "error": "Engine health module not available",
-            "summary": {
-                "total_trucks": 0,
-                "healthy": 0,
-                "warning": 0,
-                "critical": 0,
-                "offline": 0,
-            },
-        }
-    except Exception as e:
-        logger.error(f"Error getting fleet health summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/engine-health/trucks/{truck_id}", tags=["Engine Health"])
-async def get_truck_health_detail(
-    truck_id: str,
-    include_history: bool = Query(True, description="Include 7-day history for trends"),
-):
-    """
-    🆕 v3.13.0: Get detailed engine health status for a specific truck.
-
-    Returns:
-    - Current sensor values with status indicators
-    - Active alerts (critical, warning, watch)
-    - Trend analysis (7-day comparison to 30-day baseline)
-    - Maintenance predictions with cost estimates
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-        from engine_health_engine import EngineHealthAnalyzer, BaselineCalculator
-
-        engine = get_sqlalchemy_engine()
-        analyzer = EngineHealthAnalyzer()
-
+# MIGRATED_TO_ROUTER:         summary = analyzer.analyze_fleet_health(fleet_data)
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return summary.to_dict()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except ImportError as e:
+# MIGRATED_TO_ROUTER:         logger.warning(f"Engine health module not available: {e}")
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "error": "Engine health module not available",
+# MIGRATED_TO_ROUTER:             "summary": {
+# MIGRATED_TO_ROUTER:                 "total_trucks": 0,
+# MIGRATED_TO_ROUTER:                 "healthy": 0,
+# MIGRATED_TO_ROUTER:                 "warning": 0,
+# MIGRATED_TO_ROUTER:                 "critical": 0,
+# MIGRATED_TO_ROUTER:                 "offline": 0,
+# MIGRATED_TO_ROUTER:             },
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Error getting fleet health summary: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/engine-health/trucks/{truck_id}", tags=["Engine Health"])
+# MIGRATED_TO_ROUTER: async def get_truck_health_detail(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER:     include_history: bool = Query(True, description="Include 7-day history for trends"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Get detailed engine health status for a specific truck.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns:
+# MIGRATED_TO_ROUTER:     - Current sensor values with status indicators
+# MIGRATED_TO_ROUTER:     - Active alerts (critical, warning, watch)
+# MIGRATED_TO_ROUTER:     - Trend analysis (7-day comparison to 30-day baseline)
+# MIGRATED_TO_ROUTER:     - Maintenance predictions with cost estimates
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER:         from engine_health_engine import EngineHealthAnalyzer, BaselineCalculator
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         analyzer = EngineHealthAnalyzer()
+# MIGRATED_TO_ROUTER: 
         # Get current reading
-        current_query = """
-            SELECT 
-                truck_id,
-                timestamp_utc,
-                oil_pressure_psi,
-                coolant_temp_f,
-                oil_temp_f,
-                battery_voltage,
-                def_level_pct,
-                engine_load_pct,
-                rpm,
-                speed_mph,
-                truck_status,
-                latitude,
-                longitude
-            FROM fuel_metrics
-            WHERE truck_id = :truck_id
-            ORDER BY timestamp_utc DESC
-            LIMIT 1
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(current_query), {"truck_id": truck_id})
-            row = result.fetchone()
-
-            if not row:
-                raise HTTPException(
-                    status_code=404, detail=f"Truck {truck_id} not found"
-                )
-
-            columns = result.keys()
-            current_data = dict(zip(columns, row))
-
+# MIGRATED_TO_ROUTER:         current_query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 truck_id,
+# MIGRATED_TO_ROUTER:                 timestamp_utc,
+# MIGRATED_TO_ROUTER:                 oil_pressure_psi,
+# MIGRATED_TO_ROUTER:                 coolant_temp_f,
+# MIGRATED_TO_ROUTER:                 oil_temp_f,
+# MIGRATED_TO_ROUTER:                 battery_voltage,
+# MIGRATED_TO_ROUTER:                 def_level_pct,
+# MIGRATED_TO_ROUTER:                 engine_load_pct,
+# MIGRATED_TO_ROUTER:                 rpm,
+# MIGRATED_TO_ROUTER:                 speed_mph,
+# MIGRATED_TO_ROUTER:                 truck_status,
+# MIGRATED_TO_ROUTER:                 latitude,
+# MIGRATED_TO_ROUTER:                 longitude
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE truck_id = :truck_id
+# MIGRATED_TO_ROUTER:             ORDER BY timestamp_utc DESC
+# MIGRATED_TO_ROUTER:             LIMIT 1
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(current_query), {"truck_id": truck_id})
+# MIGRATED_TO_ROUTER:             row = result.fetchone()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             if not row:
+# MIGRATED_TO_ROUTER:                 raise HTTPException(
+# MIGRATED_TO_ROUTER:                     status_code=404, detail=f"Truck {truck_id} not found"
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             columns = result.keys()
+# MIGRATED_TO_ROUTER:             current_data = dict(zip(columns, row))
+# MIGRATED_TO_ROUTER: 
         # Get historical data for trend analysis
-        historical_data = []
-        baselines = {}
-
-        if include_history:
-            history_query = """
-                SELECT 
-                    timestamp_utc,
-                    oil_pressure_psi,
-                    coolant_temp_f,
-                    oil_temp_f,
-                    battery_voltage,
-                    def_level_pct,
-                    engine_load_pct,
-                    rpm
-                FROM fuel_metrics
-                WHERE truck_id = :truck_id
-                  AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                  AND rpm > 400  -- Only when engine running
-                ORDER BY timestamp_utc DESC
-                LIMIT 5000
-            """
-
-            with engine.connect() as conn:
-                result = conn.execute(text(history_query), {"truck_id": truck_id})
-                rows = result.fetchall()
-                columns = result.keys()
-                historical_data = [dict(zip(columns, row)) for row in rows]
-
+# MIGRATED_TO_ROUTER:         historical_data = []
+# MIGRATED_TO_ROUTER:         baselines = {}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if include_history:
+# MIGRATED_TO_ROUTER:             history_query = """
+# MIGRATED_TO_ROUTER:                 SELECT 
+# MIGRATED_TO_ROUTER:                     timestamp_utc,
+# MIGRATED_TO_ROUTER:                     oil_pressure_psi,
+# MIGRATED_TO_ROUTER:                     coolant_temp_f,
+# MIGRATED_TO_ROUTER:                     oil_temp_f,
+# MIGRATED_TO_ROUTER:                     battery_voltage,
+# MIGRATED_TO_ROUTER:                     def_level_pct,
+# MIGRATED_TO_ROUTER:                     engine_load_pct,
+# MIGRATED_TO_ROUTER:                     rpm
+# MIGRATED_TO_ROUTER:                 FROM fuel_metrics
+# MIGRATED_TO_ROUTER:                 WHERE truck_id = :truck_id
+# MIGRATED_TO_ROUTER:                   AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+# MIGRATED_TO_ROUTER:                   AND rpm > 400  -- Only when engine running
+# MIGRATED_TO_ROUTER:                 ORDER BY timestamp_utc DESC
+# MIGRATED_TO_ROUTER:                 LIMIT 5000
+# MIGRATED_TO_ROUTER:             """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:                 result = conn.execute(text(history_query), {"truck_id": truck_id})
+# MIGRATED_TO_ROUTER:                 rows = result.fetchall()
+# MIGRATED_TO_ROUTER:                 columns = result.keys()
+# MIGRATED_TO_ROUTER:                 historical_data = [dict(zip(columns, row)) for row in rows]
+# MIGRATED_TO_ROUTER: 
             # Calculate baselines
-            for sensor in ["oil_pressure_psi", "coolant_temp_f", "battery_voltage"]:
-                baseline = BaselineCalculator.calculate_baseline(
-                    truck_id, sensor, historical_data
-                )
-                baselines[sensor] = baseline
-
+# MIGRATED_TO_ROUTER:             for sensor in ["oil_pressure_psi", "coolant_temp_f", "battery_voltage"]:
+# MIGRATED_TO_ROUTER:                 baseline = BaselineCalculator.calculate_baseline(
+# MIGRATED_TO_ROUTER:                     truck_id, sensor, historical_data
+# MIGRATED_TO_ROUTER:                 )
+# MIGRATED_TO_ROUTER:                 baselines[sensor] = baseline
+# MIGRATED_TO_ROUTER: 
         # Analyze truck health
-        status = analyzer.analyze_truck_health(
-            truck_id, current_data, historical_data, baselines
-        )
-
-        response = status.to_dict()
-
+# MIGRATED_TO_ROUTER:         status = analyzer.analyze_truck_health(
+# MIGRATED_TO_ROUTER:             truck_id, current_data, historical_data, baselines
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         response = status.to_dict()
+# MIGRATED_TO_ROUTER: 
         # Add historical chart data (last 7 days, sampled)
-        if include_history and historical_data:
+# MIGRATED_TO_ROUTER:         if include_history and historical_data:
             # Sample to ~100 points for charts
-            sample_rate = max(1, len(historical_data) // 100)
-            sampled = historical_data[::sample_rate][:100]
-
-            response["history"] = {
-                "timestamps": [str(d.get("timestamp_utc", "")) for d in sampled],
-                "oil_pressure": [d.get("oil_pressure_psi") for d in sampled],
-                "coolant_temp": [d.get("coolant_temp_f") for d in sampled],
-                "oil_temp": [d.get("oil_temp_f") for d in sampled],
-                "battery": [d.get("battery_voltage") for d in sampled],
-            }
-
+# MIGRATED_TO_ROUTER:             sample_rate = max(1, len(historical_data) // 100)
+# MIGRATED_TO_ROUTER:             sampled = historical_data[::sample_rate][:100]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             response["history"] = {
+# MIGRATED_TO_ROUTER:                 "timestamps": [str(d.get("timestamp_utc", "")) for d in sampled],
+# MIGRATED_TO_ROUTER:                 "oil_pressure": [d.get("oil_pressure_psi") for d in sampled],
+# MIGRATED_TO_ROUTER:                 "coolant_temp": [d.get("coolant_temp_f") for d in sampled],
+# MIGRATED_TO_ROUTER:                 "oil_temp": [d.get("oil_temp_f") for d in sampled],
+# MIGRATED_TO_ROUTER:                 "battery": [d.get("battery_voltage") for d in sampled],
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER: 
             # Add baselines to response
-            response["baselines"] = {
-                sensor: {
-                    "mean_30d": b.mean_30d,
-                    "mean_7d": b.mean_7d,
-                    "std_30d": b.std_30d,
-                    "min_30d": b.min_30d,
-                    "max_30d": b.max_30d,
-                }
-                for sensor, b in baselines.items()
-                if b.sample_count > 0
-            }
-
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting truck health for {truck_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/engine-health/alerts", tags=["Engine Health"])
-async def get_health_alerts(
-    severity: Optional[str] = Query(
-        None, description="Filter by severity: critical, warning, watch"
-    ),
-    truck_id: Optional[str] = Query(None, description="Filter by truck"),
-    active_only: bool = Query(True, description="Only active alerts"),
-    limit: int = Query(50, ge=1, le=200),
-):
-    """
-    🆕 v3.13.0: Get engine health alerts.
-
-    Returns list of alerts sorted by severity and timestamp.
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
+# MIGRATED_TO_ROUTER:             response["baselines"] = {
+# MIGRATED_TO_ROUTER:                 sensor: {
+# MIGRATED_TO_ROUTER:                     "mean_30d": b.mean_30d,
+# MIGRATED_TO_ROUTER:                     "mean_7d": b.mean_7d,
+# MIGRATED_TO_ROUTER:                     "std_30d": b.std_30d,
+# MIGRATED_TO_ROUTER:                     "min_30d": b.min_30d,
+# MIGRATED_TO_ROUTER:                     "max_30d": b.max_30d,
+# MIGRATED_TO_ROUTER:                 }
+# MIGRATED_TO_ROUTER:                 for sensor, b in baselines.items()
+# MIGRATED_TO_ROUTER:                 if b.sample_count > 0
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return response
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Error getting truck health for {truck_id}: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/engine-health/alerts", tags=["Engine Health"])
+# MIGRATED_TO_ROUTER: async def get_health_alerts(
+# MIGRATED_TO_ROUTER:     severity: Optional[str] = Query(
+# MIGRATED_TO_ROUTER:         None, description="Filter by severity: critical, warning, watch"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER:     truck_id: Optional[str] = Query(None, description="Filter by truck"),
+# MIGRATED_TO_ROUTER:     active_only: bool = Query(True, description="Only active alerts"),
+# MIGRATED_TO_ROUTER:     limit: int = Query(50, ge=1, le=200),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Get engine health alerts.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns list of alerts sorted by severity and timestamp.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
         # Build query with filters
-        conditions = []
-        params = {"limit": limit}
-
-        if active_only:
-            conditions.append("is_active = TRUE")
-
-        if severity:
-            conditions.append("severity = :severity")
-            params["severity"] = severity
-
-        if truck_id:
-            conditions.append("truck_id = :truck_id")
-            params["truck_id"] = truck_id
-
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
-
-        query = f"""
-            SELECT 
-                id, truck_id, category, severity, sensor_name,
-                current_value, threshold_value, baseline_value,
-                message, action_required, trend_direction,
-                is_active, created_at, acknowledged_at
-            FROM engine_health_alerts
-            WHERE {where_clause}
-            ORDER BY 
-                FIELD(severity, 'critical', 'warning', 'watch', 'info'),
-                created_at DESC
-            LIMIT :limit
-        """
-
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text(query), params)
-                rows = result.fetchall()
-                columns = result.keys()
-
-            alerts = [dict(zip(columns, row)) for row in rows]
-
+# MIGRATED_TO_ROUTER:         conditions = []
+# MIGRATED_TO_ROUTER:         params = {"limit": limit}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if active_only:
+# MIGRATED_TO_ROUTER:             conditions.append("is_active = TRUE")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if severity:
+# MIGRATED_TO_ROUTER:             conditions.append("severity = :severity")
+# MIGRATED_TO_ROUTER:             params["severity"] = severity
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if truck_id:
+# MIGRATED_TO_ROUTER:             conditions.append("truck_id = :truck_id")
+# MIGRATED_TO_ROUTER:             params["truck_id"] = truck_id
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         where_clause = " AND ".join(conditions) if conditions else "1=1"
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         query = f"""
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 id, truck_id, category, severity, sensor_name,
+# MIGRATED_TO_ROUTER:                 current_value, threshold_value, baseline_value,
+# MIGRATED_TO_ROUTER:                 message, action_required, trend_direction,
+# MIGRATED_TO_ROUTER:                 is_active, created_at, acknowledged_at
+# MIGRATED_TO_ROUTER:             FROM engine_health_alerts
+# MIGRATED_TO_ROUTER:             WHERE {where_clause}
+# MIGRATED_TO_ROUTER:             ORDER BY 
+# MIGRATED_TO_ROUTER:                 FIELD(severity, 'critical', 'warning', 'watch', 'info'),
+# MIGRATED_TO_ROUTER:                 created_at DESC
+# MIGRATED_TO_ROUTER:             LIMIT :limit
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         try:
+# MIGRATED_TO_ROUTER:             with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:                 result = conn.execute(text(query), params)
+# MIGRATED_TO_ROUTER:                 rows = result.fetchall()
+# MIGRATED_TO_ROUTER:                 columns = result.keys()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             alerts = [dict(zip(columns, row)) for row in rows]
+# MIGRATED_TO_ROUTER: 
             # Convert datetime objects to strings
-            for alert in alerts:
-                for key in ["created_at", "acknowledged_at"]:
-                    if alert.get(key):
-                        alert[key] = str(alert[key])
-
-            return {
-                "alerts": alerts,
-                "count": len(alerts),
-                "filters": {
-                    "severity": severity,
-                    "truck_id": truck_id,
-                    "active_only": active_only,
-                },
-            }
-        except Exception as db_error:
+# MIGRATED_TO_ROUTER:             for alert in alerts:
+# MIGRATED_TO_ROUTER:                 for key in ["created_at", "acknowledged_at"]:
+# MIGRATED_TO_ROUTER:                     if alert.get(key):
+# MIGRATED_TO_ROUTER:                         alert[key] = str(alert[key])
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             return {
+# MIGRATED_TO_ROUTER:                 "alerts": alerts,
+# MIGRATED_TO_ROUTER:                 "count": len(alerts),
+# MIGRATED_TO_ROUTER:                 "filters": {
+# MIGRATED_TO_ROUTER:                     "severity": severity,
+# MIGRATED_TO_ROUTER:                     "truck_id": truck_id,
+# MIGRATED_TO_ROUTER:                     "active_only": active_only,
+# MIGRATED_TO_ROUTER:                 },
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER:         except Exception as db_error:
             # Table might not exist yet - return empty
-            logger.warning(f"Engine health alerts table may not exist: {db_error}")
-            return {
-                "alerts": [],
-                "count": 0,
-                "message": "No alerts table - run migration first",
-            }
-
-    except Exception as e:
-        logger.error(f"Error getting health alerts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post(
-    "/fuelAnalytics/api/engine-health/alerts/{alert_id}/acknowledge",
-    tags=["Engine Health"],
-)
-async def acknowledge_alert(
-    alert_id: int,
-    acknowledged_by: str = Query(..., description="User who acknowledged"),
-):
-    """
-    🆕 v3.13.0: Acknowledge an engine health alert.
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
-        query = """
-            UPDATE engine_health_alerts
-            SET acknowledged_at = NOW(),
-                acknowledged_by = :acknowledged_by
-            WHERE id = :alert_id
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(
-                text(query), {"alert_id": alert_id, "acknowledged_by": acknowledged_by}
-            )
-            conn.commit()
-
-        if result.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Alert not found")
-
-        return {"status": "acknowledged", "alert_id": alert_id}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error acknowledging alert {alert_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post(
-    "/fuelAnalytics/api/engine-health/alerts/{alert_id}/resolve", tags=["Engine Health"]
-)
-async def resolve_alert(
-    alert_id: int,
-    resolution_notes: str = Query(None, description="Notes about the resolution"),
-):
-    """
-    🆕 v3.13.0: Resolve/close an engine health alert.
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
-        query = """
-            UPDATE engine_health_alerts
-            SET is_active = FALSE,
-                resolved_at = NOW(),
-                resolution_notes = :notes
-            WHERE id = :alert_id
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(
-                text(query), {"alert_id": alert_id, "notes": resolution_notes}
-            )
-            conn.commit()
-
-        if result.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Alert not found")
-
-        return {"status": "resolved", "alert_id": alert_id}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error resolving alert {alert_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/fuelAnalytics/api/engine-health/thresholds", tags=["Engine Health"])
-async def get_health_thresholds():
-    """
-    🆕 v3.13.0: Get current engine health thresholds.
-
-    Returns the threshold configuration for all monitored sensors.
-    Useful for frontend to display gauge ranges and alert levels.
-    """
-    from engine_health_engine import ENGINE_HEALTH_THRESHOLDS
-
-    return {
-        "thresholds": ENGINE_HEALTH_THRESHOLDS,
-        "description": "Threshold values for engine health monitoring",
-    }
-
-
-@app.get(
-    "/fuelAnalytics/api/engine-health/maintenance-predictions", tags=["Engine Health"]
-)
-async def get_maintenance_predictions(
-    truck_id: Optional[str] = Query(None, description="Filter by truck"),
-    urgency: Optional[str] = Query(
-        None, description="Filter by urgency: low, medium, high, critical"
-    ),
-    status: str = Query(
-        "active", description="Status: active, scheduled, completed, all"
-    ),
-):
-    """
-    🆕 v3.13.0: Get maintenance predictions based on engine health analysis.
-
-    Returns predicted maintenance needs with cost estimates.
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
-        conditions = []
-        params = {}
-
-        if status != "all":
-            conditions.append("status = :status")
-            params["status"] = status
-
-        if truck_id:
-            conditions.append("truck_id = :truck_id")
-            params["truck_id"] = truck_id
-
-        if urgency:
-            conditions.append("urgency = :urgency")
-            params["urgency"] = urgency
-
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
-
-        query = f"""
-            SELECT 
-                id, truck_id, component, urgency, prediction,
-                recommended_action, estimated_repair_cost, if_ignored_cost,
-                predicted_failure_date, confidence_pct, status,
-                scheduled_date, created_at
-            FROM maintenance_predictions
-            WHERE {where_clause}
-            ORDER BY 
-                FIELD(urgency, 'critical', 'high', 'medium', 'low'),
-                predicted_failure_date ASC
-            LIMIT 100
-        """
-
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text(query), params)
-                rows = result.fetchall()
-                columns = result.keys()
-
-            predictions = [dict(zip(columns, row)) for row in rows]
-
+# MIGRATED_TO_ROUTER:             logger.warning(f"Engine health alerts table may not exist: {db_error}")
+# MIGRATED_TO_ROUTER:             return {
+# MIGRATED_TO_ROUTER:                 "alerts": [],
+# MIGRATED_TO_ROUTER:                 "count": 0,
+# MIGRATED_TO_ROUTER:                 "message": "No alerts table - run migration first",
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Error getting health alerts: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/engine-health/alerts/{alert_id}/acknowledge",
+# MIGRATED_TO_ROUTER:     tags=["Engine Health"],
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def acknowledge_alert(
+# MIGRATED_TO_ROUTER:     alert_id: int,
+# MIGRATED_TO_ROUTER:     acknowledged_by: str = Query(..., description="User who acknowledged"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Acknowledge an engine health alert.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             UPDATE engine_health_alerts
+# MIGRATED_TO_ROUTER:             SET acknowledged_at = NOW(),
+# MIGRATED_TO_ROUTER:                 acknowledged_by = :acknowledged_by
+# MIGRATED_TO_ROUTER:             WHERE id = :alert_id
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(
+# MIGRATED_TO_ROUTER:                 text(query), {"alert_id": alert_id, "acknowledged_by": acknowledged_by}
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER:             conn.commit()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if result.rowcount == 0:
+# MIGRATED_TO_ROUTER:             raise HTTPException(status_code=404, detail="Alert not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {"status": "acknowledged", "alert_id": alert_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Error acknowledging alert {alert_id}: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/engine-health/alerts/{alert_id}/resolve", tags=["Engine Health"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def resolve_alert(
+# MIGRATED_TO_ROUTER:     alert_id: int,
+# MIGRATED_TO_ROUTER:     resolution_notes: str = Query(None, description="Notes about the resolution"),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Resolve/close an engine health alert.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             UPDATE engine_health_alerts
+# MIGRATED_TO_ROUTER:             SET is_active = FALSE,
+# MIGRATED_TO_ROUTER:                 resolved_at = NOW(),
+# MIGRATED_TO_ROUTER:                 resolution_notes = :notes
+# MIGRATED_TO_ROUTER:             WHERE id = :alert_id
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(
+# MIGRATED_TO_ROUTER:                 text(query), {"alert_id": alert_id, "notes": resolution_notes}
+# MIGRATED_TO_ROUTER:             )
+# MIGRATED_TO_ROUTER:             conn.commit()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if result.rowcount == 0:
+# MIGRATED_TO_ROUTER:             raise HTTPException(status_code=404, detail="Alert not found")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {"status": "resolved", "alert_id": alert_id}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except HTTPException:
+# MIGRATED_TO_ROUTER:         raise
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Error resolving alert {alert_id}: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get("/fuelAnalytics/api/engine-health/thresholds", tags=["Engine Health"])
+# MIGRATED_TO_ROUTER: async def get_health_thresholds():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Get current engine health thresholds.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns the threshold configuration for all monitored sensors.
+# MIGRATED_TO_ROUTER:     Useful for frontend to display gauge ranges and alert levels.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     from engine_health_engine import ENGINE_HEALTH_THRESHOLDS
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     return {
+# MIGRATED_TO_ROUTER:         "thresholds": ENGINE_HEALTH_THRESHOLDS,
+# MIGRATED_TO_ROUTER:         "description": "Threshold values for engine health monitoring",
+# MIGRATED_TO_ROUTER:     }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/engine-health/maintenance-predictions", tags=["Engine Health"]
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def get_maintenance_predictions(
+# MIGRATED_TO_ROUTER:     truck_id: Optional[str] = Query(None, description="Filter by truck"),
+# MIGRATED_TO_ROUTER:     urgency: Optional[str] = Query(
+# MIGRATED_TO_ROUTER:         None, description="Filter by urgency: low, medium, high, critical"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER:     status: str = Query(
+# MIGRATED_TO_ROUTER:         "active", description="Status: active, scheduled, completed, all"
+# MIGRATED_TO_ROUTER:     ),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Get maintenance predictions based on engine health analysis.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Returns predicted maintenance needs with cost estimates.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         conditions = []
+# MIGRATED_TO_ROUTER:         params = {}
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if status != "all":
+# MIGRATED_TO_ROUTER:             conditions.append("status = :status")
+# MIGRATED_TO_ROUTER:             params["status"] = status
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if truck_id:
+# MIGRATED_TO_ROUTER:             conditions.append("truck_id = :truck_id")
+# MIGRATED_TO_ROUTER:             params["truck_id"] = truck_id
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         if urgency:
+# MIGRATED_TO_ROUTER:             conditions.append("urgency = :urgency")
+# MIGRATED_TO_ROUTER:             params["urgency"] = urgency
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         where_clause = " AND ".join(conditions) if conditions else "1=1"
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         query = f"""
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 id, truck_id, component, urgency, prediction,
+# MIGRATED_TO_ROUTER:                 recommended_action, estimated_repair_cost, if_ignored_cost,
+# MIGRATED_TO_ROUTER:                 predicted_failure_date, confidence_pct, status,
+# MIGRATED_TO_ROUTER:                 scheduled_date, created_at
+# MIGRATED_TO_ROUTER:             FROM maintenance_predictions
+# MIGRATED_TO_ROUTER:             WHERE {where_clause}
+# MIGRATED_TO_ROUTER:             ORDER BY 
+# MIGRATED_TO_ROUTER:                 FIELD(urgency, 'critical', 'high', 'medium', 'low'),
+# MIGRATED_TO_ROUTER:                 predicted_failure_date ASC
+# MIGRATED_TO_ROUTER:             LIMIT 100
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         try:
+# MIGRATED_TO_ROUTER:             with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:                 result = conn.execute(text(query), params)
+# MIGRATED_TO_ROUTER:                 rows = result.fetchall()
+# MIGRATED_TO_ROUTER:                 columns = result.keys()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             predictions = [dict(zip(columns, row)) for row in rows]
+# MIGRATED_TO_ROUTER: 
             # Convert dates to strings
-            for pred in predictions:
-                for key in ["predicted_failure_date", "scheduled_date", "created_at"]:
-                    if pred.get(key):
-                        pred[key] = str(pred[key])
-
-            return {
-                "predictions": predictions,
-                "count": len(predictions),
-            }
-        except Exception:
+# MIGRATED_TO_ROUTER:             for pred in predictions:
+# MIGRATED_TO_ROUTER:                 for key in ["predicted_failure_date", "scheduled_date", "created_at"]:
+# MIGRATED_TO_ROUTER:                     if pred.get(key):
+# MIGRATED_TO_ROUTER:                         pred[key] = str(pred[key])
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             return {
+# MIGRATED_TO_ROUTER:                 "predictions": predictions,
+# MIGRATED_TO_ROUTER:                 "count": len(predictions),
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER:         except Exception:
             # Table might not exist
-            return {
-                "predictions": [],
-                "count": 0,
-                "message": "Run migration to create maintenance_predictions table",
-            }
-
-    except Exception as e:
-        logger.error(f"Error getting maintenance predictions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get(
-    "/fuelAnalytics/api/engine-health/sensor-history/{truck_id}/{sensor}",
-    tags=["Engine Health"],
-)
-async def get_sensor_history(
-    truck_id: str,
-    sensor: str,
-    days: int = Query(7, ge=1, le=30),
-):
-    """
-    🆕 v3.13.0: Get historical data for a specific sensor.
-
-    Useful for detailed trend charts.
-
-    Valid sensors: oil_pressure_psi, coolant_temp_f, oil_temp_f,
-                   battery_voltage, def_level_pct, engine_load_pct
-    """
-    valid_sensors = [
-        "oil_pressure_psi",
-        "coolant_temp_f",
-        "oil_temp_f",
-        "battery_voltage",
-        "def_level_pct",
-        "engine_load_pct",
-    ]
-
-    if sensor not in valid_sensors:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid sensor. Valid options: {valid_sensors}"
-        )
-
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-
-        engine = get_sqlalchemy_engine()
-
+# MIGRATED_TO_ROUTER:             return {
+# MIGRATED_TO_ROUTER:                 "predictions": [],
+# MIGRATED_TO_ROUTER:                 "count": 0,
+# MIGRATED_TO_ROUTER:                 "message": "Run migration to create maintenance_predictions table",
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Error getting maintenance predictions: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.get(
+# MIGRATED_TO_ROUTER:     "/fuelAnalytics/api/engine-health/sensor-history/{truck_id}/{sensor}",
+# MIGRATED_TO_ROUTER:     tags=["Engine Health"],
+# MIGRATED_TO_ROUTER: )
+# MIGRATED_TO_ROUTER: async def get_sensor_history(
+# MIGRATED_TO_ROUTER:     truck_id: str,
+# MIGRATED_TO_ROUTER:     sensor: str,
+# MIGRATED_TO_ROUTER:     days: int = Query(7, ge=1, le=30),
+# MIGRATED_TO_ROUTER: ):
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Get historical data for a specific sensor.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Useful for detailed trend charts.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     Valid sensors: oil_pressure_psi, coolant_temp_f, oil_temp_f,
+# MIGRATED_TO_ROUTER:                    battery_voltage, def_level_pct, engine_load_pct
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     valid_sensors = [
+# MIGRATED_TO_ROUTER:         "oil_pressure_psi",
+# MIGRATED_TO_ROUTER:         "coolant_temp_f",
+# MIGRATED_TO_ROUTER:         "oil_temp_f",
+# MIGRATED_TO_ROUTER:         "battery_voltage",
+# MIGRATED_TO_ROUTER:         "def_level_pct",
+# MIGRATED_TO_ROUTER:         "engine_load_pct",
+# MIGRATED_TO_ROUTER:     ]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     if sensor not in valid_sensors:
+# MIGRATED_TO_ROUTER:         raise HTTPException(
+# MIGRATED_TO_ROUTER:             status_code=400, detail=f"Invalid sensor. Valid options: {valid_sensors}"
+# MIGRATED_TO_ROUTER:         )
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER: 
         # Get hourly averages for cleaner charts
-        query = f"""
-            SELECT 
-                DATE_FORMAT(timestamp_utc, '%Y-%m-%d %H:00:00') as hour,
-                AVG({sensor}) as avg_value,
-                MIN({sensor}) as min_value,
-                MAX({sensor}) as max_value,
-                COUNT(*) as sample_count
-            FROM fuel_metrics
-            WHERE truck_id = :truck_id
-              AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-              AND {sensor} IS NOT NULL
-              AND rpm > 400  -- Only when engine running
-            GROUP BY DATE_FORMAT(timestamp_utc, '%Y-%m-%d %H:00:00')
-            ORDER BY hour DESC
-            LIMIT 720
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), {"truck_id": truck_id, "days": days})
-            rows = result.fetchall()
-            columns = result.keys()
-
-        data = [dict(zip(columns, row)) for row in rows]
-
+# MIGRATED_TO_ROUTER:         query = f"""
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 DATE_FORMAT(timestamp_utc, '%Y-%m-%d %H:00:00') as hour,
+# MIGRATED_TO_ROUTER:                 AVG({sensor}) as avg_value,
+# MIGRATED_TO_ROUTER:                 MIN({sensor}) as min_value,
+# MIGRATED_TO_ROUTER:                 MAX({sensor}) as max_value,
+# MIGRATED_TO_ROUTER:                 COUNT(*) as sample_count
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics
+# MIGRATED_TO_ROUTER:             WHERE truck_id = :truck_id
+# MIGRATED_TO_ROUTER:               AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+# MIGRATED_TO_ROUTER:               AND {sensor} IS NOT NULL
+# MIGRATED_TO_ROUTER:               AND rpm > 400  -- Only when engine running
+# MIGRATED_TO_ROUTER:             GROUP BY DATE_FORMAT(timestamp_utc, '%Y-%m-%d %H:00:00')
+# MIGRATED_TO_ROUTER:             ORDER BY hour DESC
+# MIGRATED_TO_ROUTER:             LIMIT 720
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query), {"truck_id": truck_id, "days": days})
+# MIGRATED_TO_ROUTER:             rows = result.fetchall()
+# MIGRATED_TO_ROUTER:             columns = result.keys()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         data = [dict(zip(columns, row)) for row in rows]
+# MIGRATED_TO_ROUTER: 
         # Calculate statistics
-        values = [d["avg_value"] for d in data if d["avg_value"] is not None]
-
-        stats = {}
-        if values:
-            import statistics
-
-            stats = {
-                "mean": round(statistics.mean(values), 2),
-                "min": round(min(values), 2),
-                "max": round(max(values), 2),
-                "std": round(statistics.stdev(values), 2) if len(values) > 1 else 0,
-            }
-
-        return {
-            "truck_id": truck_id,
-            "sensor": sensor,
-            "days": days,
-            "data": data,
-            "statistics": stats,
-            "data_points": len(data),
-        }
-
-    except Exception as e:
-        logger.error(f"Error getting sensor history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/fuelAnalytics/api/engine-health/analyze-now", tags=["Engine Health"])
-async def trigger_health_analysis():
-    """
-    🆕 v3.13.0: Trigger immediate health analysis for all trucks.
-
-    This runs the analysis and saves any new alerts to the database.
-    Normally this runs automatically, but can be triggered manually.
-    """
-    try:
-        from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
-        from engine_health_engine import EngineHealthAnalyzer
-
-        engine = get_sqlalchemy_engine()
-        analyzer = EngineHealthAnalyzer()
-
+# MIGRATED_TO_ROUTER:         values = [d["avg_value"] for d in data if d["avg_value"] is not None]
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         stats = {}
+# MIGRATED_TO_ROUTER:         if values:
+# MIGRATED_TO_ROUTER:             import statistics
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:             stats = {
+# MIGRATED_TO_ROUTER:                 "mean": round(statistics.mean(values), 2),
+# MIGRATED_TO_ROUTER:                 "min": round(min(values), 2),
+# MIGRATED_TO_ROUTER:                 "max": round(max(values), 2),
+# MIGRATED_TO_ROUTER:                 "std": round(statistics.stdev(values), 2) if len(values) > 1 else 0,
+# MIGRATED_TO_ROUTER:             }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "truck_id": truck_id,
+# MIGRATED_TO_ROUTER:             "sensor": sensor,
+# MIGRATED_TO_ROUTER:             "days": days,
+# MIGRATED_TO_ROUTER:             "data": data,
+# MIGRATED_TO_ROUTER:             "statistics": stats,
+# MIGRATED_TO_ROUTER:             "data_points": len(data),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Error getting sensor history: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: @app.post("/fuelAnalytics/api/engine-health/analyze-now", tags=["Engine Health"])
+# MIGRATED_TO_ROUTER: async def trigger_health_analysis():
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     🆕 v3.13.0: Trigger immediate health analysis for all trucks.
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     This runs the analysis and saves any new alerts to the database.
+# MIGRATED_TO_ROUTER:     Normally this runs automatically, but can be triggered manually.
+# MIGRATED_TO_ROUTER:     """
+# MIGRATED_TO_ROUTER:     try:
+# MIGRATED_TO_ROUTER:         from database_mysql import get_sqlalchemy_engine
+# MIGRATED_TO_ROUTER:         from sqlalchemy import text
+# MIGRATED_TO_ROUTER:         from engine_health_engine import EngineHealthAnalyzer
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         engine = get_sqlalchemy_engine()
+# MIGRATED_TO_ROUTER:         analyzer = EngineHealthAnalyzer()
+# MIGRATED_TO_ROUTER: 
         # Get latest reading for each truck
-        query = """
-            SELECT 
-                fm.truck_id,
-                fm.timestamp_utc,
-                fm.oil_pressure_psi,
-                fm.coolant_temp_f,
-                fm.oil_temp_f,
-                fm.battery_voltage,
-                fm.def_level_pct,
-                fm.engine_load_pct,
-                fm.rpm
-            FROM fuel_metrics fm
-            INNER JOIN (
-                SELECT truck_id, MAX(timestamp_utc) as max_ts
-                FROM fuel_metrics
-                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
-                GROUP BY truck_id
-            ) latest ON fm.truck_id = latest.truck_id 
-                     AND fm.timestamp_utc = latest.max_ts
-        """
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query))
-            rows = result.fetchall()
-            columns = result.keys()
-
-        fleet_data = [dict(zip(columns, row)) for row in rows]
-
+# MIGRATED_TO_ROUTER:         query = """
+# MIGRATED_TO_ROUTER:             SELECT 
+# MIGRATED_TO_ROUTER:                 fm.truck_id,
+# MIGRATED_TO_ROUTER:                 fm.timestamp_utc,
+# MIGRATED_TO_ROUTER:                 fm.oil_pressure_psi,
+# MIGRATED_TO_ROUTER:                 fm.coolant_temp_f,
+# MIGRATED_TO_ROUTER:                 fm.oil_temp_f,
+# MIGRATED_TO_ROUTER:                 fm.battery_voltage,
+# MIGRATED_TO_ROUTER:                 fm.def_level_pct,
+# MIGRATED_TO_ROUTER:                 fm.engine_load_pct,
+# MIGRATED_TO_ROUTER:                 fm.rpm
+# MIGRATED_TO_ROUTER:             FROM fuel_metrics fm
+# MIGRATED_TO_ROUTER:             INNER JOIN (
+# MIGRATED_TO_ROUTER:                 SELECT truck_id, MAX(timestamp_utc) as max_ts
+# MIGRATED_TO_ROUTER:                 FROM fuel_metrics
+# MIGRATED_TO_ROUTER:                 WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+# MIGRATED_TO_ROUTER:                 GROUP BY truck_id
+# MIGRATED_TO_ROUTER:             ) latest ON fm.truck_id = latest.truck_id 
+# MIGRATED_TO_ROUTER:                      AND fm.timestamp_utc = latest.max_ts
+# MIGRATED_TO_ROUTER:         """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:             result = conn.execute(text(query))
+# MIGRATED_TO_ROUTER:             rows = result.fetchall()
+# MIGRATED_TO_ROUTER:             columns = result.keys()
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         fleet_data = [dict(zip(columns, row)) for row in rows]
+# MIGRATED_TO_ROUTER: 
         # Analyze fleet
-        summary = analyzer.analyze_fleet_health(fleet_data)
-
+# MIGRATED_TO_ROUTER:         summary = analyzer.analyze_fleet_health(fleet_data)
+# MIGRATED_TO_ROUTER: 
         # Save new alerts to database
-        alerts_saved = 0
-        try:
-            for alert in summary.critical_alerts + summary.warning_alerts:
-                insert_query = """
-                    INSERT INTO engine_health_alerts 
-                    (truck_id, category, severity, sensor_name, current_value, 
-                     threshold_value, baseline_value, message, action_required, 
-                     trend_direction, is_active)
-                    VALUES 
-                    (:truck_id, :category, :severity, :sensor_name, :current_value,
-                     :threshold_value, :baseline_value, :message, :action_required,
-                     :trend_direction, TRUE)
-                """
-
-                with engine.connect() as conn:
-                    conn.execute(
-                        text(insert_query),
-                        {
-                            "truck_id": alert.truck_id,
-                            "category": alert.category.value,
-                            "severity": alert.severity.value,
-                            "sensor_name": alert.sensor_name,
-                            "current_value": alert.current_value,
-                            "threshold_value": alert.threshold_value,
-                            "baseline_value": alert.baseline_value,
-                            "message": alert.message,
-                            "action_required": alert.action_required,
-                            "trend_direction": alert.trend_direction,
-                        },
-                    )
-                    conn.commit()
-                    alerts_saved += 1
-        except Exception as save_error:
-            logger.warning(f"Could not save alerts (table may not exist): {save_error}")
-
-        return {
-            "status": "completed",
-            "trucks_analyzed": len(fleet_data),
-            "critical_alerts": summary.trucks_critical,
-            "warning_alerts": summary.trucks_warning,
-            "alerts_saved": alerts_saved,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Error running health analysis: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# MIGRATED_TO_ROUTER:         alerts_saved = 0
+# MIGRATED_TO_ROUTER:         try:
+# MIGRATED_TO_ROUTER:             for alert in summary.critical_alerts + summary.warning_alerts:
+# MIGRATED_TO_ROUTER:                 insert_query = """
+# MIGRATED_TO_ROUTER:                     INSERT INTO engine_health_alerts 
+# MIGRATED_TO_ROUTER:                     (truck_id, category, severity, sensor_name, current_value, 
+# MIGRATED_TO_ROUTER:                      threshold_value, baseline_value, message, action_required, 
+# MIGRATED_TO_ROUTER:                      trend_direction, is_active)
+# MIGRATED_TO_ROUTER:                     VALUES 
+# MIGRATED_TO_ROUTER:                     (:truck_id, :category, :severity, :sensor_name, :current_value,
+# MIGRATED_TO_ROUTER:                      :threshold_value, :baseline_value, :message, :action_required,
+# MIGRATED_TO_ROUTER:                      :trend_direction, TRUE)
+# MIGRATED_TO_ROUTER:                 """
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:                 with engine.connect() as conn:
+# MIGRATED_TO_ROUTER:                     conn.execute(
+# MIGRATED_TO_ROUTER:                         text(insert_query),
+# MIGRATED_TO_ROUTER:                         {
+# MIGRATED_TO_ROUTER:                             "truck_id": alert.truck_id,
+# MIGRATED_TO_ROUTER:                             "category": alert.category.value,
+# MIGRATED_TO_ROUTER:                             "severity": alert.severity.value,
+# MIGRATED_TO_ROUTER:                             "sensor_name": alert.sensor_name,
+# MIGRATED_TO_ROUTER:                             "current_value": alert.current_value,
+# MIGRATED_TO_ROUTER:                             "threshold_value": alert.threshold_value,
+# MIGRATED_TO_ROUTER:                             "baseline_value": alert.baseline_value,
+# MIGRATED_TO_ROUTER:                             "message": alert.message,
+# MIGRATED_TO_ROUTER:                             "action_required": alert.action_required,
+# MIGRATED_TO_ROUTER:                             "trend_direction": alert.trend_direction,
+# MIGRATED_TO_ROUTER:                         },
+# MIGRATED_TO_ROUTER:                     )
+# MIGRATED_TO_ROUTER:                     conn.commit()
+# MIGRATED_TO_ROUTER:                     alerts_saved += 1
+# MIGRATED_TO_ROUTER:         except Exception as save_error:
+# MIGRATED_TO_ROUTER:             logger.warning(f"Could not save alerts (table may not exist): {save_error}")
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:         return {
+# MIGRATED_TO_ROUTER:             "status": "completed",
+# MIGRATED_TO_ROUTER:             "trucks_analyzed": len(fleet_data),
+# MIGRATED_TO_ROUTER:             "critical_alerts": summary.trucks_critical,
+# MIGRATED_TO_ROUTER:             "warning_alerts": summary.trucks_warning,
+# MIGRATED_TO_ROUTER:             "alerts_saved": alerts_saved,
+# MIGRATED_TO_ROUTER:             "timestamp": datetime.now(timezone.utc).isoformat(),
+# MIGRATED_TO_ROUTER:         }
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER:     except Exception as e:
+# MIGRATED_TO_ROUTER:         logger.error(f"Error running health analysis: {e}")
+# MIGRATED_TO_ROUTER:         raise HTTPException(status_code=500, detail=str(e))
+# MIGRATED_TO_ROUTER: 
+# MIGRATED_TO_ROUTER: 
 # ============================================================================
 # CATCH-ALL ROUTE - Must be at the END of file after all API routes
 # ============================================================================

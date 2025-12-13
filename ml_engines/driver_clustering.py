@@ -461,7 +461,8 @@ class DriverClusteringEngine:
                 X_scaled = self.scaler.transform(X)
                 labels = self.model.predict(X_scaled)
                 quality = silhouette_score(X_scaled, labels)
-            except:
+            except Exception as cluster_err:
+                logger.warning(f"Silhouette score calculation failed: {cluster_err}")
                 quality = 0.5
         else:
             quality = 0.5

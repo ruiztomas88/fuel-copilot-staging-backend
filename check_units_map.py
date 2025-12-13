@@ -2,12 +2,16 @@ import pymysql
 import os
 
 # Connection details for fuel_copilot
+_password = os.getenv("MYSQL_PASSWORD")
+if not _password:
+    raise ValueError("MYSQL_PASSWORD environment variable required")
+
 conn = pymysql.connect(
-    host=os.getenv('MYSQL_HOST', 'localhost'),
-    user=os.getenv('MYSQL_USER', 'fuel_admin'),
-    password=os.getenv('MYSQL_PASSWORD', 'FuelCopilot2025!'),
-    database=os.getenv('MYSQL_DATABASE', 'fuel_copilot'),
-    charset='utf8mb4'
+    host=os.getenv("MYSQL_HOST", "localhost"),
+    user=os.getenv("MYSQL_USER", "fuel_admin"),
+    password=_password,
+    database=os.getenv("MYSQL_DATABASE", "fuel_copilot"),
+    charset="utf8mb4",
 )
 
 with conn.cursor() as cursor:

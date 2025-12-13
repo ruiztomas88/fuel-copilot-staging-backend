@@ -18,8 +18,11 @@ logger = logging.getLogger(__name__)
 MYSQL_HOST = os.getenv("MYSQL_HOST", "20.127.200.135")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
 MYSQL_USER = os.getenv("MYSQL_USER", "tomas")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "Tomas2025")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")  # Required - set via environment
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "wialon_collect")
+
+if not MYSQL_PASSWORD:
+    logger.warning("⚠️ MYSQL_PASSWORD not set - database connections will fail")
 
 # Build connection string for Wialon (remote)
 DATABASE_URL = (
@@ -32,8 +35,11 @@ DATABASE_URL = (
 LOCAL_DB_HOST = os.getenv("LOCAL_DB_HOST", "localhost")
 LOCAL_DB_PORT = int(os.getenv("LOCAL_DB_PORT", "3306"))
 LOCAL_DB_USER = os.getenv("LOCAL_DB_USER", "fuel_admin")
-LOCAL_DB_PASSWORD = os.getenv("LOCAL_DB_PASS", "FuelCopilot2025!")
+LOCAL_DB_PASSWORD = os.getenv("LOCAL_DB_PASS", "")  # Required - set via environment
 LOCAL_DB_NAME = os.getenv("LOCAL_DB_NAME", "fuel_copilot")
+
+if not LOCAL_DB_PASSWORD:
+    logger.warning("⚠️ LOCAL_DB_PASS not set - local database connections will fail")
 
 # Build connection string for fuel_copilot (local)
 LOCAL_DATABASE_URL = (

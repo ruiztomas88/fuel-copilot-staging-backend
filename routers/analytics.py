@@ -307,7 +307,8 @@ async def get_kpis():
                 kpis["unresolved_alerts"] = alerts["total_unresolved"] or 0
                 kpis["critical_alerts"] = alerts["critical"] or 0
                 kpis["high_alerts"] = alerts["high"] or 0
-        except:
+        except Exception as alerts_err:
+            logger.warning(f"Failed to fetch maintenance alerts KPIs: {alerts_err}")
             kpis["unresolved_alerts"] = 0
             kpis["critical_alerts"] = 0
             kpis["high_alerts"] = 0
@@ -329,7 +330,8 @@ async def get_kpis():
                 kpis["fleet_avg_mpg_7d"] = (
                     round(eff["avg_mpg"], 2) if eff.get("avg_mpg") else None
                 )
-        except:
+        except Exception as mpg_err:
+            logger.warning(f"Failed to fetch fleet MPG KPIs: {mpg_err}")
             kpis["fleet_avg_mpg_7d"] = None
 
         fuel_conn.close()

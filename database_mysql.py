@@ -456,7 +456,9 @@ def get_refuel_history(
 
             # Process each day: take the LARGEST single refuel
             consolidated_results = []
-            MIN_REFUEL_GAL = 40  # Minimum 40 gal to count as real refuel (~$140)
+            # 🔧 FIX v5.6.1: Was 40, now 10 to match detection threshold in wialon_sync_enhanced.py
+            # This was causing ~30% of detected refuels to be filtered out in queries!
+            MIN_REFUEL_GAL = 10
 
             for (tid, date_str), day_records in truck_day_records.items():
                 # Find the record with largest refuel_gallons

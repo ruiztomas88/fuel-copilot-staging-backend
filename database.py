@@ -252,6 +252,66 @@ class DatabaseManager:
 
         return sorted(list(trucks))
 
+    def get_trucks_batch(self, truck_ids: List[str]) -> Dict[str, Dict]:
+        """🆕 v5.6.0: Batch fetch truck data to avoid N+1 queries
+
+        Args:
+            truck_ids: List of truck IDs to fetch
+
+        Returns:
+            Dict mapping truck_id to truck data
+        """
+        if not truck_ids:
+            return {}
+
+        result = {}
+
+        # Try MySQL batch query first
+        if self.mysql_available:
+            try:
+                from database_mysql import get_sqlalchemy_engine
+                from sqlalchemy import text
+
+                engine = get_sqlalchemy_engine()
+                placeholders = ",".join([f"'{tid}'" for tid in truck_ids])
+
+                with engine.connect() as conn:
+                    query = text(
+                        f"""
+                        SELECT fm.* FROM fuel_metrics fm
+                        INNER JOIN (
+                            SELECT truck_id, MAX(timestamp_utc) as max_ts
+                            FROM fuel_metrics
+                            WHERE truck_id IN ({placeholders})
+                            AND timestamp_utc > NOW() - INTERVAL 24 HOUR
+                            GROUP BY truck_id
+                        ) latest ON fm.truck_id = latest.truck_id 
+                        AND fm.timestamp_utc = latest.max_ts
+                    """
+                    )
+                    rows = conn.execute(query)
+
+                    for row in rows:
+                        row_dict = dict(row._mapping)
+                        truck_id = row_dict.get("truck_id")
+                        if truck_id:
+                            row_dict = self._enrich_truck_record(row_dict)
+                            result[truck_id] = row_dict
+
+                logger.info(f"✅ Batch fetched {len(result)} trucks from MySQL")
+                return result
+
+            except Exception as e:
+                logger.warning(f"Batch MySQL query failed: {e}")
+
+        # Fallback to individual queries (N+1 but works)
+        for tid in truck_ids:
+            data = self.get_truck_latest_record(tid)
+            if data:
+                result[tid] = data
+
+        return result
+
     def get_fleet_summary(self) -> Dict:
         """Get summary statistics for entire fleet (MySQL first, then CSV fallback)"""
 

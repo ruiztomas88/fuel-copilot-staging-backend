@@ -243,8 +243,8 @@ class TestCircuitBreakerIntegration:
         for _ in range(2):
             try:
                 sometimes_fails(should_fail=True)
-            except:
-                pass
+            except ConnectionError:
+                pass  # Expected - opening the circuit
 
         assert breaker.state == CircuitState.OPEN
 
