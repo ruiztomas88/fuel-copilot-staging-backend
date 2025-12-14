@@ -546,6 +546,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         allowed, remaining = check_rate_limit(client_id, role)
 
         if not allowed:
+            # 🔧 v5.7.8: Add CORS headers to 429 response to prevent browser CORS errors
+            origin = request.headers.get("origin", "")
+            cors_headers = {
+                "Retry-After": "60",
+                "X-RateLimit-Limit": str(get_rate_limit_for_role(role)),
+                "X-RateLimit-Remaining": "0",
+            }
+            # Add CORS headers if origin is allowed
+            allowed_origins = [
+                "http://localhost:3000",
+                "http://localhost:3001", 
+                "http://localhost:5173",
+                "https://fuelanalytics.fleetbooster.net",
+                "https://fleetbooster.net",
+            ]
+            if origin in allowed_origins:
+                cors_headers["Access-Control-Allow-Origin"] = origin
+                cors_headers["Access-Control-Allow-Credentials"] = "true"
+            
             return JSONResponse(
                 status_code=429,
                 content={
@@ -553,11 +572,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "message": f"Rate limit exceeded. Limit: {get_rate_limit_for_role(role)}/min for role '{role}'",
                     "retry_after": 60,
                 },
-                headers={
-                    "Retry-After": "60",
-                    "X-RateLimit-Limit": str(get_rate_limit_for_role(role)),
-                    "X-RateLimit-Remaining": "0",
-                },
+                headers=cors_headers,
             )
 
         # Process request
