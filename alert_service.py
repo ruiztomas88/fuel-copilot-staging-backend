@@ -72,6 +72,8 @@ class AlertType(Enum):
     MAINTENANCE_DUE = "maintenance_due"
     DTC_ALERT = "dtc_alert"  # 🆕 v5.7.3: Diagnostic trouble code
     VOLTAGE_ALERT = "voltage_alert"  # 🆕 v5.7.3: Battery/alternator issue
+    IDLE_DEVIATION = "idle_deviation"  # 🆕 v5.7.6: Idle calculation vs ECU mismatch
+    GPS_QUALITY = "gps_quality"  # 🆕 v5.7.6: Poor GPS signal
 
 
 @dataclass
@@ -792,6 +794,8 @@ class AlertManager:
             AlertType.MAINTENANCE_DUE: "🔧",
             AlertType.DTC_ALERT: "🔧",  # 🆕 v5.7.3
             AlertType.VOLTAGE_ALERT: "🔋",  # 🆕 v5.7.3
+            AlertType.IDLE_DEVIATION: "⏱️",  # 🆕 v5.7.6
+            AlertType.GPS_QUALITY: "📡",  # 🆕 v5.7.6
         }
 
         emoji = f"{priority_emoji.get(alert.priority, '📢')} {type_emoji.get(alert.alert_type, '📢')}"
@@ -1193,6 +1197,105 @@ class AlertManager:
         )
         return self.send_alert(alert, channels=channels)
 
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🆕 v5.7.6: IDLE DEVIATION AND GPS QUALITY ALERTS
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    def alert_idle_deviation(
+        self,
+        truck_id: str,
+        calculated_hours: float,
+        ecu_hours: float,
+        deviation_pct: float,
+    ) -> bool:
+        """
+        🆕 v5.7.6: Send alert when idle calculation differs significantly from ECU.
+
+        Deviation > 25% → HIGH priority (possible sensor miscalibration)
+        Deviation > 15% → MEDIUM priority (investigate)
+        """
+        if abs(deviation_pct) > 25:
+            priority = AlertPriority.HIGH
+            channels = ["email"]
+            emoji = "⏱️🚨"
+            message = f"SIGNIFICANT IDLE DEVIATION DETECTED\n"
+        else:
+            priority = AlertPriority.MEDIUM
+            channels = ["email"]
+            emoji = "⏱️⚠️"
+            message = f"IDLE TRACKING DEVIATION\n"
+
+        message += (
+            f"Our calculation: {calculated_hours:.1f}h\n"
+            f"ECU reported: {ecu_hours:.1f}h\n"
+            f"Deviation: {deviation_pct:+.1f}%"
+        )
+
+        alert = Alert(
+            alert_type=AlertType.IDLE_DEVIATION,
+            priority=priority,
+            truck_id=truck_id,
+            message=f"{emoji} {message}",
+            details={
+                "calculated_idle_hours": f"{calculated_hours:.1f}h",
+                "ecu_idle_hours": f"{ecu_hours:.1f}h",
+                "deviation_pct": f"{deviation_pct:+.1f}%",
+                "action": (
+                    "Schedule sensor recalibration"
+                    if abs(deviation_pct) > 25
+                    else "Monitor for next 24 hours"
+                ),
+            },
+        )
+        return self.send_alert(alert, channels=channels)
+
+    def alert_gps_quality(
+        self,
+        truck_id: str,
+        satellites: int,
+        quality_level: str,
+        estimated_accuracy_m: float = None,
+    ) -> bool:
+        """
+        🆕 v5.7.6: Send alert for poor GPS signal quality.
+
+        CRITICAL (<4 sats) → HIGH priority
+        POOR (4-6 sats) → MEDIUM priority
+        """
+        if quality_level == "CRITICAL" or satellites < 4:
+            priority = AlertPriority.HIGH
+            channels = ["email"]
+            emoji = "📡🚨"
+            message = "GPS SIGNAL CRITICAL"
+        else:
+            priority = AlertPriority.MEDIUM
+            channels = ["email"]
+            emoji = "📡⚠️"
+            message = "GPS SIGNAL DEGRADED"
+
+        alert = Alert(
+            alert_type=AlertType.GPS_QUALITY,
+            priority=priority,
+            truck_id=truck_id,
+            message=f"{emoji} {message}\n"
+            f"Satellites: {satellites}\n"
+            f"Quality: {quality_level}"
+            + (
+                f"\nAccuracy: ~{estimated_accuracy_m:.0f}m"
+                if estimated_accuracy_m
+                else ""
+            ),
+            details={
+                "satellites": satellites,
+                "quality": quality_level,
+                "accuracy_m": (
+                    f"{estimated_accuracy_m:.0f}" if estimated_accuracy_m else "N/A"
+                ),
+                "action": "Check GPS antenna connection and placement",
+            },
+        )
+        return self.send_alert(alert, channels=channels)
+
 
 # Global instance for easy access
 _alert_manager: AlertManager = None
@@ -1283,6 +1386,30 @@ def send_voltage_alert(
     """🆕 v5.7.3: Quick function to send voltage alert"""
     return get_alert_manager().alert_voltage(
         truck_id, voltage, priority_level, message, is_engine_running
+    )
+
+
+def send_idle_deviation_alert(
+    truck_id: str,
+    calculated_hours: float,
+    ecu_hours: float,
+    deviation_pct: float,
+) -> bool:
+    """🆕 v5.7.6: Quick function to send idle deviation alert"""
+    return get_alert_manager().alert_idle_deviation(
+        truck_id, calculated_hours, ecu_hours, deviation_pct
+    )
+
+
+def send_gps_quality_alert(
+    truck_id: str,
+    satellites: int,
+    quality_level: str,
+    estimated_accuracy_m: float = None,
+) -> bool:
+    """🆕 v5.7.6: Quick function to send GPS quality alert"""
+    return get_alert_manager().alert_gps_quality(
+        truck_id, satellites, quality_level, estimated_accuracy_m
     )
 
 

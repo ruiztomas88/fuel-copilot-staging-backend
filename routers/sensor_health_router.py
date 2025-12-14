@@ -47,6 +47,15 @@ try:
 except ImportError:
     VOLTAGE_AVAILABLE = False
 
+# 🆕 v5.7.6: Import alert service for automatic alerts
+try:
+    from alert_service import send_idle_deviation_alert, send_gps_quality_alert
+
+    ALERTS_AVAILABLE = True
+except ImportError:
+    ALERTS_AVAILABLE = False
+    logger.warning("Alert service not available for sensor health alerts")
+
 router = APIRouter(prefix="/fuelAnalytics/api/sensor-health", tags=["Sensor Health"])
 
 
@@ -252,6 +261,29 @@ async def get_idle_validation_status(
                         needs_investigation=validation.needs_investigation,
                     )
                 )
+
+                # 🆕 v5.7.6: Trigger automatic alert for significant deviations
+                if (
+                    ALERTS_AVAILABLE
+                    and validation.needs_investigation
+                    and validation.deviation_pct is not None
+                    and abs(validation.deviation_pct) > 15
+                    and ecu_idle is not None
+                ):
+                    try:
+                        send_idle_deviation_alert(
+                            truck_id=tid,
+                            calculated_hours=calc_idle,
+                            ecu_hours=ecu_idle,
+                            deviation_pct=validation.deviation_pct,
+                        )
+                        logger.info(
+                            f"⏱️ Idle deviation alert sent for {tid}: {validation.deviation_pct:+.1f}%"
+                        )
+                    except Exception as alert_err:
+                        logger.debug(
+                            f"Failed to send idle deviation alert: {alert_err}"
+                        )
 
             except Exception as e:
                 logger.debug(f"Error validating idle for {tid}: {e}")
@@ -476,7 +508,24 @@ async def get_gps_quality_overview():
                     continue
 
                 sats = record.get("gps_satellites") or record.get("sats")
-                quality = record.get("gps_quality", "UNKNOWN")
+                quality_raw = record.get("gps_quality", "UNKNOWN")
+
+                # Parse quality string (format: "QUALITY|sats=X|acc=Ym")
+                quality = "UNKNOWN"
+                accuracy = None
+                if quality_raw and "|" in str(quality_raw):
+                    parts = str(quality_raw).split("|")
+                    quality = parts[0] if parts else "UNKNOWN"
+                    for part in parts[1:]:
+                        if part.startswith("acc="):
+                            try:
+                                accuracy = float(
+                                    part.replace("acc=", "").replace("m", "")
+                                )
+                            except:
+                                pass
+                elif quality_raw:
+                    quality = str(quality_raw)
 
                 # Count by quality
                 if quality in quality_counts:
@@ -489,10 +538,28 @@ async def get_gps_quality_overview():
                         "truck_id": tid,
                         "satellites": sats,
                         "quality": quality,
+                        "accuracy_m": accuracy,
                         "latitude": record.get("latitude"),
                         "longitude": record.get("longitude"),
                     }
                 )
+
+                # 🆕 v5.7.6: Trigger alert for poor GPS quality
+                if (
+                    ALERTS_AVAILABLE
+                    and quality in ["POOR", "CRITICAL"]
+                    and sats is not None
+                ):
+                    try:
+                        send_gps_quality_alert(
+                            truck_id=tid,
+                            satellites=sats,
+                            quality_level=quality,
+                            estimated_accuracy_m=accuracy,
+                        )
+                        logger.info(f"📡 GPS quality alert sent for {tid}: {quality}")
+                    except Exception as alert_err:
+                        logger.debug(f"Failed to send GPS quality alert: {alert_err}")
 
             except Exception as e:
                 logger.debug(f"Error checking GPS for {tid}: {e}")
@@ -601,4 +668,73 @@ async def get_voltage_summary():
 
     except Exception as e:
         logger.error(f"Error getting voltage summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.7.6: VOLTAGE TRENDING (Prediction)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Import voltage history manager
+try:
+    from voltage_history import get_voltage_trending, get_voltage_history_manager
+
+    VOLTAGE_HISTORY_AVAILABLE = True
+except ImportError:
+    VOLTAGE_HISTORY_AVAILABLE = False
+    logger.warning("Voltage history module not available")
+
+
+@router.get("/voltage-trending/{truck_id}")
+async def get_voltage_trending_for_truck(
+    truck_id: str,
+    days_back: int = Query(30, ge=1, le=90, description="Days of history to analyze"),
+):
+    """
+    🆕 v5.7.6: Get voltage trending and prediction for a specific truck.
+
+    Analyzes voltage history to predict:
+    - Battery degradation
+    - Alternator issues
+    - Days until potential failure
+
+    Args:
+        truck_id: Truck ID to analyze
+        days_back: Days of history to analyze (1-90, default 30)
+
+    Returns:
+        Trending summary with prediction data
+    """
+    if not VOLTAGE_HISTORY_AVAILABLE:
+        raise HTTPException(
+            status_code=503, detail="Voltage history module not available"
+        )
+
+    try:
+        trending = get_voltage_trending(truck_id, days_back)
+        return trending
+
+    except Exception as e:
+        logger.error(f"Error getting voltage trending for {truck_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/voltage-fleet-trending")
+async def get_fleet_voltage_trending():
+    """
+    🆕 v5.7.6: Get voltage trending summary for the entire fleet.
+
+    Returns aggregated voltage health data for all trucks.
+    """
+    if not VOLTAGE_HISTORY_AVAILABLE:
+        raise HTTPException(
+            status_code=503, detail="Voltage history module not available"
+        )
+
+    try:
+        manager = get_voltage_history_manager()
+        return manager.get_fleet_summary()
+
+    except Exception as e:
+        logger.error(f"Error getting fleet voltage trending: {e}")
         raise HTTPException(status_code=500, detail=str(e))

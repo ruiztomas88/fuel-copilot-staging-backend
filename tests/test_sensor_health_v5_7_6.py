@@ -264,25 +264,31 @@ class TestSensorHealthRouter:
             yield mock
 
     def test_idle_validation_response_model(self):
-        """Test IdleValidationResponse model structure"""
-        from routers.sensor_health_router import IdleValidationResponse
+        """Test IdleValidationResponse model structure - v5.7.6 updated model"""
+        from routers.sensor_health_router import IdleValidationResponse, ExpectedRange
 
         response = IdleValidationResponse(
             truck_id="TEST001",
+            timestamp="2025-12-14T00:00:00Z",
+            idle_mode="NORMAL",
+            idle_gph=0.8,
             is_valid=True,
-            confidence="HIGH",
+            validation_status="VALID",
+            expected_range=ExpectedRange(min_gph=0.4, max_gph=1.2),
+            confidence=0.9,
+            message="Validation OK",
             calculated_idle_hours=3.5,
             ecu_idle_hours=1250.0,
             deviation_pct=5.0,
             idle_ratio_pct=15.0,
             needs_investigation=False,
-            message="Validation OK",
-            last_validated="2025-12-14T00:00:00Z",
         )
 
         assert response.truck_id == "TEST001"
         assert response.is_valid is True
-        assert response.confidence == "HIGH"
+        assert response.confidence == 0.9
+        assert response.idle_mode == "NORMAL"
+        assert response.expected_range.min_gph == 0.4
 
     def test_sensor_health_summary_model(self):
         """Test SensorHealthSummary model structure"""
