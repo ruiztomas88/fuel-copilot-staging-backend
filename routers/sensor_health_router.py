@@ -47,7 +47,7 @@ try:
 except ImportError:
     VOLTAGE_AVAILABLE = False
 
-router = APIRouter(prefix="/fuelAnalytics/api/sensor-health", tags=["Sensor Health"])
+router = APIRouter(prefix="/fuelAnalytics/sensor-health", tags=["Sensor Health"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
