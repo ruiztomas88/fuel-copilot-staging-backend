@@ -946,26 +946,29 @@ async def _get_all_sensor_histories_batch(
     Get daily aggregated sensor history for ALL trucks in a single query.
     Returns: {truck_id: {sensor_field: [values]}}
     """
+    # Define sensor fields to fetch
+    sensor_fields = [
+        "battery_voltage",
+        "coolant_temp_f",
+        "oil_pressure_psi",
+        "def_level_pct",
+        "dpf_soot_pct",
+    ]
+
+    result_dict: Dict[str, Dict[str, List[float]]] = {}
+
+    # Initialize empty structure
+    for tid in truck_ids:
+        result_dict[tid] = {field: [] for field in sensor_fields}
+
+    if not truck_ids:
+        return result_dict
+
     try:
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
 
         engine = get_sqlalchemy_engine()
-
-        # Define sensor fields to fetch
-        sensor_fields = [
-            "battery_voltage",
-            "coolant_temp_f",
-            "oil_pressure_psi",
-            "def_level_pct",
-            "dpf_soot_pct",
-        ]
-
-        result_dict: Dict[str, Dict[str, List[float]]] = {}
-
-        # Initialize empty structure
-        for tid in truck_ids:
-            result_dict[tid] = {field: [] for field in sensor_fields}
 
         with engine.connect() as conn:
             # Build a single query that gets daily averages for all sensors for all trucks
@@ -993,16 +996,22 @@ async def _get_all_sensor_histories_batch(
             """
             )
 
-            rows = conn.execute(query, params).fetchall()
+            result = conn.execute(query, params)
+            rows = result.fetchall()
+            
+            # Get column names from result
+            columns = result.keys()
 
-            # Process results
+            # Process results - use index-based access for compatibility
             for row in rows:
-                tid = row.truck_id
+                # Convert row to dict for easier access
+                row_dict = dict(zip(columns, row))
+                tid = row_dict.get("truck_id")
                 if tid not in result_dict:
                     continue
 
                 for field in sensor_fields:
-                    value = getattr(row, f"avg_{field}", None)
+                    value = row_dict.get(f"avg_{field}")
                     if value is not None:
                         result_dict[tid][field].append(float(value))
 
