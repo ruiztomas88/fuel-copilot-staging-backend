@@ -184,6 +184,9 @@ class FuelEstimator:
         tanks_config=None,
     ):
         self.truck_id = truck_id
+        # 🔧 v5.7.8: Validate capacity to prevent division by zero
+        if capacity_liters is None or capacity_liters <= 0:
+            raise ValueError(f"capacity_liters must be positive, got {capacity_liters}")
         self.capacity_liters = capacity_liters
         self.capacity = capacity_liters  # Alias for compatibility
         self.config = config
