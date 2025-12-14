@@ -3,7 +3,11 @@
 VOLTAGE MONITOR - Alertas de Batería y Alternador
 ═══════════════════════════════════════════════════════════════════════════════
 
-Usa el sensor `pwr_int` (voltaje interno) para detectar:
+⚠️ IMPORTANTE: Hay dos sensores de voltaje en Wialon:
+- `pwr_ext` = Voltaje externo (batería del camión) - 12-14V - ¡USAR ESTE!
+- `pwr_int` = Voltaje interno (batería GPS backup) - 3-4V - No usar para alertas
+
+Este módulo usa `pwr_ext` para detectar:
 - Batería baja (no va a arrancar)
 - Alternador fallando (no está cargando)
 - Sobrevoltaje (riesgo de daño a electrónicos)
@@ -11,9 +15,10 @@ Usa el sensor `pwr_int` (voltaje interno) para detectar:
 También correlaciona voltaje bajo con problemas de sensores (drift, lecturas erráticas)
 
 🆕 v3.12.28: New module for Phase 2
+🔧 v5.7.5: Fixed to use pwr_ext (truck battery) instead of pwr_int (GPS backup)
 
 Author: Fuel Copilot Team
-Version: 1.0.0
+Version: 1.0.1
 Date: December 2025
 ═══════════════════════════════════════════════════════════════════════════════
 """
@@ -106,16 +111,19 @@ DEFAULT_THRESHOLDS = VoltageThresholds()
 
 
 def analyze_voltage(
-    pwr_int: Optional[float],
+    voltage: Optional[float],
     rpm: Optional[float] = None,
     truck_id: str = "UNKNOWN",
     thresholds: VoltageThresholds = DEFAULT_THRESHOLDS,
 ) -> Optional[VoltageAlert]:
     """
     Analizar voltaje del sistema y generar alertas.
+    
+    🔧 v5.7.5: Parameter renamed from pwr_int to voltage for clarity.
+    Use pwr_ext (truck battery 12-14V), NOT pwr_int (GPS backup 3-4V).
 
     Args:
-        pwr_int: Voltaje del sensor pwr_int (volts)
+        voltage: Truck battery voltage from pwr_ext sensor (volts)
         rpm: RPM del motor (None si no disponible, 0 = apagado, >0 = encendido)
         truck_id: ID del camión
         thresholds: Umbrales de voltaje
@@ -123,7 +131,7 @@ def analyze_voltage(
     Returns:
         VoltageAlert con diagnóstico completo, or None if no voltage data
     """
-    if pwr_int is None:
+    if voltage is None:
         return None
 
     # Determinar si motor está encendido
@@ -131,9 +139,9 @@ def analyze_voltage(
 
     # Analizar según estado del motor
     if is_running:
-        return _analyze_charging_voltage(pwr_int, rpm, truck_id, thresholds)
+        return _analyze_charging_voltage(voltage, rpm, truck_id, thresholds)
     else:
-        return _analyze_battery_voltage(pwr_int, truck_id, thresholds)
+        return _analyze_battery_voltage(voltage, truck_id, thresholds)
 
 
 def _analyze_battery_voltage(

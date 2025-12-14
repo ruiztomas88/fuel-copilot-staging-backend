@@ -257,8 +257,11 @@ async def get_diagnostic_alerts():
                 else truck.get("truck_id", "UNKNOWN")
             )
 
-            # DTC Alerts
-            dtc_value = getattr(truck, "dtc", None) or truck.get("dtc")
+            # DTC Alerts - v5.7.5: Prefer dtc_code over dtc (dtc may be just a flag 0/1)
+            dtc_code = getattr(truck, "dtc_code", None) or truck.get("dtc_code")
+            dtc_flag = getattr(truck, "dtc", None) or truck.get("dtc")
+            # Use dtc_code if available (actual codes), otherwise dtc if it's not just a flag
+            dtc_value = dtc_code if dtc_code else (dtc_flag if dtc_flag and str(dtc_flag) not in ["0", "1", "0.0", "1.0"] else None)
             if dtc_value:
                 try:
                     timestamp = (
@@ -268,7 +271,7 @@ async def get_diagnostic_alerts():
                     )
                     dtc_alerts = process_dtc_from_sensor_data(
                         truck_id=truck_id,
-                        dtc_value=dtc_value,
+                        dtc_value=str(dtc_value),
                         timestamp=timestamp,
                     )
                     for dtc_alert in dtc_alerts:
@@ -296,11 +299,11 @@ async def get_diagnostic_alerts():
                 except Exception as e:
                     logger.debug(f"DTC parse error for {truck_id}: {e}")
 
-            # Voltage Alerts
-            pwr_int = getattr(truck, "pwr_int", None) or truck.get("pwr_int")
+            # Voltage Alerts - v5.7.5: Use pwr_ext (truck battery 12-14V), not pwr_int (GPS backup)
+            pwr_ext = getattr(truck, "pwr_ext", None) or truck.get("pwr_ext")
             rpm = getattr(truck, "rpm", None) or truck.get("rpm")
-            if pwr_int is not None:
-                voltage_alert = analyze_voltage(pwr_int, rpm, truck_id)
+            if pwr_ext is not None:
+                voltage_alert = analyze_voltage(pwr_ext, rpm, truck_id)
                 if voltage_alert and voltage_alert.priority not in ["OK", None]:
                     alerts.append(
                         {
@@ -312,7 +315,7 @@ async def get_diagnostic_alerts():
                                 else "warning"
                             ),
                             "message": voltage_alert.message,
-                            "voltage": pwr_int,
+                            "voltage": pwr_ext,
                             "status": voltage_alert.status.value,
                             "timestamp": datetime.now().isoformat(),
                             "recommendation": voltage_alert.action,

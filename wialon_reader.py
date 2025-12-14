@@ -80,10 +80,12 @@ class WialonConfig:
         "def_level": "def_level",  # DEF Level (%) - Fixed: was def_lvl
         "intake_air_temp": "intake_air_temp",  # Intake Air Temperature (°F)
         # 🆕 v3.12.28: New sensors for DTC alerts, GPS quality, idle validation
-        "dtc": "dtc",  # Diagnostic Trouble Codes (comma-separated)
+        "dtc": "dtc",  # DTC flag (0/1) or comma-separated codes
+        "dtc_code": "dtc_code",  # 🆕 v5.7.5: Actual DTC code (SPN.FMI format)
+        "active_dtc": "active_dtc",  # 🆕 v5.7.5: Alternative DTC code parameter
         "idle_hours": "idle_hours",  # ECU Idle Hours counter
         "sats": "sats",  # GPS Satellites count
-        "pwr_int": "pwr_int",  # Internal battery voltage
+        "pwr_int": "pwr_int",  # GPS tracker internal battery (~3-4V)
         "course": "course",  # GPS Heading/Course (degrees)
     }
 
@@ -127,10 +129,12 @@ class TruckSensorData:
     def_level: Optional[float] = None  # DEF Level %
     intake_air_temp: Optional[float] = None  # Intake Air Temperature °F
     # 🆕 v3.12.28: New sensors for DTC, GPS quality, idle validation
-    dtc: Optional[str] = None  # Diagnostic Trouble Codes (comma-separated string)
+    dtc: Optional[str] = None  # DTC flag (0/1) or codes
+    dtc_code: Optional[str] = None  # 🆕 v5.7.5: Actual DTC code (SPN.FMI)
+    active_dtc: Optional[str] = None  # 🆕 v5.7.5: Alternative DTC code param
     idle_hours: Optional[float] = None  # ECU Idle Hours counter
     sats: Optional[int] = None  # GPS Satellites count
-    pwr_int: Optional[float] = None  # Internal battery voltage
+    pwr_int: Optional[float] = None  # GPS tracker internal battery (~3-4V)
     course: Optional[float] = None  # GPS Heading/Course (degrees 0-360)
 
     def __post_init__(self):
@@ -591,6 +595,8 @@ class WialonReader:
                             intake_air_temp=sensor_data.get("intake_air_temp"),
                             # 🆕 v3.12.28: DTC, GPS quality, idle validation sensors
                             dtc=sensor_data.get("dtc"),
+                            dtc_code=sensor_data.get("dtc_code"),
+                            active_dtc=sensor_data.get("active_dtc"),
                             idle_hours=sensor_data.get("idle_hours"),
                             sats=sensor_data.get("sats"),
                             pwr_int=sensor_data.get("pwr_int"),

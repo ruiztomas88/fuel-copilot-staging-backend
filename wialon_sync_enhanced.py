@@ -43,6 +43,7 @@ from idle_engine import (
     detect_idle_mode,
     IdleMethod,
     IdleConfig,
+    validate_idle_calculation,  # 🆕 v5.7.3: For idle validation logging
 )
 from wialon_reader import WialonReader, WialonConfig, TRUCK_UNIT_MAPPING
 from config import (
@@ -1666,20 +1667,25 @@ def sync_cycle(
                 "oil_temp": truck_data.oil_temp,
                 "def_level": truck_data.def_level,
                 "intake_air_temp": truck_data.intake_air_temp,
-                # 🆕 v3.12.28: New sensors for DTC, GPS quality, idle validation
-                "dtc": truck_data.dtc,
+                # 🆕 v3.12.28 / v5.7.5: Sensors for DTC, GPS quality, idle validation
+                "dtc": truck_data.dtc,  # May be just 0/1 flag
+                "dtc_code": truck_data.dtc_code,  # v5.7.5: Actual DTC codes like "100.4,157.3"
                 "idle_hours": truck_data.idle_hours,
                 "sats": truck_data.sats,
                 "pwr_int": truck_data.pwr_int,
                 "course": truck_data.course,
             }
 
-            # 🆕 v3.12.28: Process DTC codes and generate alerts
-            if truck_data.dtc:
+            # 🆕 v3.12.28 / v5.7.5: Process DTC codes and generate alerts
+            # Prefer dtc_code (actual codes like "100.4,157.3") over dtc (which may be just 0/1 flag)
+            dtc_to_process = truck_data.dtc_code if truck_data.dtc_code else (
+                truck_data.dtc if truck_data.dtc and str(truck_data.dtc) not in ["0", "1", "0.0", "1.0"] else None
+            )
+            if dtc_to_process:
                 try:
                     dtc_alerts = process_dtc_from_sensor_data(
                         truck_id=truck_id,
-                        dtc_value=truck_data.dtc,
+                        dtc_value=str(dtc_to_process),
                         timestamp=truck_data.timestamp,
                     )
                     for alert in dtc_alerts:
@@ -1733,12 +1739,13 @@ def sync_cycle(
                 except Exception as dtc_error:
                     logger.debug(f"DTC processing error for {truck_id}: {dtc_error}")
 
-            # 🆕 v3.12.28: Process voltage alerts (battery/alternator)
-            if truck_data.pwr_int is not None:
+            # 🆕 v3.12.28 / v5.7.5: Process voltage alerts using pwr_ext (truck battery)
+            # NOTE: pwr_int is GPS tracker backup battery (~3.78V), NOT truck voltage
+            if truck_data.pwr_ext is not None:
                 try:
                     is_running = (truck_data.rpm or 0) > 100
                     voltage_alert = analyze_voltage(
-                        pwr_int=truck_data.pwr_int,
+                        voltage=truck_data.pwr_ext,  # v5.7.5: Use pwr_ext (truck 12-14V)
                         rpm=truck_data.rpm,
                         truck_id=truck_id,
                     )
@@ -1754,7 +1761,7 @@ def sync_cycle(
                                 # 🆕 v5.7.3: Send notification via alert_service
                                 send_voltage_alert(
                                     truck_id=truck_id,
-                                    voltage=truck_data.pwr_int,
+                                    voltage=truck_data.pwr_ext,
                                     priority_level="CRITICAL",
                                     message=voltage_alert.message,
                                     is_engine_running=is_running,
@@ -1766,7 +1773,7 @@ def sync_cycle(
                                 # 🆕 v5.7.3: Send email-only for warnings
                                 send_voltage_alert(
                                     truck_id=truck_id,
-                                    voltage=truck_data.pwr_int,
+                                    voltage=truck_data.pwr_ext,
                                     priority_level="WARNING",
                                     message=voltage_alert.message,
                                     is_engine_running=is_running,
@@ -2082,7 +2089,9 @@ def sync_cycle(
                     {
                         "truck_id": truck_data.truck_id,
                         "dtc": truck_data.dtc,
-                        "pwr_int": truck_data.pwr_int,
+                        "dtc_code": truck_data.dtc_code,  # v5.7.5: Actual DTC codes
+                        "pwr_ext": truck_data.pwr_ext,  # v5.7.5: Truck battery (12-14V)
+                        "pwr_int": truck_data.pwr_int,  # GPS backup battery (3-4V)
                         "sats": truck_data.sats,
                         "rpm": truck_data.rpm,
                         "timestamp": (
