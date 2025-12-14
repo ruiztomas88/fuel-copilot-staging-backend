@@ -53,6 +53,9 @@ from .engine_health_router import router as engine_health_router
 from .export_router import router as export_router
 from .predictions_router import router as predictions_router
 
+# 🆕 v5.7.6: Sensor Health router
+from .sensor_health_router import router as sensor_health_router
+
 __all__ = [
     "ml_intelligence_router",
     "auth_router",
@@ -70,6 +73,7 @@ __all__ = [
     "engine_health_router",
     "export_router",
     "predictions_router",
+    "sensor_health_router",  # 🆕 v5.7.6
 ]
 
 
@@ -117,3 +121,6 @@ def include_all_routers(app, auth_dependency=None):
     app.include_router(
         predictions_router
     )  # /analytics/next-refuel-*, trends, historical (3 endpoints)
+
+    # 🆕 v5.7.6: Sensor Health router
+    app.include_router(sensor_health_router)  # /sensor-health/* (4 endpoints)

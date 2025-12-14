@@ -107,7 +107,7 @@ class DatabaseManager:
         3. Default 0.8 GPH (if engine is running)
 
         Also adds health_score and health_category
-        
+
         🆕 v5.7.5: Added voltage, gps_satellites, gps_quality, voltage_status
         mappings for frontend compatibility
         """
@@ -163,7 +163,7 @@ class DatabaseManager:
         # ═══════════════════════════════════════════════════════════════════════
         # 🆕 v5.7.5: Frontend compatibility mappings for diagnostics display
         # ═══════════════════════════════════════════════════════════════════════
-        
+
         # Map battery_voltage -> voltage (frontend expects 'voltage')
         battery_voltage = record.get("battery_voltage")
         if battery_voltage is not None and not pd.isna(battery_voltage):
@@ -193,15 +193,19 @@ class DatabaseManager:
                     record["voltage_status"] = "HIGH"  # Unusual when off
                 else:
                     record["voltage_status"] = "NORMAL"
-        
+
         # Map sats -> gps_satellites (frontend expects 'gps_satellites')
         sats = record.get("sats")
         if sats is not None and not pd.isna(sats):
             record["gps_satellites"] = int(sats)
-        
+
         # Parse gps_quality from descriptive format "GOOD|sats=10|acc=3m" to simple "GOOD"
         gps_quality_raw = record.get("gps_quality")
-        if gps_quality_raw and isinstance(gps_quality_raw, str) and "|" in gps_quality_raw:
+        if (
+            gps_quality_raw
+            and isinstance(gps_quality_raw, str)
+            and "|" in gps_quality_raw
+        ):
             # Extract just the quality level (first part before |)
             record["gps_quality"] = gps_quality_raw.split("|")[0]
         elif gps_quality_raw:
@@ -213,7 +217,7 @@ class DatabaseManager:
         # dtc may be a count (0-N) or flag (0/1)
         dtc_code = record.get("dtc_code")
         dtc_flag = record.get("dtc")
-        
+
         if dtc_code and str(dtc_code).strip():
             # We have actual codes - use them directly
             record["dtc_codes"] = str(dtc_code)
