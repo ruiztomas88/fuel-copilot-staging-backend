@@ -79,6 +79,12 @@ class WialonConfig:
         "oil_temp": "oil_temp",  # Oil Temperature (°F)
         "def_level": "def_level",  # DEF Level (%) - Fixed: was def_lvl
         "intake_air_temp": "intake_air_temp",  # Intake Air Temperature (°F)
+        # 🆕 v3.12.28: New sensors for DTC alerts, GPS quality, idle validation
+        "dtc": "dtc",  # Diagnostic Trouble Codes (comma-separated)
+        "idle_hours": "idle_hours",  # ECU Idle Hours counter
+        "sats": "sats",  # GPS Satellites count
+        "pwr_int": "pwr_int",  # Internal battery voltage
+        "course": "course",  # GPS Heading/Course (degrees)
     }
 
 
@@ -120,6 +126,12 @@ class TruckSensorData:
     oil_temp: Optional[float] = None  # Oil Temperature °F
     def_level: Optional[float] = None  # DEF Level %
     intake_air_temp: Optional[float] = None  # Intake Air Temperature °F
+    # 🆕 v3.12.28: New sensors for DTC, GPS quality, idle validation
+    dtc: Optional[str] = None  # Diagnostic Trouble Codes (comma-separated string)
+    idle_hours: Optional[float] = None  # ECU Idle Hours counter
+    sats: Optional[int] = None  # GPS Satellites count
+    pwr_int: Optional[float] = None  # Internal battery voltage
+    course: Optional[float] = None  # GPS Heading/Course (degrees 0-360)
 
     def __post_init__(self):
         """Ensure timestamp is timezone-aware"""
@@ -577,6 +589,12 @@ class WialonReader:
                             oil_temp=sensor_data.get("oil_temp"),
                             def_level=sensor_data.get("def_level"),
                             intake_air_temp=sensor_data.get("intake_air_temp"),
+                            # 🆕 v3.12.28: DTC, GPS quality, idle validation sensors
+                            dtc=sensor_data.get("dtc"),
+                            idle_hours=sensor_data.get("idle_hours"),
+                            sats=sensor_data.get("sats"),
+                            pwr_int=sensor_data.get("pwr_int"),
+                            course=sensor_data.get("course"),
                         )
                         all_data.append(truck_data)
                         trucks_with_data.add(truck_id)
@@ -682,12 +700,12 @@ def load_truck_config_from_db() -> Dict[str, Dict]:
     try:
         # Connect to Wialon DB to get mapping
         conn = pymysql.connect(
-            host=os.getenv('WIALON_DB_HOST', 'localhost'),
-            port=int(os.getenv('WIALON_DB_PORT', '3306')),
-            user=os.getenv('WIALON_DB_USER', 'wialon_user'),
-            password=os.getenv('WIALON_DB_PASS', ''),
-            database=os.getenv('WIALON_DB_NAME', 'wialon'),
-            charset='utf8mb4',
+            host=os.getenv("WIALON_DB_HOST", "localhost"),
+            port=int(os.getenv("WIALON_DB_PORT", "3306")),
+            user=os.getenv("WIALON_DB_USER", "wialon_user"),
+            password=os.getenv("WIALON_DB_PASS", ""),
+            database=os.getenv("WIALON_DB_NAME", "wialon"),
+            charset="utf8mb4",
             connect_timeout=5,
             cursorclass=pymysql.cursors.DictCursor,
         )
@@ -695,25 +713,29 @@ def load_truck_config_from_db() -> Dict[str, Dict]:
         cursor = conn.cursor()
 
         # Get mapping from units_map table
-        cursor.execute('SELECT beyondId, unit, fuel_capacity FROM units_map ORDER BY beyondId')
+        cursor.execute(
+            "SELECT beyondId, unit, fuel_capacity FROM units_map ORDER BY beyondId"
+        )
         units_data = cursor.fetchall()
 
         trucks = {}
         for row in units_data:
-            beyond_id = row['beyondId']
-            unit_id = row['unit']
-            fuel_capacity = row.get('fuel_capacity', 200)  # Default 200 gallons
+            beyond_id = row["beyondId"]
+            unit_id = row["unit"]
+            fuel_capacity = row.get("fuel_capacity", 200)  # Default 200 gallons
 
             trucks[beyond_id] = {
-                'unit_id': unit_id,
-                'capacity_gallons': fuel_capacity,
-                'capacity_liters': fuel_capacity * 3.78541,  # Convert gallons to liters
+                "unit_id": unit_id,
+                "capacity_gallons": fuel_capacity,
+                "capacity_liters": fuel_capacity * 3.78541,  # Convert gallons to liters
             }
 
         cursor.close()
         conn.close()
 
-        logger.info(f"✅ Loaded configuration for {len(trucks)} trucks from units_map table")
+        logger.info(
+            f"✅ Loaded configuration for {len(trucks)} trucks from units_map table"
+        )
         return trucks
 
     except Exception as e:

@@ -57,6 +57,12 @@ from alert_service import (
     send_sensor_issue_alert,
 )
 
+# 🆕 v3.12.28: Import DTC analyzer for diagnostic code alerts
+from dtc_analyzer import process_dtc_from_sensor_data, DTCSeverity
+
+# 🆕 v3.12.28: Import terrain factor for altitude-based consumption adjustment
+from terrain_factor import get_terrain_fuel_factor
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1037,6 +1043,21 @@ def process_truck(
     consumption_lph = calculate_consumption(
         speed, rpm, fuel_rate, total_fuel_used, estimator, dt_hours, truck_status
     )
+    
+    # 🆕 v3.12.28: Apply terrain factor to adjust consumption for grade
+    # Only apply when moving and we have altitude data
+    terrain_factor = 1.0
+    if truck_status == "MOVING" and altitude is not None:
+        terrain_factor = get_terrain_fuel_factor(
+            truck_id=truck_id,
+            altitude=altitude,
+            latitude=sensor_data.get("latitude"),
+            longitude=sensor_data.get("longitude"),
+            speed=speed
+        )
+        if consumption_lph is not None:
+            consumption_lph = consumption_lph * terrain_factor
+    
     # 🔧 FIX v3.12.1: Use 'is not None' instead of truthy check
     # 0.0 is a valid consumption value, shouldn't become None
     consumption_gph = consumption_lph / 3.78541 if consumption_lph is not None else None
@@ -1281,6 +1302,8 @@ def process_truck(
         "intake_air_temp_f": intake_air_temp,
         # 🆕 v5.3.3: Ambient temperature for weather-adjusted alerts
         "ambient_temp_f": ambient_temp,
+        # 🆕 v3.12.28: Terrain factor for grade-adjusted consumption
+        "terrain_factor": round(terrain_factor, 3),
     }
 
 
@@ -1474,7 +1497,30 @@ def sync_cycle(
                 "oil_temp": truck_data.oil_temp,
                 "def_level": truck_data.def_level,
                 "intake_air_temp": truck_data.intake_air_temp,
+                # 🆕 v3.12.28: New sensors for DTC, GPS quality, idle validation
+                "dtc": truck_data.dtc,
+                "idle_hours": truck_data.idle_hours,
+                "sats": truck_data.sats,
+                "pwr_int": truck_data.pwr_int,
+                "course": truck_data.course,
             }
+
+            # 🆕 v3.12.28: Process DTC codes and generate alerts
+            if truck_data.dtc:
+                try:
+                    dtc_alerts = process_dtc_from_sensor_data(
+                        truck_id=truck_id,
+                        dtc_value=truck_data.dtc,
+                        timestamp=truck_data.timestamp
+                    )
+                    for alert in dtc_alerts:
+                        if alert.severity == DTCSeverity.CRITICAL:
+                            logger.warning(f"🚨 CRITICAL DTC: {alert.message}")
+                            # TODO: Send notification via alert_service
+                        elif alert.severity == DTCSeverity.WARNING:
+                            logger.info(f"⚠️ DTC Warning: {truck_id} - {alert.codes[0].code}")
+                except Exception as dtc_error:
+                    logger.debug(f"DTC processing error for {truck_id}: {dtc_error}")
 
             # Full processing with Kalman
             metrics = process_truck(
