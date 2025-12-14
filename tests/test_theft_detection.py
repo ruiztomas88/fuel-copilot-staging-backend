@@ -1,10 +1,11 @@
 """
-Test suite for enhanced fuel theft detection system (v5.8.0)
+Test suite for enhanced fuel theft detection system (v5.8.1)
 
 Tests cover:
 - Basic theft detection scenarios
 - Time-of-day factor adjustments
 - Sensor health factor adjustments
+- Geofence / safe-zone detection
 - Combined multi-factor analysis
 - Edge cases and boundary conditions
 """
@@ -18,6 +19,8 @@ from wialon_sync_enhanced import (
     detect_fuel_theft,
     get_time_of_day_factor,
     get_sensor_health_factor,
+    check_safe_zone,
+    SAFE_ZONES,
 )
 
 
@@ -186,6 +189,87 @@ class TestSensorHealthFactor:
         assert factor == 1.0
         assert status == "HEALTHY"
         assert issues == []
+
+
+class TestCheckSafeZone:
+    """Tests for check_safe_zone function (v5.8.1 Geofence)."""
+
+    def test_inside_miami_depot(self):
+        """Point at Miami depot center should be in safe zone."""
+        in_zone, factor, info = check_safe_zone(25.7617, -80.1918)
+
+        assert in_zone == True
+        assert factor == 0.3  # Miami depot trust level
+        assert info is not None
+        assert "Miami" in info["zone_name"]
+        assert info["distance_miles"] < 0.1  # Very close to center
+
+    def test_near_miami_depot_edge(self):
+        """Point just inside depot radius should be in safe zone."""
+        # 0.3 miles from Miami depot (within 0.5 mile radius)
+        in_zone, factor, info = check_safe_zone(25.7660, -80.1918)
+
+        assert in_zone == True
+        assert factor == 0.3
+
+    def test_outside_all_safe_zones(self):
+        """Point far from all depots should not be in safe zone."""
+        # Random location in middle of nowhere
+        in_zone, factor, info = check_safe_zone(27.0000, -81.0000)
+
+        assert in_zone == False
+        assert factor == 1.0  # No adjustment
+        assert info is None
+
+    def test_maintenance_yard(self):
+        """Point at maintenance yard should have very low trust factor."""
+        in_zone, factor, info = check_safe_zone(25.7900, -80.2100)
+
+        assert in_zone == True
+        assert factor == 0.2  # Maintenance yard is very trusted
+        assert "Maintenance" in info["zone_name"]
+
+    def test_orlando_depot(self):
+        """Point at Orlando depot should be in safe zone."""
+        in_zone, factor, info = check_safe_zone(28.5383, -81.3792)
+
+        assert in_zone == True
+        assert factor == 0.3
+        assert "Orlando" in info["zone_name"]
+
+    def test_none_coordinates(self):
+        """None coordinates should return not in zone."""
+        in_zone, factor, info = check_safe_zone(None, None)
+
+        assert in_zone == False
+        assert factor == 1.0
+        assert info is None
+
+    def test_custom_zones(self):
+        """Custom zones dict should override defaults."""
+        custom_zones = {
+            "CUSTOM_ZONE": {
+                "name": "Custom Test Zone",
+                "type": "CIRCLE",
+                "lat": 30.0000,
+                "lon": -80.0000,
+                "radius_miles": 1.0,
+                "trust_level": 0.5,
+            }
+        }
+
+        # Inside custom zone
+        in_zone, factor, info = check_safe_zone(30.0000, -80.0000, zones=custom_zones)
+
+        assert in_zone == True
+        assert factor == 0.5
+        assert info["zone_name"] == "Custom Test Zone"
+
+    def test_default_zones_exist(self):
+        """Verify SAFE_ZONES configuration has expected zones."""
+        assert "DEPOT_MIAMI" in SAFE_ZONES
+        assert "DEPOT_ORLANDO" in SAFE_ZONES
+        assert "MAINTENANCE_YARD" in SAFE_ZONES
 
 
 class TestDetectFuelTheft:
@@ -366,7 +450,7 @@ class TestDetectFuelTheft:
 
     def test_low_voltage_reduces_confidence_below_threshold(self):
         """Low battery voltage should reduce confidence below reporting threshold.
-        
+
         This is intentional behavior: when sensors are failing, we DON'T want
         to report theft because it's likely a sensor issue, not actual theft.
         """
@@ -396,7 +480,7 @@ class TestDetectFuelTheft:
             tank_capacity_gal=200.0,
             voltage=11.0,  # Critical voltage
         )
-        
+
         # Even with severe drop, low voltage reduces confidence
         if result is not None:
             assert result["sensor_status"] == "FAILING"
@@ -404,7 +488,7 @@ class TestDetectFuelTheft:
 
     def test_poor_gps_reduces_confidence_below_threshold(self):
         """Poor GPS should reduce theft confidence below reporting threshold.
-        
+
         This prevents false positives when GPS issues cause erratic readings.
         """
         result = detect_fuel_theft(
@@ -466,7 +550,7 @@ class TestDetectFuelTheft:
 
     def test_suspicious_drop_but_sensor_failing(self):
         """Large drop but failing sensors = NO THEFT REPORTED.
-        
+
         This is intentional: when sensors are failing, we don't want
         to generate false theft alerts. The drop is likely caused by
         sensor malfunction, not actual fuel theft.
@@ -482,7 +566,7 @@ class TestDetectFuelTheft:
             sats=1,  # Almost no GPS: 0.4 factor
         )
 
-        # Base 0.9 * 0.3 (voltage) * 0.4 (GPS) = 0.108 
+        # Base 0.9 * 0.3 (voltage) * 0.4 (GPS) = 0.108
         # But min factor is 0.3, so: 0.9 * 0.3 = 0.27 < 0.5
         # Result should be None - no theft reported
         assert result is None
@@ -506,11 +590,12 @@ class TestDetectFuelTheft:
         assert result is None
 
     # =========================================================================
-    # GEOFENCE PLACEHOLDER
+    # GEOFENCE / SAFE-ZONE TESTS
     # =========================================================================
 
     def test_geofence_info_captured(self):
-        """GPS coordinates should be captured for future geofence use."""
+        """GPS coordinates should be captured with geofence info (outside safe zone)."""
+        # Use coordinates outside any safe zone to test geofence capture
         result = detect_fuel_theft(
             sensor_pct=75.0,
             estimated_pct=88.0,
@@ -518,15 +603,75 @@ class TestDetectFuelTheft:
             truck_status="STOPPED",
             time_gap_hours=2.0,
             tank_capacity_gal=200.0,
-            latitude=25.7617,
-            longitude=-80.1918,
+            latitude=26.5000,  # Location between Miami and Orlando
+            longitude=-80.5000,
         )
 
         assert result is not None
         assert result["geofence"] is not None
-        assert result["geofence"]["lat"] == 25.7617
-        assert result["geofence"]["lon"] == -80.1918
-        assert result["geofence"]["in_safe_zone"] is None  # Placeholder
+        assert result["geofence"]["lat"] == 26.5000
+        assert result["geofence"]["lon"] == -80.5000
+        # Should NOT be in safe zone
+        assert result["geofence"]["in_safe_zone"] == False
+        assert result["geofence"]["zone"] is None
+
+    def test_geofence_info_in_safe_zone(self):
+        """GPS coordinates in safe zone should show zone details but reduce confidence."""
+        # Use Miami depot - result should be None because confidence drops below threshold
+        result = detect_fuel_theft(
+            sensor_pct=75.0,
+            estimated_pct=88.0,
+            last_sensor_pct=90.0,  # 15% drop
+            truck_status="STOPPED",
+            time_gap_hours=2.0,
+            tank_capacity_gal=200.0,
+            latitude=25.7617,  # Miami depot center
+            longitude=-80.1918,
+        )
+
+        # Base 0.9 * 0.3 (safe zone) = 0.27 < 0.5 threshold
+        # Result should be None - no theft reported (trusted zone)
+        assert result is None
+
+    def test_safe_zone_reduces_confidence(self):
+        """Drop in a safe zone should significantly reduce theft confidence."""
+        # Miami depot coordinates (safe zone)
+        result = detect_fuel_theft(
+            sensor_pct=75.0,
+            estimated_pct=88.0,
+            last_sensor_pct=90.0,  # 15% drop
+            truck_status="STOPPED",
+            time_gap_hours=2.0,
+            tank_capacity_gal=200.0,
+            latitude=25.7617,  # Miami depot center
+            longitude=-80.1918,
+        )
+
+        # Base 0.9 * 0.3 (safe zone trust) = 0.27 < 0.5 threshold
+        # So result might be None or very low confidence
+        if result is not None:
+            assert result["confidence"] < 0.5
+            assert any("SafeZone" in adj for adj in result["adjustments"])
+
+    def test_outside_safe_zone_no_reduction(self):
+        """Drop outside safe zones should have no geofence adjustment."""
+        # Random location far from any depot
+        result = detect_fuel_theft(
+            sensor_pct=75.0,
+            estimated_pct=88.0,
+            last_sensor_pct=90.0,  # 15% drop
+            truck_status="STOPPED",
+            time_gap_hours=2.0,
+            tank_capacity_gal=200.0,
+            latitude=26.5000,  # Somewhere between Miami and Orlando
+            longitude=-80.5000,
+        )
+
+        assert result is not None
+        assert result["geofence"]["in_safe_zone"] == False
+        assert result["geofence"]["zone"] is None
+        # No SafeZone adjustment
+        assert not any("SafeZone" in adj for adj in result["adjustments"])
 
     def test_no_geofence_without_coords(self):
         """No geofence info when coordinates not provided."""
@@ -650,7 +795,7 @@ class TestTheftDetectionIntegration:
 
     def test_real_world_night_theft_scenario(self):
         """Simulate realistic night theft scenario with all factors."""
-        # Saturday 3AM - truck parked at gas station
+        # Saturday 3AM - truck parked at a random location (not a safe zone)
         theft_time = datetime(2025, 1, 11, 3, 0, 0, tzinfo=timezone.utc)
 
         result = detect_fuel_theft(
@@ -664,8 +809,8 @@ class TestTheftDetectionIntegration:
             voltage=13.8,  # Good battery
             gps_quality="Good",
             sats=12,  # Strong GPS
-            latitude=25.7617,
-            longitude=-80.1918,
+            latitude=26.5000,  # Random location, NOT in safe zone
+            longitude=-80.5000,
         )
 
         assert result is not None

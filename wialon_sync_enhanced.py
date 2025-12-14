@@ -78,7 +78,13 @@ from voltage_monitor import (
 from gps_quality import (
     analyze_gps_quality,
     analyze_fleet_gps_quality,
-    GPSQuality,
+)
+
+# 🆕 v5.8.1: Import geofence functions for safe-zone theft detection
+from database_mysql import (
+    haversine_distance,
+    check_geofence_status,
+    GEOFENCE_ZONES,
 )
 
 # Configure logging
@@ -671,6 +677,103 @@ def get_sensor_health_factor(
     return (max(0.3, factor), status, issues)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.8.1: GEOFENCE SAFE-ZONE DETECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Safe zones configuration - drops inside these zones are less suspicious
+# Includes gas stations, depots, maintenance yards, etc.
+SAFE_ZONES = {
+    "DEPOT_MIAMI": {
+        "name": "Miami Main Depot",
+        "type": "CIRCLE",
+        "lat": 25.7617,
+        "lon": -80.1918,
+        "radius_miles": 0.5,
+        "trust_level": 0.3,  # Factor applied when in zone (0.3 = 70% reduction)
+    },
+    "GAS_STATION_SHELL_1": {
+        "name": "Shell Gas Station I-95",
+        "type": "CIRCLE",
+        "lat": 25.8500,
+        "lon": -80.2000,
+        "radius_miles": 0.2,
+        "trust_level": 0.4,  # Gas stations are trusted for refuels, less for drops
+    },
+    "DEPOT_ORLANDO": {
+        "name": "Orlando Distribution Center",
+        "type": "CIRCLE",
+        "lat": 28.5383,
+        "lon": -81.3792,
+        "radius_miles": 0.5,
+        "trust_level": 0.3,
+    },
+    "DEPOT_JACKSONVILLE": {
+        "name": "Jacksonville Hub",
+        "type": "CIRCLE",
+        "lat": 30.3322,
+        "lon": -81.6557,
+        "radius_miles": 0.5,
+        "trust_level": 0.3,
+    },
+    "MAINTENANCE_YARD": {
+        "name": "Maintenance Yard",
+        "type": "CIRCLE",
+        "lat": 25.7900,
+        "lon": -80.2100,
+        "radius_miles": 0.3,
+        "trust_level": 0.2,  # Very trusted - fuel transfers happen here
+    },
+}
+
+
+def check_safe_zone(
+    latitude: float, longitude: float, zones: Optional[Dict] = None
+) -> Tuple[bool, float, Optional[Dict]]:
+    """
+    🆕 v5.8.1: Check if coordinates are within a safe zone.
+
+    Safe zones are trusted locations where fuel drops are less suspicious:
+    - Depots (authorized fuel transfers)
+    - Gas stations (authorized refueling, tank calibration)
+    - Maintenance yards (authorized maintenance)
+
+    Args:
+        latitude: GPS latitude
+        longitude: GPS longitude
+        zones: Optional custom zones dict (uses SAFE_ZONES if not provided)
+
+    Returns:
+        Tuple of:
+        - in_safe_zone: True if in any safe zone
+        - trust_factor: Multiplier for theft confidence (lower = more trusted)
+        - zone_info: Details of the zone if inside one, None otherwise
+    """
+    if zones is None:
+        zones = SAFE_ZONES
+
+    if latitude is None or longitude is None:
+        return (False, 1.0, None)
+
+    for zone_id, zone in zones.items():
+        if zone.get("type") == "CIRCLE":
+            distance = haversine_distance(latitude, longitude, zone["lat"], zone["lon"])
+
+            if distance <= zone.get("radius_miles", 0.5):
+                return (
+                    True,
+                    zone.get("trust_level", 0.5),
+                    {
+                        "zone_id": zone_id,
+                        "zone_name": zone["name"],
+                        "distance_miles": round(distance, 3),
+                        "trust_level": zone.get("trust_level", 0.5),
+                    },
+                )
+
+    return (False, 1.0, None)
+
+
 def detect_fuel_theft(
     sensor_pct: float,
     estimated_pct: float,
@@ -803,12 +906,31 @@ def detect_fuel_theft(
         for issue in sensor_issues:
             reasons.append(f"⚠️ {issue}")
 
-    # 7. GEOFENCE FACTOR (placeholder for future)
-    # TODO: Implement geofence check when safe zones are defined
+    # 7. GEOFENCE / SAFE-ZONE FACTOR
+    # 🆕 v5.8.1: Check if truck is in a trusted safe zone
     geofence_info = None
     if latitude is not None and longitude is not None:
-        # Future: check_geofence(latitude, longitude)
-        geofence_info = {"lat": latitude, "lon": longitude, "in_safe_zone": None}
+        in_safe_zone, safe_zone_factor, zone_details = check_safe_zone(
+            latitude, longitude
+        )
+
+        geofence_info = {
+            "lat": latitude,
+            "lon": longitude,
+            "in_safe_zone": in_safe_zone,
+            "zone": zone_details,
+        }
+
+        if in_safe_zone and zone_details:
+            old_conf = final_confidence
+            final_confidence = final_confidence * safe_zone_factor
+            adjustments.append(
+                f"SafeZone ({zone_details['zone_name']}): {(safe_zone_factor-1)*100:.0f}%"
+            )
+            reasons.append(
+                f"📍 In trusted zone: {zone_details['zone_name']} "
+                f"({zone_details['distance_miles']:.2f} mi from center)"
+            )
 
     # Final threshold check
     if final_confidence >= 0.5:
