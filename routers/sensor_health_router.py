@@ -113,16 +113,28 @@ class VoltageDataPoint(BaseModel):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# IDLE VALIDATION ENDPOINTS
+# CACHING FOR EXPENSIVE OPERATIONS
 # ═══════════════════════════════════════════════════════════════════════════════
-
 
 # 🆕 v5.7.6: In-memory cache for expensive operations
 # 🔧 v5.7.8: Fixed BUG #13 - timestamp per cache key instead of global
-_idle_validation_cache: Dict[str, Dict[str, Any]] = (
-    {}
-)  # {key: {"data": ..., "timestamp": ...}}
+# 🚀 v5.7.11: Extended caching to days-to-failure endpoint
+_idle_validation_cache: Dict[str, Dict[str, Any]] = {}
+_days_to_failure_cache: Dict[str, Dict[str, Any]] = {}
+_sensor_health_cache: Dict[str, Dict[str, Any]] = {}
+_gps_quality_cache: Dict[str, Dict[str, Any]] = {}
+_voltage_summary_cache: Dict[str, Dict[str, Any]] = {}
+
 IDLE_CACHE_TTL_SECONDS = 60  # Cache for 60 seconds
+DAYS_TO_FAILURE_CACHE_TTL = 120  # 2 minutes - this is the slowest endpoint
+SENSOR_HEALTH_CACHE_TTL = 60  # 1 minute
+GPS_QUALITY_CACHE_TTL = 60  # 1 minute
+VOLTAGE_SUMMARY_CACHE_TTL = 60  # 1 minute
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IDLE VALIDATION ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def _get_expected_range(idle_mode: str) -> ExpectedRange:
@@ -311,6 +323,7 @@ async def get_idle_validation_status(
 async def get_sensor_health_summary():
     """
     🆕 v5.7.6: Get fleet-wide sensor health summary.
+    🚀 v5.7.11: Added caching for faster response times.
 
     Returns counts of trucks with various sensor issues:
     - GPS quality problems
@@ -318,7 +331,22 @@ async def get_sensor_health_summary():
     - Active DTCs
     - Idle calculation deviations
     """
+    global _sensor_health_cache
+
     try:
+        # Check cache first
+        cache_key = "summary"
+        now = datetime.now(timezone.utc)
+
+        if cache_key in _sensor_health_cache:
+            cache_entry = _sensor_health_cache[cache_key]
+            cache_age = (now - cache_entry["timestamp"]).total_seconds()
+            if cache_age < SENSOR_HEALTH_CACHE_TTL:
+                logger.debug(
+                    f"Cache hit for sensor health summary (age: {cache_age:.1f}s)"
+                )
+                return cache_entry["data"]
+
         trucks = db.get_all_trucks()
         total = len(trucks)
 
@@ -366,7 +394,7 @@ async def get_sensor_health_summary():
         else:
             health_score = 100.0
 
-        return SensorHealthSummary(
+        result = SensorHealthSummary(
             total_trucks=total,
             trucks_with_gps_issues=gps_issues,
             trucks_with_voltage_issues=voltage_issues,
@@ -375,6 +403,12 @@ async def get_sensor_health_summary():
             overall_health_score=round(health_score, 1),
             last_updated=datetime.now(timezone.utc).isoformat(),
         )
+
+        # Store in cache
+        _sensor_health_cache[cache_key] = {"data": result, "timestamp": now}
+        logger.debug("Cached sensor health summary")
+
+        return result
 
     except Exception as e:
         logger.error(f"Error getting sensor health summary: {e}")
@@ -485,11 +519,25 @@ async def get_voltage_history(
 async def get_gps_quality_overview():
     """
     🆕 v5.7.6: Get GPS quality overview for all trucks.
+    🚀 v5.7.11: Added caching for faster response times.
 
     Returns satellite counts and quality levels.
     Useful for identifying trucks with GPS antenna issues.
     """
+    global _gps_quality_cache
+
     try:
+        # Check cache first
+        cache_key = "gps_quality"
+        now = datetime.now(timezone.utc)
+
+        if cache_key in _gps_quality_cache:
+            cache_entry = _gps_quality_cache[cache_key]
+            cache_age = (now - cache_entry["timestamp"]).total_seconds()
+            if cache_age < GPS_QUALITY_CACHE_TTL:
+                logger.debug(f"Cache hit for GPS quality (age: {cache_age:.1f}s)")
+                return cache_entry["data"]
+
         trucks = db.get_all_trucks()
         results = []
 
@@ -556,7 +604,8 @@ async def get_gps_quality_overview():
                             truck_id=tid,
                             satellites=sats,
                             quality_level=quality,
-                            estimated_accuracy_m=accuracy,
+                            estimated_accuracy_m=accuracy
+                            or 0.0,  # Default to 0.0 if None
                         )
                         logger.info(f"📡 GPS quality alert sent for {tid}: {quality}")
                     except Exception as alert_err:
@@ -566,7 +615,7 @@ async def get_gps_quality_overview():
                 logger.debug(f"Error checking GPS for {tid}: {e}")
                 continue
 
-        return {
+        result = {
             "trucks": results,
             "summary": {
                 "total": len(trucks),
@@ -575,6 +624,12 @@ async def get_gps_quality_overview():
             },
             "last_updated": datetime.now(timezone.utc).isoformat(),
         }
+
+        # Store in cache
+        _gps_quality_cache[cache_key] = {"data": result, "timestamp": now}
+        logger.debug("Cached GPS quality overview")
+
+        return result
 
     except Exception as e:
         logger.error(f"Error getting GPS quality overview: {e}")
@@ -590,11 +645,25 @@ async def get_gps_quality_overview():
 async def get_voltage_summary():
     """
     🆕 v5.7.6: Get voltage summary for all trucks in the fleet.
+    🚀 v5.7.11: Added caching for faster response times.
 
     Returns current voltage status and trends for each truck.
     Useful for identifying battery/alternator issues fleet-wide.
     """
+    global _voltage_summary_cache
+
     try:
+        # Check cache first
+        cache_key = "voltage_summary"
+        now = datetime.now(timezone.utc)
+
+        if cache_key in _voltage_summary_cache:
+            cache_entry = _voltage_summary_cache[cache_key]
+            cache_age = (now - cache_entry["timestamp"]).total_seconds()
+            if cache_age < VOLTAGE_SUMMARY_CACHE_TTL:
+                logger.debug(f"Cache hit for voltage summary (age: {cache_age:.1f}s)")
+                return cache_entry["data"]
+
         trucks = db.get_all_trucks()
         results = []
 
@@ -653,7 +722,7 @@ async def get_voltage_summary():
         voltages = [r["voltage"] for r in results if r.get("voltage")]
         avg_voltage = sum(voltages) / len(voltages) if voltages else 0
 
-        return {
+        result = {
             "trucks": results,
             "summary": {
                 "total": len(trucks),
@@ -666,6 +735,12 @@ async def get_voltage_summary():
             },
             "last_updated": datetime.now(timezone.utc).isoformat(),
         }
+
+        # Store in cache
+        _voltage_summary_cache[cache_key] = {"data": result, "timestamp": now}
+        logger.debug("Cached voltage summary")
+
+        return result
 
     except Exception as e:
         logger.error(f"Error getting voltage summary: {e}")
@@ -863,6 +938,84 @@ async def _get_sensor_history(
         return []
 
 
+# 🚀 v5.7.11: Batch query for all sensor histories at once - MAJOR PERFORMANCE IMPROVEMENT
+async def _get_all_sensor_histories_batch(
+    truck_ids: List[str], days: int = 30
+) -> Dict[str, Dict[str, List[float]]]:
+    """
+    Get daily aggregated sensor history for ALL trucks in a single query.
+    Returns: {truck_id: {sensor_field: [values]}}
+    """
+    try:
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+
+        engine = get_sqlalchemy_engine()
+
+        # Define sensor fields to fetch
+        sensor_fields = [
+            "battery_voltage",
+            "coolant_temp_f",
+            "oil_pressure_psi",
+            "def_level_pct",
+            "dpf_soot_pct",
+        ]
+
+        result_dict: Dict[str, Dict[str, List[float]]] = {}
+
+        # Initialize empty structure
+        for tid in truck_ids:
+            result_dict[tid] = {field: [] for field in sensor_fields}
+
+        with engine.connect() as conn:
+            # Build a single query that gets daily averages for all sensors for all trucks
+            placeholders = ", ".join([f":truck_{i}" for i in range(len(truck_ids))])
+            params: Dict[str, Any] = {
+                f"truck_{i}": tid for i, tid in enumerate(truck_ids)
+            }
+            params["days"] = days
+
+            query = text(
+                f"""
+                SELECT 
+                    truck_id,
+                    DATE(timestamp_utc) as day,
+                    AVG(battery_voltage) as avg_battery_voltage,
+                    AVG(coolant_temp_f) as avg_coolant_temp_f,
+                    AVG(oil_pressure_psi) as avg_oil_pressure_psi,
+                    AVG(def_level_pct) as avg_def_level_pct,
+                    AVG(dpf_soot_pct) as avg_dpf_soot_pct
+                FROM fuel_metrics
+                WHERE truck_id IN ({placeholders})
+                AND timestamp_utc > DATE_SUB(NOW(), INTERVAL :days DAY)
+                GROUP BY truck_id, DATE(timestamp_utc)
+                ORDER BY truck_id, day ASC
+            """
+            )
+
+            rows = conn.execute(query, params).fetchall()
+
+            # Process results
+            for row in rows:
+                tid = row.truck_id
+                if tid not in result_dict:
+                    continue
+
+                for field in sensor_fields:
+                    value = getattr(row, f"avg_{field}", None)
+                    if value is not None:
+                        result_dict[tid][field].append(float(value))
+
+        logger.debug(
+            f"Batch fetched sensor histories for {len(truck_ids)} trucks in single query"
+        )
+        return result_dict
+
+    except Exception as e:
+        logger.error(f"Error in batch sensor history query: {e}")
+        return {}
+
+
 @router.get("/days-to-failure/{truck_id}")
 async def get_truck_maintenance_forecast(
     truck_id: str,
@@ -1026,6 +1179,7 @@ async def get_fleet_maintenance_dashboard(
 ):
     """
     🆕 v5.7.9: Get fleet-wide maintenance dashboard with days-to-failure predictions.
+    🚀 v5.7.11: MAJOR OPTIMIZATION - batch queries + caching for 10x faster response.
 
     Provides an overview of all trucks with predicted maintenance needs.
 
@@ -1036,12 +1190,25 @@ async def get_fleet_maintenance_dashboard(
     Returns:
         FleetMaintenanceDashboard with all truck forecasts and summary statistics
     """
+    global _days_to_failure_cache
+
     if not PREDICTION_AVAILABLE:
         raise HTTPException(
             status_code=503, detail="Maintenance prediction module not available"
         )
 
     try:
+        # 🚀 v5.7.11: Check cache first
+        cache_key = f"dtf:{days_back}:{only_attention}"
+        now = datetime.now(timezone.utc)
+
+        if cache_key in _days_to_failure_cache:
+            cache_entry = _days_to_failure_cache[cache_key]
+            cache_age = (now - cache_entry["timestamp"]).total_seconds()
+            if cache_age < DAYS_TO_FAILURE_CACHE_TTL:
+                logger.debug(f"Cache hit for days-to-failure (age: {cache_age:.1f}s)")
+                return cache_entry["data"]
+
         from config import get_allowed_trucks
 
         allowed_trucks = get_allowed_trucks()
@@ -1056,6 +1223,18 @@ async def get_fleet_maintenance_dashboard(
                 summary_by_sensor={},
                 last_updated=datetime.now(timezone.utc).isoformat(),
             )
+
+        # 🚀 v5.7.11: Limit trucks and use batch query
+        # Convert set to list if needed
+        trucks_list = (
+            list(allowed_trucks) if isinstance(allowed_trucks, set) else allowed_trucks
+        )
+        trucks_to_process = trucks_list[:50]
+
+        # Get ALL sensor histories in ONE batch query (was 50*5=250 queries before!)
+        all_histories = await _get_all_sensor_histories_batch(
+            trucks_to_process, days_back
+        )
 
         forecasts = []
         critical_count = 0
@@ -1074,38 +1253,132 @@ async def get_fleet_maintenance_dashboard(
                 "unknown": 0,
             }
 
-        for truck_id in allowed_trucks[:50]:  # Limit to 50 trucks for performance
-            try:
-                forecast = await get_truck_maintenance_forecast(truck_id, days_back)
+        urgency_order = {
+            "CRITICAL": 5,
+            "HIGH": 4,
+            "MEDIUM": 3,
+            "LOW": 2,
+            "NONE": 1,
+            "UNKNOWN": 0,
+        }
 
-                if only_attention and not forecast.needs_attention:
+        # Map of record fields to sensor names
+        field_mapping = {
+            "battery_voltage": ["battery_voltage", "voltage", "pwr_int"],
+            "coolant_temp_f": ["coolant_temp_f", "coolant_temp"],
+            "oil_pressure_psi": ["oil_pressure_psi", "oil_press"],
+            "def_level_pct": ["def_level_pct", "def_level"],
+            "dpf_soot_pct": ["dpf_soot_pct", "dpf_soot"],
+        }
+
+        for truck_id in trucks_to_process:
+            try:
+                # Get current values
+                record = db.get_truck_latest_record(truck_id)
+                if not record:
                     continue
 
+                predictions = []
+                highest_urgency = "NONE"
+
+                # Get pre-fetched histories for this truck
+                truck_histories = all_histories.get(truck_id, {})
+
+                for sensor_name, config in SENSOR_THRESHOLDS.items():
+                    # Get current value from record
+                    current_value = None
+
+                    for field in field_mapping.get(sensor_name, [sensor_name]):
+                        current_value = record.get(field)
+                        if current_value is not None:
+                            break
+
+                    if current_value is None:
+                        continue
+
+                    # Get history from batch results
+                    history = truck_histories.get(sensor_name, [])
+
+                    if len(history) < 3:
+                        predictions.append(
+                            MaintenancePrediction(
+                                sensor=sensor_name,
+                                current_value=round(float(current_value), 2),
+                                warning_threshold=config["warning"],
+                                critical_threshold=config["critical"],
+                                trend_direction="UNKNOWN",
+                                days_to_warning=None,
+                                days_to_critical=None,
+                                urgency="UNKNOWN",
+                                recommendation=f"Insufficient data ({len(history)}/3 days minimum)",
+                            )
+                        )
+                        continue
+
+                    # Run prediction
+                    prediction = predict_maintenance_timing(
+                        sensor_name=sensor_name,
+                        current_value=float(current_value),
+                        history=history,
+                        warning_threshold=config["warning"],
+                        critical_threshold=config["critical"],
+                        is_higher_worse=config["is_higher_worse"],
+                    )
+
+                    pred_model = MaintenancePrediction(
+                        sensor=sensor_name,
+                        current_value=prediction["current_value"],
+                        warning_threshold=config["warning"],
+                        critical_threshold=config["critical"],
+                        trend_direction=prediction["trend_direction"],
+                        days_to_warning=prediction["days_to_warning"],
+                        days_to_critical=prediction["days_to_critical"],
+                        urgency=prediction["urgency"],
+                        recommendation=prediction["recommendation"],
+                    )
+                    predictions.append(pred_model)
+
+                    # Track highest urgency
+                    if urgency_order.get(prediction["urgency"], 0) > urgency_order.get(
+                        highest_urgency, 0
+                    ):
+                        highest_urgency = prediction["urgency"]
+
+                needs_attention = highest_urgency in ["CRITICAL", "HIGH", "MEDIUM"]
+
+                if only_attention and not needs_attention:
+                    continue
+
+                forecast = TruckMaintenanceForecast(
+                    truck_id=truck_id,
+                    overall_urgency=highest_urgency,
+                    predictions=predictions,
+                    needs_attention=needs_attention,
+                    last_updated=now.isoformat(),
+                )
                 forecasts.append(forecast)
 
                 # Count urgencies
-                if forecast.overall_urgency == "CRITICAL":
+                if highest_urgency == "CRITICAL":
                     critical_count += 1
-                elif forecast.overall_urgency == "HIGH":
+                elif highest_urgency == "HIGH":
                     high_count += 1
-                elif forecast.overall_urgency == "MEDIUM":
+                elif highest_urgency == "MEDIUM":
                     medium_count += 1
 
                 # Update sensor summary
-                for pred in forecast.predictions:
+                for pred in predictions:
                     if pred.sensor in sensor_summary:
                         urgency_key = pred.urgency.lower()
                         if urgency_key in sensor_summary[pred.sensor]:
                             sensor_summary[pred.sensor][urgency_key] += 1
 
-            except HTTPException:
-                continue
             except Exception as e:
                 logger.debug(f"Error forecasting {truck_id}: {e}")
                 continue
 
         # Sort by urgency (critical first)
-        urgency_order = {
+        urgency_sort_order = {
             "CRITICAL": 0,
             "HIGH": 1,
             "MEDIUM": 2,
@@ -1113,9 +1386,9 @@ async def get_fleet_maintenance_dashboard(
             "NONE": 4,
             "UNKNOWN": 5,
         }
-        forecasts.sort(key=lambda f: urgency_order.get(f.overall_urgency, 99))
+        forecasts.sort(key=lambda f: urgency_sort_order.get(f.overall_urgency, 99))
 
-        return FleetMaintenanceDashboard(
+        result = FleetMaintenanceDashboard(
             total_trucks=len(allowed_trucks),
             trucks_needing_attention=critical_count + high_count + medium_count,
             critical_count=critical_count,
@@ -1123,8 +1396,14 @@ async def get_fleet_maintenance_dashboard(
             medium_count=medium_count,
             forecasts=forecasts,
             summary_by_sensor=sensor_summary,
-            last_updated=datetime.now(timezone.utc).isoformat(),
+            last_updated=now.isoformat(),
         )
+
+        # 🚀 v5.7.11: Store in cache
+        _days_to_failure_cache[cache_key] = {"data": result, "timestamp": now}
+        logger.info(f"🚀 Days-to-failure dashboard cached ({len(forecasts)} trucks)")
+
+        return result
 
     except HTTPException:
         raise
