@@ -314,17 +314,15 @@ class WialonReader:
                     return None
 
                 # Get latest timestamp (first row)
+                # 🔧 FIX v5.8.0: ALWAYS use epoch_time for timestamp calculation
+                # measure_datetime from Wialon is in EST, not UTC!
+                # Using epoch_time ensures correct UTC conversion
                 latest_epoch = results[0]["epoch_time"]
-                latest_datetime = results[0]["measure_datetime"]
 
                 # Build sensor dict
                 sensor_data = {
                     "epoch_time": latest_epoch,
-                    "timestamp": (
-                        latest_datetime.replace(tzinfo=timezone.utc)
-                        if latest_datetime
-                        else self._epoch_to_datetime_utc(latest_epoch)
-                    ),
+                    "timestamp": self._epoch_to_datetime_utc(latest_epoch),
                     "latitude": results[0].get("from_latitude"),
                     "longitude": results[0].get("from_longitude"),
                 }
@@ -332,7 +330,7 @@ class WialonReader:
                 # Extract all sensor parameters (Last Known Value strategy)
                 # 1. First pass: Get values from the latest timestamp
                 for row in results:
-                    if row["measure_datetime"] == latest_datetime:
+                    if row["epoch_time"] == latest_epoch:
                         param_name = row.get("param_name")
                         param_value = row.get("value")
 
@@ -518,17 +516,14 @@ class WialonReader:
                         continue
 
                     # Get latest timestamp for this truck
+                    # 🔧 FIX v5.8.0: ALWAYS use epoch_time for timestamp calculation
+                    # measure_datetime from Wialon is in EST, not UTC!
                     latest_epoch = rows[0]["epoch_time"]
-                    latest_datetime = rows[0]["measure_datetime"]
 
                     # Build sensor dict for this truck
                     sensor_data = {
                         "epoch_time": latest_epoch,
-                        "timestamp": (
-                            latest_datetime.replace(tzinfo=timezone.utc)
-                            if latest_datetime
-                            else self._epoch_to_datetime_utc(latest_epoch)
-                        ),
+                        "timestamp": self._epoch_to_datetime_utc(latest_epoch),
                         "latitude": rows[0].get("from_latitude"),
                         "longitude": rows[0].get("from_longitude"),
                     }
