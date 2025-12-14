@@ -89,7 +89,10 @@ def run_migration():
         new_columns = [
             ("sats", "TINYINT UNSIGNED DEFAULT NULL COMMENT 'GPS satellites count'"),
             ("pwr_int", "FLOAT DEFAULT NULL COMMENT 'Internal/battery voltage (V)'"),
-            ("terrain_factor", "FLOAT DEFAULT 1.0 COMMENT 'Terrain consumption adjustment'"),
+            (
+                "terrain_factor",
+                "FLOAT DEFAULT 1.0 COMMENT 'Terrain consumption adjustment'",
+            ),
             ("gps_quality", "VARCHAR(20) DEFAULT NULL COMMENT 'GPS quality level'"),
             ("idle_hours_ecu", "FLOAT DEFAULT NULL COMMENT 'ECU idle hours counter'"),
         ]
@@ -98,7 +101,9 @@ def run_migration():
             if column_exists(cursor, "fuel_metrics", col_name):
                 print(f"   ⏭️  Column '{col_name}' already exists, skipping")
             else:
-                cursor.execute(f"ALTER TABLE fuel_metrics ADD COLUMN {col_name} {col_def}")
+                cursor.execute(
+                    f"ALTER TABLE fuel_metrics ADD COLUMN {col_name} {col_def}"
+                )
                 print(f"   ✅ Added column '{col_name}'")
 
         # ================================================================
@@ -109,7 +114,8 @@ def run_migration():
         if table_exists(cursor, "dtc_events"):
             print("   ⏭️  Table 'dtc_events' already exists, skipping")
         else:
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE dtc_events (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY,
                     timestamp_utc DATETIME NOT NULL,
@@ -129,7 +135,8 @@ def run_migration():
                     INDEX idx_severity (severity),
                     INDEX idx_unresolved (resolved_at, truck_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
+            """
+            )
             print("   ✅ Created table 'dtc_events'")
 
         # ================================================================
@@ -140,7 +147,8 @@ def run_migration():
         if table_exists(cursor, "voltage_events"):
             print("   ⏭️  Table 'voltage_events' already exists, skipping")
         else:
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE voltage_events (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY,
                     timestamp_utc DATETIME NOT NULL,
@@ -156,7 +164,8 @@ def run_migration():
                     INDEX idx_status (status),
                     INDEX idx_unresolved (resolved_at, truck_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
+            """
+            )
             print("   ✅ Created table 'voltage_events'")
 
         # ================================================================
@@ -167,7 +176,8 @@ def run_migration():
         if table_exists(cursor, "gps_quality_events"):
             print("   ⏭️  Table 'gps_quality_events' already exists, skipping")
         else:
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE gps_quality_events (
                     id BIGINT AUTO_INCREMENT PRIMARY KEY,
                     timestamp_utc DATETIME NOT NULL,
@@ -182,7 +192,8 @@ def run_migration():
                     INDEX idx_truck_time (truck_id, timestamp_utc),
                     INDEX idx_quality (quality)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
+            """
+            )
             print("   ✅ Created table 'gps_quality_events'")
 
         # ================================================================
@@ -192,8 +203,14 @@ def run_migration():
 
         ml_indexes = [
             ("idx_mpg_analysis", "truck_id, timestamp_utc, mpg_current, speed_mph"),
-            ("idx_idle_analysis", "truck_id, timestamp_utc, idle_gph, rpm, truck_status"),
-            ("idx_drift_analysis", "truck_id, timestamp_utc, drift_pct, sensor_pct, estimated_pct"),
+            (
+                "idx_idle_analysis",
+                "truck_id, timestamp_utc, idle_gph, rpm, truck_status",
+            ),
+            (
+                "idx_drift_analysis",
+                "truck_id, timestamp_utc, drift_pct, sensor_pct, estimated_pct",
+            ),
         ]
 
         for idx_name, idx_cols in ml_indexes:
@@ -201,7 +218,9 @@ def run_migration():
                 print(f"   ⏭️  Index '{idx_name}' already exists, skipping")
             else:
                 try:
-                    cursor.execute(f"CREATE INDEX {idx_name} ON fuel_metrics ({idx_cols})")
+                    cursor.execute(
+                        f"CREATE INDEX {idx_name} ON fuel_metrics ({idx_cols})"
+                    )
                     print(f"   ✅ Created index '{idx_name}'")
                 except Exception as e:
                     print(f"   ⚠️  Could not create index '{idx_name}': {e}")

@@ -176,6 +176,8 @@ class StateManager:
         self.mpg_states: Dict[str, MPGState] = {}
         self.anchor_detectors: Dict[str, AnchorDetector] = {}
         self.last_sensor_data: Dict[str, Dict] = {}
+        # 🆕 v5.7.2: Track idle hours for ECU validation
+        self.idle_tracking: Dict[str, dict] = {}  # {truck_id: {calc_idle_hours, last_ecu_idle, last_check}}
         self._load_states()
 
     def _load_states(self):
@@ -1626,21 +1628,48 @@ def sync_cycle(
                 except Exception as gps_error:
                     logger.debug(f"GPS quality error for {truck_id}: {gps_error}")
 
-            # 🆕 v5.7.1: Validate idle calculation against ECU when data available
+            # 🆕 v5.7.2: Full idle validation against ECU
             if (
                 truck_data.idle_hours is not None
                 and truck_data.engine_hours is not None
             ):
                 try:
-                    # Note: For full validation, we'd need to track accumulated idle hours
-                    # For now, we just log ECU values for monitoring
-                    if truck_data.idle_hours > 0 and truck_data.engine_hours > 0:
-                        idle_ratio = truck_data.idle_hours / truck_data.engine_hours
-                        if idle_ratio > 0.5:  # More than 50% idle time is concerning
-                            logger.warning(
-                                f"⚠️ High idle ratio: {truck_id} - {idle_ratio*100:.1f}% idle "
-                                f"({truck_data.idle_hours:.1f}h/{truck_data.engine_hours:.1f}h)"
-                            )
+                    # Initialize tracking for this truck if needed
+                    if truck_id not in state_manager.idle_tracking:
+                        state_manager.idle_tracking[truck_id] = {
+                            "calc_idle_hours": 0.0,
+                            "last_ecu_idle": truck_data.idle_hours,
+                            "last_check": datetime.now(timezone.utc).isoformat(),
+                        }
+                    
+                    tracking = state_manager.idle_tracking[truck_id]
+                    
+                    # Get our calculated idle from this cycle (if truck was idle)
+                    # We track it after metrics processing below
+                    
+                    # Validate against ECU using the proper function
+                    validation = validate_idle_calculation(
+                        truck_id=truck_id,
+                        calculated_idle_hours=tracking["calc_idle_hours"],
+                        ecu_idle_hours=truck_data.idle_hours,
+                        ecu_engine_hours=truck_data.engine_hours,
+                        time_period_hours=24.0,  # Rolling 24h window
+                    )
+                    
+                    if validation.needs_investigation:
+                        logger.warning(
+                            f"⚠️ Idle validation issue: {validation.message} "
+                            f"(deviation: {validation.deviation_pct:.1f}%)"
+                        )
+                    elif validation.confidence == "HIGH":
+                        logger.debug(
+                            f"✅ Idle validation OK: {truck_id} - {validation.message}"
+                        )
+                    
+                    # Update ECU reference for next cycle
+                    tracking["last_ecu_idle"] = truck_data.idle_hours
+                    tracking["last_check"] = datetime.now(timezone.utc).isoformat()
+                    
                 except Exception as idle_val_error:
                     logger.debug(
                         f"Idle validation error for {truck_id}: {idle_val_error}"
@@ -1659,6 +1688,14 @@ def sync_cycle(
             inserted = save_to_fuel_metrics(local_conn, metrics)
             total_inserted += inserted
             trucks_processed += 1
+
+            # 🆕 v5.7.2: Track calculated idle hours for ECU validation
+            if metrics.get("idle_mode") != "ENGINE_OFF" and metrics.get("idle_gph"):
+                # If truck was idle this cycle, accumulate the idle time
+                # Sync interval is typically 30 seconds = 0.00833 hours
+                if truck_id in state_manager.idle_tracking:
+                    idle_hours_this_cycle = 30 / 3600  # 30 seconds in hours
+                    state_manager.idle_tracking[truck_id]["calc_idle_hours"] += idle_hours_this_cycle
 
             # Track status
             status = metrics["truck_status"]
