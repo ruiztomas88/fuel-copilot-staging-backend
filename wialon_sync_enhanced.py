@@ -26,6 +26,7 @@ import time
 import json
 import pymysql
 import yaml
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Any, List
@@ -189,6 +190,8 @@ class StateManager:
         self.idle_tracking: Dict[str, dict] = (
             {}
         )  # {truck_id: {calc_idle_hours, last_ecu_idle, last_check}}
+        # 🔧 v5.8.2: Thread safety lock for concurrent access
+        self._lock = threading.RLock()
         self._load_states()
 
     def _load_states(self):
@@ -251,80 +254,84 @@ class StateManager:
         logger.info(f"✅ Loaded estimator states for {len(self.estimators)} trucks")
 
     def get_estimator(self, truck_id: str) -> FuelEstimator:
-        """Get or create estimator for a truck"""
-        if truck_id not in self.estimators:
-            capacity_liters = get_tank_capacity_liters(truck_id)
-            self.estimators[truck_id] = FuelEstimator(
-                truck_id=truck_id,
-                capacity_liters=capacity_liters,
-                config=KALMAN_CONFIG,
-            )
-        return self.estimators[truck_id]
+        """Get or create estimator for a truck (thread-safe)"""
+        with self._lock:
+            if truck_id not in self.estimators:
+                capacity_liters = get_tank_capacity_liters(truck_id)
+                self.estimators[truck_id] = FuelEstimator(
+                    truck_id=truck_id,
+                    capacity_liters=capacity_liters,
+                    config=KALMAN_CONFIG,
+                )
+            return self.estimators[truck_id]
 
     def get_mpg_state(self, truck_id: str) -> MPGState:
-        """Get or create MPG state for a truck"""
-        if truck_id not in self.mpg_states:
-            self.mpg_states[truck_id] = MPGState()
-        return self.mpg_states[truck_id]
+        """Get or create MPG state for a truck (thread-safe)"""
+        with self._lock:
+            if truck_id not in self.mpg_states:
+                self.mpg_states[truck_id] = MPGState()
+            return self.mpg_states[truck_id]
 
     def get_anchor_detector(self, truck_id: str) -> AnchorDetector:
-        """Get or create anchor detector for a truck"""
-        if truck_id not in self.anchor_detectors:
-            self.anchor_detectors[truck_id] = AnchorDetector(KALMAN_CONFIG)
-        return self.anchor_detectors[truck_id]
+        """Get or create anchor detector for a truck (thread-safe)"""
+        with self._lock:
+            if truck_id not in self.anchor_detectors:
+                self.anchor_detectors[truck_id] = AnchorDetector(KALMAN_CONFIG)
+            return self.anchor_detectors[truck_id]
 
     def save_states(self):
-        """Persist all states to disk"""
-        # Save MPG states
-        try:
-            mpg_data = {}
-            for truck_id, state in self.mpg_states.items():
-                mpg_data[truck_id] = {
-                    "distance_accum": state.distance_accum,
-                    "fuel_accum_gal": state.fuel_accum_gal,
-                    "mpg_current": state.mpg_current,
-                    "window_count": state.window_count,
-                    "last_fuel_lvl_pct": state.last_fuel_lvl_pct,
-                    "last_odometer_mi": state.last_odometer_mi,
-                    "last_timestamp": state.last_timestamp,
-                    "fuel_source_stats": state.fuel_source_stats,
-                }
-            with open(MPG_STATES_FILE, "w") as f:
-                json.dump(mpg_data, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save MPG states: {e}")
-
-        # Save estimator states
-        for truck_id, estimator in self.estimators.items():
+        """Persist all states to disk (thread-safe)"""
+        with self._lock:
+            # Save MPG states
             try:
-                state_file = ESTIMATOR_STATES_DIR / f"{truck_id}_state.json"
-                state_data = {
-                    "truck_id": truck_id,
-                    "initialized": estimator.initialized,
-                    "level_liters": estimator.level_liters,
-                    "level_pct": estimator.level_pct,
-                    "consumption_lph": estimator.consumption_lph,
-                    "drift_pct": estimator.drift_pct,
-                    "P": estimator.P,
-                    "L": estimator.L,
-                    "P_L": estimator.P_L,
-                    "last_fuel_lvl_pct": estimator.last_fuel_lvl_pct,
-                    "last_timestamp": (
-                        estimator.last_update_time.isoformat()
-                        if estimator.last_update_time
-                        else None
-                    ),
-                    "saved_at": datetime.now(timezone.utc).isoformat(),
-                    "mpg_current": (
-                        self.mpg_states[truck_id].mpg_current
-                        if truck_id in self.mpg_states
-                        else None
-                    ),
-                }
-                with open(state_file, "w") as f:
-                    json.dump(state_data, f, indent=2)
+                mpg_data = {}
+                for truck_id, state in self.mpg_states.items():
+                    mpg_data[truck_id] = {
+                        "distance_accum": state.distance_accum,
+                        "fuel_accum_gal": state.fuel_accum_gal,
+                        "mpg_current": state.mpg_current,
+                        "window_count": state.window_count,
+                        "last_fuel_lvl_pct": state.last_fuel_lvl_pct,
+                        "last_odometer_mi": state.last_odometer_mi,
+                        "last_timestamp": state.last_timestamp,
+                        "fuel_source_stats": state.fuel_source_stats,
+                    }
+                with open(MPG_STATES_FILE, "w") as f:
+                    json.dump(mpg_data, f, indent=2)
             except Exception as e:
-                logger.error(f"Failed to save estimator state for {truck_id}: {e}")
+                logger.error(f"Failed to save MPG states: {e}")
+
+            # Save estimator states
+            for truck_id, estimator in self.estimators.items():
+                try:
+                    state_file = ESTIMATOR_STATES_DIR / f"{truck_id}_state.json"
+                    state_data = {
+                        "truck_id": truck_id,
+                        "initialized": estimator.initialized,
+                        "level_liters": estimator.level_liters,
+                        "level_pct": estimator.level_pct,
+                        "consumption_lph": estimator.consumption_lph,
+                        "drift_pct": estimator.drift_pct,
+                        "P": estimator.P,
+                        "L": estimator.L,
+                        "P_L": estimator.P_L,
+                        "last_fuel_lvl_pct": estimator.last_fuel_lvl_pct,
+                        "last_timestamp": (
+                            estimator.last_update_time.isoformat()
+                            if estimator.last_update_time
+                            else None
+                        ),
+                        "saved_at": datetime.now(timezone.utc).isoformat(),
+                        "mpg_current": (
+                            self.mpg_states[truck_id].mpg_current
+                            if truck_id in self.mpg_states
+                            else None
+                        ),
+                    }
+                    with open(state_file, "w") as f:
+                        json.dump(state_data, f, indent=2)
+                except Exception as e:
+                    logger.error(f"Failed to save estimator state for {truck_id}: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1360,6 +1367,13 @@ def process_truck(
         time_gap_hours = (timestamp - estimator.last_update_time).total_seconds() / 3600
         dt_hours = min(time_gap_hours, 1.0)  # Cap at 1 hour for predictions
 
+        # 🔧 v5.8.2: Validate out-of-order data
+        if time_gap_hours < -0.01:  # Allow small negative (clock skew)
+            logger.warning(
+                f"[{truck_id}] Out-of-order data detected: gap={time_gap_hours:.4f}h, skipping"
+            )
+            return None
+
     # Sensor percentage
     sensor_pct = fuel_lvl
 
@@ -1405,6 +1419,23 @@ def process_truck(
     # 🔧 FIX v3.12.1: Use 'is not None' instead of truthy check
     # 0.0 is a valid consumption value, shouldn't become None
     consumption_gph = consumption_lph / 3.78541 if consumption_lph is not None else None
+
+    # 🔧 v5.8.2: Update sensor quality BEFORE predict phase (not after!)
+    # This ensures the sensor_quality_factor is fresh when used in Q_L calculation
+    is_engine_running = rpm is not None and rpm > 100
+    estimator.update_sensor_quality(
+        satellites=sats,
+        voltage=pwr_int,
+        is_engine_running=is_engine_running,
+    )
+
+    # 🔧 v5.8.2: Update adaptive Q_r based on truck status BEFORE predict
+    # This adapts process noise to operational state (parked/idle/moving)
+    estimator.update_adaptive_Q_r(
+        speed=speed,
+        rpm=rpm,
+        consumption_lph=consumption_lph,
+    )
 
     # Kalman predict phase (only if reasonable time delta)
     if dt_hours > 0 and dt_hours < 1.0:
@@ -1471,14 +1502,6 @@ def process_truck(
                 gallons_added=refuel_event.get("increase_gal", 0),
             )
             reset_mpg_state(mpg_state, "REFUEL", truck_id)
-
-    # 🆕 v3.12.28: Update sensor quality before Kalman update (adaptive Q_L)
-    is_engine_running = rpm is not None and rpm > 100
-    estimator.update_sensor_quality(
-        satellites=sats,
-        voltage=pwr_int,
-        is_engine_running=is_engine_running,
-    )
 
     # Kalman update phase
     if sensor_pct is not None and not refuel_event:
@@ -1712,6 +1735,10 @@ def process_truck(
         # 🆕 v5.7.5: DTC data for diagnostic display
         "dtc": sensor_data.get("dtc"),  # Count/flag (0=none, >0=active)
         "dtc_code": sensor_data.get("dtc_code"),  # Actual codes like "100.4,157.3"
+        # 🔧 v5.8.2: Kalman confidence for debugging and ML
+        # P is covariance, lower = more confident (typical range 0.5-10)
+        "kalman_confidence": round(1.0 / (1.0 + estimator.P), 3) if estimator else None,
+        "kalman_P": round(estimator.P, 3) if estimator else None,
     }
 
 

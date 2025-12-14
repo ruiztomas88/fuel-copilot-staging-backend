@@ -432,6 +432,237 @@ def test_get_estimate_returns_all_fields():
 
 
 # ============================================================================
+# 8. DYNAMIC K CLAMP TESTS v5.8.2
+# ============================================================================
+
+
+class TestDynamicKClamp:
+    """
+    Tests for dynamic Kalman gain clamping based on uncertainty (P).
+
+    v5.8.2: K max now varies based on P:
+    - P > 5.0 (low confidence): k_max = 0.50
+    - P > 2.0 (medium confidence): k_max = 0.35
+    - P <= 2.0 (high confidence): k_max = 0.20
+    """
+
+    def test_high_uncertainty_allows_large_corrections(self):
+        """When P is high (>5), allow larger corrections (up to 0.50)"""
+        est = make_estimator(50.0)
+        # Set high P (low confidence)
+        est.P = 10.0
+
+        # Large measurement deviation
+        est.update(70.0)  # Jump from 50% to 70%
+
+        # Should allow larger correction due to high P
+        # With P=10, k_max=0.50, so correction should be substantial
+        assert est.level_pct > 55.0  # Should move significantly toward measurement
+        assert est.level_pct < 70.0  # But not all the way
+
+    def test_medium_uncertainty_limits_corrections(self):
+        """When P is medium (2-5), limit corrections to 0.35"""
+        est = make_estimator(50.0)
+        # Set medium P
+        est.P = 3.0
+
+        est.update(70.0)
+
+        # Should have moderate correction
+        assert est.level_pct > 52.0
+        assert est.level_pct < 65.0
+
+    def test_high_confidence_limits_corrections(self):
+        """When P is low (<2), limit corrections to 0.20"""
+        est = make_estimator(50.0)
+        # Set low P (high confidence)
+        est.P = 1.0
+
+        # Use smaller deviation to avoid triggering auto-resync (15% drift threshold)
+        est.update(58.0)  # 8% deviation instead of 20%
+
+        # Should have small correction due to high confidence in current state
+        # K = P / (P + R) clamped to 0.20 max
+        # Innovation = 58% - 50% = 8%
+        # Correction = K * innovation ≈ 0.20 * 8% = 1.6%
+        assert est.level_pct > 50.0  # Should move toward reading
+        assert est.level_pct < 54.0  # But limited due to high confidence
+
+    def test_k_clamp_preserves_stability(self):
+        """K clamping should prevent wild oscillations"""
+        est = make_estimator(50.0)
+        est.P = 5.0  # Medium confidence
+
+        # Simulate noisy sensor readings
+        readings = [50.0, 55.0, 48.0, 60.0, 45.0, 53.0]
+        prev_level = est.level_pct
+
+        for reading in readings:
+            est.update(reading)
+            # Level should change smoothly, not jump wildly
+            change = abs(est.level_pct - prev_level)
+            assert change < 15.0  # No single update should change more than 15%
+            prev_level = est.level_pct
+
+    def test_p_decreases_after_consistent_readings(self):
+        """P should decrease (confidence increase) after consistent readings"""
+        est = make_estimator(50.0)
+        est.P = 5.0
+
+        # Send consistent readings
+        for _ in range(5):
+            est.update(50.0)
+
+        # P should be lower (higher confidence)
+        assert est.P < 5.0
+
+
+# ============================================================================
+# 9. SENSOR QUALITY TESTS v5.8.2
+# ============================================================================
+
+
+class TestSensorQuality:
+    """Tests for sensor quality factor updates"""
+
+    def test_update_sensor_quality_returns_factor(self):
+        """update_sensor_quality returns quality factor"""
+        est = make_estimator(50.0)
+
+        factor = est.update_sensor_quality(
+            satellites=12, voltage=14.0, is_engine_running=True
+        )
+
+        # Should return a factor between 0.5 and 1.0
+        assert 0.5 <= factor <= 1.0
+
+    def test_low_satellites_affects_quality(self):
+        """Low satellite count affects sensor quality"""
+        est = make_estimator(50.0)
+
+        # Good satellites
+        factor_good = est.update_sensor_quality(satellites=12)
+
+        # Bad satellites
+        factor_bad = est.update_sensor_quality(satellites=3)
+
+        # Lower satellites should give lower or equal quality
+        assert factor_bad <= factor_good
+
+    def test_low_voltage_affects_quality(self):
+        """Low voltage affects sensor quality"""
+        est = make_estimator(50.0)
+
+        # Good voltage
+        factor_good = est.update_sensor_quality(voltage=14.0, is_engine_running=True)
+
+        # Bad voltage
+        factor_bad = est.update_sensor_quality(voltage=10.0, is_engine_running=True)
+
+        # Lower voltage should give lower quality
+        assert factor_bad <= factor_good
+
+
+# ============================================================================
+# 10. ADAPTIVE Q_R TESTS v5.8.2
+# ============================================================================
+
+
+class TestAdaptiveQr:
+    """Tests for adaptive process noise (Q_r) updates"""
+
+    def test_update_adaptive_q_r_parked(self):
+        """Parked truck gets low Q_r"""
+        est = make_estimator(50.0)
+
+        est.update_adaptive_Q_r(speed=0, rpm=0, consumption_lph=0)
+
+        # Q_r should be set (not None)
+        assert hasattr(est, "Q_r")
+        assert est.Q_r >= 0
+
+    def test_update_adaptive_q_r_moving(self):
+        """Moving truck gets appropriate Q_r"""
+        est = make_estimator(50.0)
+
+        est.update_adaptive_Q_r(speed=60, rpm=1500, consumption_lph=20)
+
+        assert hasattr(est, "Q_r")
+        assert est.Q_r >= 0
+
+    def test_update_adaptive_q_r_idle(self):
+        """Idling truck gets idle-appropriate Q_r"""
+        est = make_estimator(50.0)
+
+        est.update_adaptive_Q_r(speed=0, rpm=700, consumption_lph=2)
+
+        assert hasattr(est, "Q_r")
+        assert est.Q_r >= 0
+
+
+# ============================================================================
+# 11. REFUEL RESET TESTS v5.8.2
+# ============================================================================
+
+
+class TestRefuelReset:
+    """Tests for refuel detection reset"""
+
+    def test_apply_refuel_reset_updates_level(self):
+        """Refuel reset updates fuel level"""
+        est = make_estimator(30.0)  # Start at 30%
+
+        est.apply_refuel_reset(
+            new_fuel_pct=80.0, timestamp=datetime.now(timezone.utc), gallons_added=100
+        )
+
+        assert est.level_pct == 80.0
+        assert est.recent_refuel == True
+
+    def test_apply_refuel_reset_resets_drift(self):
+        """Refuel reset clears drift"""
+        est = make_estimator(50.0)
+        est.drift_pct = 5.0  # Simulate drift
+
+        est.apply_refuel_reset(
+            new_fuel_pct=90.0, timestamp=datetime.now(timezone.utc), gallons_added=80
+        )
+
+        assert est.drift_pct == 0.0
+        assert est.drift_warning == False
+
+
+# ============================================================================
+# 12. AUTO RESYNC TESTS v5.8.2
+# ============================================================================
+
+
+class TestAutoResync:
+    """Tests for automatic resync on extreme drift"""
+
+    def test_auto_resync_on_extreme_drift(self):
+        """Auto resync triggers on extreme drift"""
+        est = make_estimator(50.0)
+
+        # Create extreme drift by updating with very different value
+        # and checking if resync happens
+        est.update(70.0)  # 20% difference - should trigger resync
+
+        # After resync, level should be close to sensor
+        assert abs(est.level_pct - 70.0) < 2.0
+
+    def test_no_resync_on_small_drift(self):
+        """No resync on small drift"""
+        est = make_estimator(50.0)
+
+        # Small drift shouldn't trigger resync
+        est.update(51.0)  # Only 1% difference
+
+        # Level should have moved somewhat but not fully resynced
+        assert est.level_pct < 51.0  # Not fully at sensor level
+
+
+# ============================================================================
 # RUN TESTS
 # ============================================================================
 

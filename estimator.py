@@ -681,7 +681,18 @@ class FuelEstimator:
         # Kalman Gain
         R = self.Q_L
         K = self.P / (self.P + R)
-        K = min(K, 0.30)  # Clamp to prevent over-correction
+
+        # 🔧 v5.8.2: Dynamic K clamp based on uncertainty (P)
+        # Higher P = less certainty = allow more correction
+        # Lower P = high certainty = limit correction
+        # P typically ranges from 0.5 (high confidence) to 10+ (low confidence)
+        if self.P > 5.0:
+            k_max = 0.50  # Low confidence: allow larger corrections
+        elif self.P > 2.0:
+            k_max = 0.35  # Medium confidence
+        else:
+            k_max = 0.20  # High confidence: limit over-correction
+        K = min(K, k_max)
 
         # Update state
         innovation = measured_liters - self.level_liters
