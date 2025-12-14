@@ -55,6 +55,8 @@ from alert_service import (
     get_alert_manager,
     send_theft_confirmed_alert,
     send_sensor_issue_alert,
+    send_dtc_alert,
+    send_voltage_alert,
 )
 
 # 🆕 v3.12.28: Import DTC analyzer for diagnostic code alerts
@@ -177,7 +179,9 @@ class StateManager:
         self.anchor_detectors: Dict[str, AnchorDetector] = {}
         self.last_sensor_data: Dict[str, Dict] = {}
         # 🆕 v5.7.2: Track idle hours for ECU validation
-        self.idle_tracking: Dict[str, dict] = {}  # {truck_id: {calc_idle_hours, last_ecu_idle, last_check}}
+        self.idle_tracking: Dict[str, dict] = (
+            {}
+        )  # {truck_id: {calc_idle_hours, last_ecu_idle, last_check}}
         self._load_states()
 
     def _load_states(self):
@@ -1032,6 +1036,12 @@ def process_truck(
     sats = sensor_data.get("sats")  # GPS satellites count
     pwr_int = sensor_data.get("pwr_int")  # Internal voltage (battery)
 
+    # 🆕 v5.7.3: Calculate descriptive GPS quality
+    gps_quality_str = None
+    if sats is not None:
+        gps_result = analyze_gps_quality(satellites=sats, truck_id=truck_id)
+        gps_quality_str = f"{gps_result.quality.value}|sats={sats}|acc={gps_result.estimated_accuracy_m:.0f}m"
+
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
     data_age_min = (now_utc - timestamp).total_seconds() / 60.0
@@ -1347,7 +1357,7 @@ def process_truck(
         # 🆕 v5.7.1: New sensor data for ML and diagnostics
         "sats": sats,
         "pwr_int": pwr_int,
-        "gps_quality": f"sats={sats}" if sats else None,  # Basic quality indicator
+        "gps_quality": gps_quality_str,  # 🆕 v5.7.3: Descriptive format QUALITY|sats=X|acc=Ym
         "idle_hours_ecu": sensor_data.get("idle_hours"),
     }
 
@@ -1355,6 +1365,71 @@ def process_truck(
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATABASE INSERT
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+def save_dtc_event(connection, truck_id: str, alert, sensor_data: Dict) -> bool:
+    """
+    🆕 v5.7.3: Save DTC event to dtc_events table for history and ML.
+    
+    Args:
+        connection: MySQL connection
+        truck_id: Truck identifier
+        alert: DTCAlert from dtc_analyzer
+        sensor_data: Current sensor data for context
+    
+    Returns:
+        True if saved successfully
+    """
+    if not alert.codes:
+        return False
+    
+    try:
+        with connection.cursor() as cursor:
+            for code in alert.codes:
+                # Check for duplicate (same truck, code, within 5 minutes)
+                cursor.execute("""
+                    SELECT id FROM dtc_events 
+                    WHERE truck_id = %s AND dtc_code = %s 
+                    AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+                    LIMIT 1
+                """, (truck_id, code.code))
+                
+                if cursor.fetchone():
+                    logger.debug(f"Skipping duplicate DTC {code.code} for {truck_id}")
+                    continue
+                
+                cursor.execute("""
+                    INSERT INTO dtc_events 
+                    (truck_id, carrier_id, timestamp_utc, spn, fmi, dtc_code, raw_value,
+                     severity, system, description, recommended_action,
+                     latitude, longitude, speed_mph, engine_hours, odometer_mi)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    truck_id,
+                    sensor_data.get("carrier_id"),
+                    datetime.now(timezone.utc),
+                    code.spn,
+                    code.fmi,
+                    code.code,
+                    code.raw,
+                    alert.severity.value,
+                    getattr(code, 'system', 'UNKNOWN'),
+                    code.description or alert.message,
+                    getattr(code, 'recommended_action', None),
+                    sensor_data.get("lat"),
+                    sensor_data.get("lon"),
+                    sensor_data.get("speed"),
+                    sensor_data.get("engine_hours"),
+                    sensor_data.get("odometer"),
+                ))
+            
+            connection.commit()
+            logger.info(f"💾 Saved {len(alert.codes)} DTC(s) for {truck_id}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"Error saving DTC for {truck_id}: {e}")
+        return False
 
 
 def save_to_fuel_metrics(connection, metrics: Dict) -> int:
@@ -1493,6 +1568,31 @@ def get_local_connection():
     return pymysql.connect(**LOCAL_DB_CONFIG)
 
 
+# 🆕 v5.7.3: Track last reset date for idle validation
+_last_idle_reset_date: Optional[str] = None
+
+
+def _reset_idle_tracking_if_new_day(state_manager: "StateManager") -> None:
+    """
+    🆕 v5.7.3: Reset idle_tracking accumulator at midnight for accurate daily validation.
+    
+    The idle validation compares our calculated idle hours vs ECU over 24h periods.
+    Resetting daily ensures meaningful comparison windows.
+    """
+    global _last_idle_reset_date
+    
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    if _last_idle_reset_date != today:
+        if state_manager.idle_tracking:
+            truck_count = len(state_manager.idle_tracking)
+            # Reset calculated hours but keep ECU reference
+            for truck_id in state_manager.idle_tracking:
+                state_manager.idle_tracking[truck_id]["calc_idle_hours"] = 0.0
+            logger.info(f"🔄 Daily idle tracking reset for {truck_count} trucks (new day: {today})")
+        _last_idle_reset_date = today
+
+
 def sync_cycle(
     reader: WialonReader,
     local_conn,
@@ -1508,6 +1608,9 @@ def sync_cycle(
         f"🔄 ENHANCED SYNC CYCLE - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
     )
     logger.info("═" * 70)
+
+    # 🆕 v5.7.3: Daily reset of idle_tracking for accurate validation
+    _reset_idle_tracking_if_new_day(state_manager)
 
     total_inserted = 0
     trucks_processed = 0
@@ -1572,12 +1675,36 @@ def sync_cycle(
                         timestamp=truck_data.timestamp,
                     )
                     for alert in dtc_alerts:
+                        # 🆕 v5.7.3: Save DTC to database for history/ML
+                        save_dtc_event(
+                            local_conn,
+                            truck_id=truck_id,
+                            alert=alert,
+                            sensor_data=sensor_data,
+                        )
+                        
                         if alert.severity == DTCSeverity.CRITICAL:
                             logger.warning(f"🚨 CRITICAL DTC: {alert.message}")
-                            # TODO: Send notification via alert_service
+                            # 🆕 v5.7.3: Send notification via alert_service
+                            send_dtc_alert(
+                                truck_id=truck_id,
+                                dtc_code=alert.codes[0].code if alert.codes else "UNKNOWN",
+                                severity="CRITICAL",
+                                description=alert.message,
+                                system=getattr(alert.codes[0], 'system', 'UNKNOWN') if alert.codes else 'UNKNOWN',
+                                recommended_action=getattr(alert.codes[0], 'recommended_action', None) if alert.codes else None,
+                            )
                         elif alert.severity == DTCSeverity.WARNING:
                             logger.info(
                                 f"⚠️ DTC Warning: {truck_id} - {alert.codes[0].code}"
+                            )
+                            # Send email-only for warnings
+                            send_dtc_alert(
+                                truck_id=truck_id,
+                                dtc_code=alert.codes[0].code if alert.codes else "UNKNOWN",
+                                severity="WARNING",
+                                description=alert.message,
+                                system=getattr(alert.codes[0], 'system', 'UNKNOWN') if alert.codes else 'UNKNOWN',
                             )
                 except Exception as dtc_error:
                     logger.debug(f"DTC processing error for {truck_id}: {dtc_error}")
@@ -1600,10 +1727,25 @@ def sync_cycle(
                                 logger.warning(
                                     f"🔋 CRITICAL VOLTAGE: {voltage_alert.message}"
                                 )
-                                # TODO: Send notification via alert_service
+                                # 🆕 v5.7.3: Send notification via alert_service
+                                send_voltage_alert(
+                                    truck_id=truck_id,
+                                    voltage=truck_data.pwr_int,
+                                    priority_level="CRITICAL",
+                                    message=voltage_alert.message,
+                                    is_engine_running=is_running,
+                                )
                             else:
                                 logger.info(
                                     f"🔋 Voltage Warning: {truck_id} - {voltage_alert.message}"
+                                )
+                                # 🆕 v5.7.3: Send email-only for warnings
+                                send_voltage_alert(
+                                    truck_id=truck_id,
+                                    voltage=truck_data.pwr_int,
+                                    priority_level="WARNING",
+                                    message=voltage_alert.message,
+                                    is_engine_running=is_running,
                                 )
                 except Exception as volt_error:
                     logger.debug(
@@ -1641,12 +1783,12 @@ def sync_cycle(
                             "last_ecu_idle": truck_data.idle_hours,
                             "last_check": datetime.now(timezone.utc).isoformat(),
                         }
-                    
+
                     tracking = state_manager.idle_tracking[truck_id]
-                    
+
                     # Get our calculated idle from this cycle (if truck was idle)
                     # We track it after metrics processing below
-                    
+
                     # Validate against ECU using the proper function
                     validation = validate_idle_calculation(
                         truck_id=truck_id,
@@ -1655,7 +1797,7 @@ def sync_cycle(
                         ecu_engine_hours=truck_data.engine_hours,
                         time_period_hours=24.0,  # Rolling 24h window
                     )
-                    
+
                     if validation.needs_investigation:
                         logger.warning(
                             f"⚠️ Idle validation issue: {validation.message} "
@@ -1665,11 +1807,11 @@ def sync_cycle(
                         logger.debug(
                             f"✅ Idle validation OK: {truck_id} - {validation.message}"
                         )
-                    
+
                     # Update ECU reference for next cycle
                     tracking["last_ecu_idle"] = truck_data.idle_hours
                     tracking["last_check"] = datetime.now(timezone.utc).isoformat()
-                    
+
                 except Exception as idle_val_error:
                     logger.debug(
                         f"Idle validation error for {truck_id}: {idle_val_error}"
@@ -1695,7 +1837,9 @@ def sync_cycle(
                 # Sync interval is typically 30 seconds = 0.00833 hours
                 if truck_id in state_manager.idle_tracking:
                     idle_hours_this_cycle = 30 / 3600  # 30 seconds in hours
-                    state_manager.idle_tracking[truck_id]["calc_idle_hours"] += idle_hours_this_cycle
+                    state_manager.idle_tracking[truck_id][
+                        "calc_idle_hours"
+                    ] += idle_hours_this_cycle
 
             # Track status
             status = metrics["truck_status"]

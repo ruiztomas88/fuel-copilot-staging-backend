@@ -70,6 +70,8 @@ class AlertType(Enum):
     LOW_FUEL = "low_fuel"
     EFFICIENCY_DROP = "efficiency_drop"
     MAINTENANCE_DUE = "maintenance_due"
+    DTC_ALERT = "dtc_alert"  # 🆕 v5.7.3: Diagnostic trouble code
+    VOLTAGE_ALERT = "voltage_alert"  # 🆕 v5.7.3: Battery/alternator issue
 
 
 @dataclass
@@ -779,6 +781,8 @@ class AlertManager:
             AlertType.LOW_FUEL: "🔋",
             AlertType.EFFICIENCY_DROP: "📊",
             AlertType.MAINTENANCE_DUE: "🔧",
+            AlertType.DTC_ALERT: "🔧",  # 🆕 v5.7.3
+            AlertType.VOLTAGE_ALERT: "🔋",  # 🆕 v5.7.3
         }
 
         emoji = f"{priority_emoji.get(alert.priority, '📢')} {type_emoji.get(alert.alert_type, '📢')}"
@@ -1074,6 +1078,93 @@ class AlertManager:
 
         return alerts[-limit:]
 
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # 🆕 v5.7.3: DTC AND VOLTAGE ALERTS
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    def alert_dtc(
+        self,
+        truck_id: str,
+        dtc_code: str,
+        severity: str,
+        description: str,
+        system: str = "UNKNOWN",
+        recommended_action: str = None,
+    ) -> bool:
+        """
+        🆕 v5.7.3: Send DTC (Diagnostic Trouble Code) alert.
+
+        CRITICAL DTCs → SMS + Email
+        WARNING DTCs → Email only
+        """
+        if severity == "CRITICAL":
+            priority = AlertPriority.CRITICAL
+            channels = ["sms", "email"]
+            emoji = "🚨"
+        else:
+            priority = AlertPriority.HIGH
+            channels = ["email"]
+            emoji = "⚠️"
+
+        alert = Alert(
+            alert_type=AlertType.DTC_ALERT,
+            priority=priority,
+            truck_id=truck_id,
+            message=f"{emoji} ENGINE DIAGNOSTIC CODE\n"
+            f"Code: {dtc_code}\n"
+            f"System: {system}\n"
+            f"{description}",
+            details={
+                "dtc_code": dtc_code,
+                "severity": severity,
+                "system": system,
+                "description": description,
+                "action": recommended_action or "Schedule service inspection",
+            },
+        )
+        return self.send_alert(alert, channels=channels)
+
+    def alert_voltage(
+        self,
+        truck_id: str,
+        voltage: float,
+        priority_level: str,
+        message: str,
+        is_engine_running: bool = False,
+    ) -> bool:
+        """
+        🆕 v5.7.3: Send voltage alert for battery/alternator issues.
+
+        CRITICAL → SMS + Email (alternator failure likely)
+        WARNING → Email only
+        """
+        if priority_level == "CRITICAL":
+            priority = AlertPriority.CRITICAL
+            channels = ["sms", "email"]
+            emoji = "🔋🚨"
+        else:
+            priority = AlertPriority.HIGH
+            channels = ["email"]
+            emoji = "🔋⚠️"
+
+        alert = Alert(
+            alert_type=AlertType.VOLTAGE_ALERT,
+            priority=priority,
+            truck_id=truck_id,
+            message=f"{emoji} VOLTAGE ALERT\n{message}",
+            details={
+                "voltage": f"{voltage:.1f}V",
+                "engine_status": "Running" if is_engine_running else "Off",
+                "priority": priority_level,
+                "action": (
+                    "Check battery/alternator immediately"
+                    if priority_level == "CRITICAL"
+                    else "Monitor and schedule check"
+                ),
+            },
+        )
+        return self.send_alert(alert, channels=channels)
+
 
 # Global instance for easy access
 _alert_manager: AlertManager = None
@@ -1137,6 +1228,33 @@ def send_low_fuel_alert(
     """
     return get_alert_manager().alert_low_fuel(
         truck_id, current_level_pct, estimated_miles, send_sms
+    )
+
+
+def send_dtc_alert(
+    truck_id: str,
+    dtc_code: str,
+    severity: str,
+    description: str,
+    system: str = "UNKNOWN",
+    recommended_action: str = None,
+) -> bool:
+    """🆕 v5.7.3: Quick function to send DTC alert"""
+    return get_alert_manager().alert_dtc(
+        truck_id, dtc_code, severity, description, system, recommended_action
+    )
+
+
+def send_voltage_alert(
+    truck_id: str,
+    voltage: float,
+    priority_level: str,
+    message: str,
+    is_engine_running: bool = False,
+) -> bool:
+    """🆕 v5.7.3: Quick function to send voltage alert"""
+    return get_alert_manager().alert_voltage(
+        truck_id, voltage, priority_level, message, is_engine_running
     )
 
 
