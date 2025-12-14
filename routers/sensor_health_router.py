@@ -118,8 +118,10 @@ class VoltageDataPoint(BaseModel):
 
 
 # 🆕 v5.7.6: In-memory cache for expensive operations
-_idle_validation_cache: Dict[str, Any] = {}
-_idle_cache_timestamp: Optional[datetime] = None
+# 🔧 v5.7.8: Fixed BUG #13 - timestamp per cache key instead of global
+_idle_validation_cache: Dict[str, Dict[str, Any]] = (
+    {}
+)  # {key: {"data": ..., "timestamp": ...}}
 IDLE_CACHE_TTL_SECONDS = 60  # Cache for 60 seconds
 
 
@@ -169,7 +171,7 @@ async def get_idle_validation_status(
     Returns:
         List of validation results per truck
     """
-    global _idle_validation_cache, _idle_cache_timestamp
+    global _idle_validation_cache
 
     if not IDLE_VALIDATION_AVAILABLE:
         raise HTTPException(
@@ -181,13 +183,13 @@ async def get_idle_validation_status(
         cache_key = f"idle_validation:{truck_id or 'all'}:{only_issues}"
         now = datetime.now(timezone.utc)
 
-        if (
-            cache_key in _idle_validation_cache
-            and _idle_cache_timestamp
-            and (now - _idle_cache_timestamp).total_seconds() < IDLE_CACHE_TTL_SECONDS
-        ):
-            logger.debug(f"Cache hit for {cache_key}")
-            return _idle_validation_cache[cache_key]
+        # 🔧 v5.7.8: Fixed BUG #13 - check timestamp per cache key
+        if cache_key in _idle_validation_cache:
+            cache_entry = _idle_validation_cache[cache_key]
+            cache_age = (now - cache_entry["timestamp"]).total_seconds()
+            if cache_age < IDLE_CACHE_TTL_SECONDS:
+                logger.debug(f"Cache hit for {cache_key} (age: {cache_age:.1f}s)")
+                return cache_entry["data"]
 
         # Get latest truck data with idle info
         trucks = db.get_all_trucks()
@@ -289,9 +291,8 @@ async def get_idle_validation_status(
                 logger.debug(f"Error validating idle for {tid}: {e}")
                 continue
 
-        # Update cache
-        _idle_validation_cache[cache_key] = results
-        _idle_cache_timestamp = now
+        # 🔧 v5.7.8: Fixed BUG #13 - store timestamp per cache key
+        _idle_validation_cache[cache_key] = {"data": results, "timestamp": now}
         logger.debug(f"Cached {len(results)} idle validation results")
 
         return results

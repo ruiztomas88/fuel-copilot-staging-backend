@@ -422,6 +422,8 @@ class TruckMPGBaseline:
             return 1.0  # Default uncertainty
         mean = self._mpg_sum / self.sample_count
         variance = (self._mpg_squared_sum / self.sample_count) - (mean**2)
+        # 🔧 v5.7.8: Fix BUG #10 - prevent negative variance from floating point errors
+        variance = max(variance, 0.0)
         return max(variance**0.5, 0.1)  # At least 0.1 to avoid division issues
 
     def update(
