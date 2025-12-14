@@ -56,6 +56,9 @@ from .predictions_router import router as predictions_router
 # 🆕 v5.7.6: Sensor Health router
 from .sensor_health_router import router as sensor_health_router
 
+# 🆕 v5.7.6: MPG Baseline router
+from .mpg_baseline_router import router as mpg_baseline_router
+
 __all__ = [
     "ml_intelligence_router",
     "auth_router",
@@ -74,6 +77,7 @@ __all__ = [
     "export_router",
     "predictions_router",
     "sensor_health_router",  # 🆕 v5.7.6
+    "mpg_baseline_router",   # 🆕 v5.7.6
 ]
 
 
@@ -124,3 +128,6 @@ def include_all_routers(app, auth_dependency=None):
 
     # 🆕 v5.7.6: Sensor Health router
     app.include_router(sensor_health_router)  # /sensor-health/* (4 endpoints)
+    
+    # 🆕 v5.7.6: MPG Baseline router  
+    app.include_router(mpg_baseline_router)  # /mpg-baseline/* (5 endpoints)
