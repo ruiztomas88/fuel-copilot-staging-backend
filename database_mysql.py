@@ -195,6 +195,15 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.flags,
             t1.altitude_ft,
             t1.coolant_temp_f,
+            -- 🆕 v5.7.6: Diagnostic fields for Sensor Health dashboard
+            t1.battery_voltage,
+            t1.sats,
+            t1.pwr_int,
+            t1.gps_quality,
+            t1.dtc,
+            t1.dtc_code,
+            t1.terrain_factor,
+            t1.idle_hours_ecu,
             -- 🆕 v3.12.14: Consumption in LPH (GPH * 3.78541)
             ROUND(t1.consumption_gph * 3.78541, 2) as consumption_lph,
             -- 🆕 24h averages for stable metrics
