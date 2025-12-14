@@ -1,0 +1,504 @@
+"""
+═══════════════════════════════════════════════════════════════════════════════
+GPS QUALITY ANALYZER - Factor de Calidad para Kalman Filter
+═══════════════════════════════════════════════════════════════════════════════
+
+Usa el sensor `sats` (número de satélites GPS) para:
+- Detectar calidad de señal GPS
+- Ajustar Q_L (covarianza de proceso) del Kalman filter adaptivamente
+- Alertar cuando GPS es poco confiable para cálculos de distancia
+
+Principio: Menos satélites = más ruido en posición = distancia menos precisa
+           = necesitamos más suavizado (Q_L más bajo)
+
+🆕 v3.12.28: New module for Phase 2
+
+Author: Fuel Copilot Team
+Version: 1.0.0
+Date: December 2025
+═══════════════════════════════════════════════════════════════════════════════
+"""
+
+from dataclasses import dataclass
+from typing import Optional, Dict, List
+from datetime import datetime
+from enum import Enum
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class GPSQuality(Enum):
+    """Calidad de señal GPS basada en satélites"""
+
+    EXCELLENT = "EXCELLENT"  # ≥12 sats - Precisión < 1m
+    GOOD = "GOOD"  # 8-11 sats - Precisión 1-3m
+    MODERATE = "MODERATE"  # 5-7 sats - Precisión 3-10m
+    POOR = "POOR"  # 3-4 sats - Precisión 10-25m
+    CRITICAL = "CRITICAL"  # 0-2 sats - No confiable
+
+
+@dataclass
+class GPSQualityResult:
+    """Resultado del análisis de calidad GPS"""
+
+    truck_id: str
+    satellites: int
+    quality: GPSQuality
+
+    # Factor de ajuste para Kalman (multiplica Q_L base)
+    q_l_factor: float
+
+    # Información adicional
+    estimated_accuracy_m: float
+    is_reliable_for_distance: bool
+    message: str
+
+    timestamp: Optional[datetime] = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "truck_id": self.truck_id,
+            "satellites": self.satellites,
+            "quality": self.quality.value,
+            "q_l_factor": self.q_l_factor,
+            "estimated_accuracy_m": self.estimated_accuracy_m,
+            "is_reliable_for_distance": self.is_reliable_for_distance,
+            "message": self.message,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONFIGURACIÓN DE UMBRALES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class GPSThresholds:
+    """Umbrales de satélites para calidad GPS"""
+
+    excellent_min: int = 12  # ≥12 satélites
+    good_min: int = 8  # 8-11 satélites
+    moderate_min: int = 5  # 5-7 satélites
+    poor_min: int = 3  # 3-4 satélites
+    # < 3 = CRITICAL
+
+    # Factores de ajuste Q_L
+    # Menor factor = más suavizado (menos confianza en mediciones)
+    q_l_excellent: float = 1.0  # Sin ajuste
+    q_l_good: float = 0.85  # Ligero suavizado extra
+    q_l_moderate: float = 0.65  # Suavizado moderado
+    q_l_poor: float = 0.4  # Suavizado fuerte
+    q_l_critical: float = 0.2  # Suavizado máximo
+
+    # Precisión estimada (metros)
+    accuracy_excellent: float = 1.0
+    accuracy_good: float = 2.5
+    accuracy_moderate: float = 7.0
+    accuracy_poor: float = 20.0
+    accuracy_critical: float = 50.0
+
+
+DEFAULT_GPS_THRESHOLDS = GPSThresholds()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FUNCIONES PRINCIPALES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def analyze_gps_quality(
+    satellites: Optional[int],
+    truck_id: str = "UNKNOWN",
+    thresholds: GPSThresholds = DEFAULT_GPS_THRESHOLDS,
+) -> GPSQualityResult:
+    """
+    Analizar calidad GPS y calcular factor de ajuste para Kalman.
+
+    Args:
+        satellites: Número de satélites GPS visibles
+        truck_id: ID del camión
+        thresholds: Umbrales configurables
+
+    Returns:
+        GPSQualityResult con factor de ajuste y diagnóstico
+    """
+    # Default si no hay datos
+    if satellites is None or satellites < 0:
+        return GPSQualityResult(
+            truck_id=truck_id,
+            satellites=0,
+            quality=GPSQuality.CRITICAL,
+            q_l_factor=thresholds.q_l_critical,
+            estimated_accuracy_m=thresholds.accuracy_critical,
+            is_reliable_for_distance=False,
+            message="❓ Sin datos de satélites GPS",
+            timestamp=datetime.now(),
+        )
+
+    # Clasificar calidad
+    if satellites >= thresholds.excellent_min:
+        return GPSQualityResult(
+            truck_id=truck_id,
+            satellites=satellites,
+            quality=GPSQuality.EXCELLENT,
+            q_l_factor=thresholds.q_l_excellent,
+            estimated_accuracy_m=thresholds.accuracy_excellent,
+            is_reliable_for_distance=True,
+            message=f"✅ GPS Excelente ({satellites} satélites)",
+            timestamp=datetime.now(),
+        )
+
+    elif satellites >= thresholds.good_min:
+        return GPSQualityResult(
+            truck_id=truck_id,
+            satellites=satellites,
+            quality=GPSQuality.GOOD,
+            q_l_factor=thresholds.q_l_good,
+            estimated_accuracy_m=thresholds.accuracy_good,
+            is_reliable_for_distance=True,
+            message=f"✅ GPS Bueno ({satellites} satélites)",
+            timestamp=datetime.now(),
+        )
+
+    elif satellites >= thresholds.moderate_min:
+        return GPSQualityResult(
+            truck_id=truck_id,
+            satellites=satellites,
+            quality=GPSQuality.MODERATE,
+            q_l_factor=thresholds.q_l_moderate,
+            estimated_accuracy_m=thresholds.accuracy_moderate,
+            is_reliable_for_distance=True,
+            message=f"⚠️ GPS Moderado ({satellites} satélites) - Precisión reducida",
+            timestamp=datetime.now(),
+        )
+
+    elif satellites >= thresholds.poor_min:
+        return GPSQualityResult(
+            truck_id=truck_id,
+            satellites=satellites,
+            quality=GPSQuality.POOR,
+            q_l_factor=thresholds.q_l_poor,
+            estimated_accuracy_m=thresholds.accuracy_poor,
+            is_reliable_for_distance=False,
+            message=f"⚠️ GPS Pobre ({satellites} satélites) - Distancia poco confiable",
+            timestamp=datetime.now(),
+        )
+
+    else:
+        return GPSQualityResult(
+            truck_id=truck_id,
+            satellites=satellites,
+            quality=GPSQuality.CRITICAL,
+            q_l_factor=thresholds.q_l_critical,
+            estimated_accuracy_m=thresholds.accuracy_critical,
+            is_reliable_for_distance=False,
+            message=f"🚨 GPS Crítico ({satellites} satélites) - No usar para cálculos",
+            timestamp=datetime.now(),
+        )
+
+
+def calculate_adjusted_Q_L(
+    base_Q_L: float,
+    satellites: Optional[int],
+    thresholds: GPSThresholds = DEFAULT_GPS_THRESHOLDS,
+) -> float:
+    """
+    Calcular Q_L ajustado por calidad GPS.
+
+    Uso directo en el Kalman filter sin crear objeto GPSQualityResult.
+
+    Args:
+        base_Q_L: Q_L base del Kalman
+        satellites: Número de satélites
+        thresholds: Umbrales
+
+    Returns:
+        Q_L ajustado
+    """
+    if satellites is None or satellites < 0:
+        factor = thresholds.q_l_critical
+    elif satellites >= thresholds.excellent_min:
+        factor = thresholds.q_l_excellent
+    elif satellites >= thresholds.good_min:
+        factor = thresholds.q_l_good
+    elif satellites >= thresholds.moderate_min:
+        factor = thresholds.q_l_moderate
+    elif satellites >= thresholds.poor_min:
+        factor = thresholds.q_l_poor
+    else:
+        factor = thresholds.q_l_critical
+
+    return base_Q_L * factor
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTEGRACIÓN CON KALMAN FILTER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class AdaptiveQLManager:
+    """
+    Manager para Q_L adaptativo basado en calidad GPS.
+
+    Mantiene historial para suavizar cambios bruscos en Q_L.
+    """
+
+    def __init__(
+        self,
+        base_Q_L: float = 0.05,
+        smoothing_factor: float = 0.3,
+        thresholds: GPSThresholds = DEFAULT_GPS_THRESHOLDS,
+    ):
+        """
+        Args:
+            base_Q_L: Q_L base cuando GPS es excelente
+            smoothing_factor: EMA alpha para suavizar cambios (0-1)
+            thresholds: Umbrales de calidad GPS
+        """
+        self.base_Q_L = base_Q_L
+        self.smoothing_factor = smoothing_factor
+        self.thresholds = thresholds
+
+        # Estado por truck
+        self._current_Q_L: Dict[str, float] = {}
+        self._last_quality: Dict[str, GPSQuality] = {}
+
+    def get_adaptive_Q_L(
+        self,
+        truck_id: str,
+        satellites: Optional[int],
+    ) -> float:
+        """
+        Obtener Q_L adaptativo para un camión.
+
+        Usa EMA para suavizar transiciones.
+
+        Args:
+            truck_id: ID del camión
+            satellites: Número de satélites actual
+
+        Returns:
+            Q_L adaptado y suavizado
+        """
+        # Calcular Q_L objetivo basado en satélites
+        target_Q_L = calculate_adjusted_Q_L(
+            self.base_Q_L,
+            satellites,
+            self.thresholds,
+        )
+
+        # Si no hay historial, usar target directamente
+        if truck_id not in self._current_Q_L:
+            self._current_Q_L[truck_id] = target_Q_L
+            return target_Q_L
+
+        # Aplicar EMA para suavizar
+        current = self._current_Q_L[truck_id]
+        new_Q_L = (
+            self.smoothing_factor * target_Q_L + (1 - self.smoothing_factor) * current
+        )
+
+        self._current_Q_L[truck_id] = new_Q_L
+        return new_Q_L
+
+    def get_quality_change(
+        self,
+        truck_id: str,
+        satellites: Optional[int],
+    ) -> Optional[Dict]:
+        """
+        Detectar cambio significativo en calidad GPS.
+
+        Returns:
+            Dict con info del cambio si hubo uno significativo, None si no
+        """
+        result = analyze_gps_quality(
+            satellites,
+            truck_id,
+            self.thresholds,
+        )
+
+        last_quality = self._last_quality.get(truck_id)
+        self._last_quality[truck_id] = result.quality
+
+        if last_quality is None:
+            return None
+
+        if last_quality != result.quality:
+            return {
+                "truck_id": truck_id,
+                "from_quality": last_quality.value,
+                "to_quality": result.quality.value,
+                "satellites": satellites,
+                "is_degradation": _quality_order(result.quality)
+                > _quality_order(last_quality),
+            }
+
+        return None
+
+
+def _quality_order(quality: GPSQuality) -> int:
+    """Helper para comparar calidades (menor = mejor)"""
+    order = {
+        GPSQuality.EXCELLENT: 0,
+        GPSQuality.GOOD: 1,
+        GPSQuality.MODERATE: 2,
+        GPSQuality.POOR: 3,
+        GPSQuality.CRITICAL: 4,
+    }
+    return order.get(quality, 5)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BATCH ANALYSIS PARA FLOTA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def analyze_fleet_gps_quality(
+    fleet_data: List[Dict],
+) -> Dict:
+    """
+    Analizar calidad GPS de toda la flota.
+
+    Args:
+        fleet_data: Lista de dicts con {truck_id, satellites}
+
+    Returns:
+        Dict con resumen y detalle
+    """
+    results = []
+    quality_counts = {q: 0 for q in GPSQuality}
+    no_data_count = 0
+
+    for truck in fleet_data:
+        truck_id = truck.get("truck_id", "UNKNOWN")
+        satellites = truck.get("satellites") or truck.get("sats")
+
+        result = analyze_gps_quality(satellites, truck_id)
+        results.append(result)
+
+        if satellites is None:
+            no_data_count += 1
+        else:
+            quality_counts[result.quality] += 1
+
+    # Estadísticas
+    total_with_data = len(fleet_data) - no_data_count
+    reliable_count = sum(1 for r in results if r.is_reliable_for_distance)
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "summary": {
+            "total_trucks": len(fleet_data),
+            "no_data": no_data_count,
+            "by_quality": {q.value: c for q, c in quality_counts.items()},
+            "reliable_for_distance": reliable_count,
+            "unreliable_for_distance": total_with_data - reliable_count,
+        },
+        "average_satellites": (
+            sum(r.satellites for r in results if r.satellites > 0)
+            / max(1, sum(1 for r in results if r.satellites > 0))
+        ),
+        "results": [r.to_dict() for r in results],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CÓDIGO DE INTEGRACIÓN PARA estimator.py
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ESTIMATOR_INTEGRATION_CODE = """
+# En FuelEstimator.__init__, agregar:
+from gps_quality import AdaptiveQLManager
+
+class FuelEstimator:
+    def __init__(self):
+        # ... existing code ...
+        self.gps_quality_manager = AdaptiveQLManager(
+            base_Q_L=self.Q_L,  # usar Q_L existente como base
+            smoothing_factor=0.3,
+        )
+
+# En el método update() o donde se usa Q_L:
+def update(self, fuel_level, distance_delta, satellites=None, ...):
+    # Obtener Q_L adaptativo basado en GPS
+    if satellites is not None:
+        adaptive_Q_L = self.gps_quality_manager.get_adaptive_Q_L(
+            self.truck_id,
+            satellites,
+        )
+    else:
+        adaptive_Q_L = self.Q_L
+    
+    # Usar adaptive_Q_L en lugar de self.Q_L en los cálculos
+    # ...
+"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    print("=" * 70)
+    print("TEST: GPS Quality Analyzer")
+    print("=" * 70)
+
+    # Test diferentes niveles de satélites
+    test_cases = [15, 12, 10, 8, 6, 5, 4, 3, 2, 1, 0, None]
+
+    base_Q_L = 0.05
+    print(f"\nBase Q_L: {base_Q_L}")
+    print("-" * 70)
+    print(
+        f"{'Sats':>4} | {'Quality':<10} | {'Factor':>6} | {'Adj Q_L':>8} | {'Accuracy':>8} | Reliable"
+    )
+    print("-" * 70)
+
+    for sats in test_cases:
+        result = analyze_gps_quality(sats, "TEST001")
+        adjusted = calculate_adjusted_Q_L(base_Q_L, sats)
+        print(
+            f"{str(sats):>4} | "
+            f"{result.quality.value:<10} | "
+            f"{result.q_l_factor:>6.2f} | "
+            f"{adjusted:>8.4f} | "
+            f"{result.estimated_accuracy_m:>6.1f}m | "
+            f"{'Yes' if result.is_reliable_for_distance else 'No'}"
+        )
+
+    print("\n" + "=" * 70)
+    print("TEST: Adaptive Q_L Manager")
+    print("=" * 70)
+
+    manager = AdaptiveQLManager(base_Q_L=0.05, smoothing_factor=0.3)
+
+    # Simular secuencia de satélites (degradación gradual)
+    sequence = [12, 10, 8, 6, 4, 3, 2, 4, 6, 8, 10, 12]
+
+    print(f"\n{'Step':>4} | {'Sats':>4} | {'Target Q_L':>10} | {'Smoothed Q_L':>12}")
+    print("-" * 50)
+
+    for i, sats in enumerate(sequence):
+        target = calculate_adjusted_Q_L(0.05, sats)
+        smoothed = manager.get_adaptive_Q_L("TEST001", sats)
+        print(f"{i:>4} | {sats:>4} | {target:>10.5f} | {smoothed:>12.5f}")
+
+    print("\n" + "=" * 70)
+    print("TEST: Fleet Analysis")
+    print("=" * 70)
+
+    fleet = [
+        {"truck_id": "CO0681", "sats": 14},
+        {"truck_id": "PC1280", "sats": 9},
+        {"truck_id": "OG2033", "sats": 5},
+        {"truck_id": "YM6023", "sats": 3},
+        {"truck_id": "DO9356", "sats": None},
+    ]
+
+    fleet_result = analyze_fleet_gps_quality(fleet)
+    print(f"\nSummary: {fleet_result['summary']}")
+    print(f"Average satellites: {fleet_result['average_satellites']:.1f}")

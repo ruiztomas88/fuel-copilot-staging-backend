@@ -524,13 +524,14 @@ def estimate_hvac_impact(
 @dataclass
 class IdleValidationResult:
     """Result of idle calculation validation against ECU"""
-    is_valid: bool                          # True if our calculation matches ECU
-    calculated_idle_hours: float            # Our calculated idle hours
-    ecu_idle_hours: Optional[float]         # ECU reported idle hours
-    deviation_pct: Optional[float]          # % difference from ECU
-    confidence: str                         # "HIGH", "MEDIUM", "LOW"
-    message: str                            # Human-readable explanation
-    
+
+    is_valid: bool  # True if our calculation matches ECU
+    calculated_idle_hours: float  # Our calculated idle hours
+    ecu_idle_hours: Optional[float]  # ECU reported idle hours
+    deviation_pct: Optional[float]  # % difference from ECU
+    confidence: str  # "HIGH", "MEDIUM", "LOW"
+    message: str  # Human-readable explanation
+
     @property
     def needs_investigation(self) -> bool:
         """Returns True if deviation is concerning"""
@@ -549,13 +550,13 @@ def validate_idle_calculation(
 ) -> IdleValidationResult:
     """
     🆕 v3.12.28: Validate our idle calculation against ECU idle_hours sensor.
-    
+
     The ECU maintains a cumulative idle hours counter that is highly accurate.
     By comparing our calculated idle with ECU delta, we can:
     1. Detect sensor issues or calculation errors
     2. Build confidence in our idle tracking
     3. Identify trucks that need calibration
-    
+
     Args:
         truck_id: Truck identifier
         calculated_idle_hours: Our calculated idle hours for the period
@@ -563,10 +564,10 @@ def validate_idle_calculation(
         ecu_engine_hours: ECU engine_hours counter (total runtime)
         time_period_hours: Period we're validating (default 24h)
         acceptable_deviation_pct: Max acceptable difference (default 10%)
-        
+
     Returns:
         IdleValidationResult with validation status and details
-        
+
     Example:
         >>> result = validate_idle_calculation(
         ...     truck_id="CO0681",
@@ -588,13 +589,13 @@ def validate_idle_calculation(
             ecu_idle_hours=None,
             deviation_pct=None,
             confidence="LOW",
-            message=f"[{truck_id}] No ECU idle_hours available for validation"
+            message=f"[{truck_id}] No ECU idle_hours available for validation",
         )
-    
+
     # For validation, we need to track delta over time
     # This function validates against a snapshot - actual implementation
     # would need historical ECU values to compute delta
-    
+
     # Sanity check on ECU value
     if ecu_idle_hours < 0 or ecu_idle_hours > 100000:  # 100k hours = ~11 years
         return IdleValidationResult(
@@ -603,45 +604,60 @@ def validate_idle_calculation(
             ecu_idle_hours=ecu_idle_hours,
             deviation_pct=None,
             confidence="LOW",
-            message=f"[{truck_id}] ECU idle_hours value out of range: {ecu_idle_hours}"
+            message=f"[{truck_id}] ECU idle_hours value out of range: {ecu_idle_hours}",
         )
-    
+
     # Calculate idle ratio (idle_hours / engine_hours) as sanity check
     # Typical idle ratio for linehaul: 10-25%
     # High idle ratio (>40%): May indicate excessive idling or local routes
     if ecu_engine_hours is not None and ecu_engine_hours > 0:
         idle_ratio = (ecu_idle_hours / ecu_engine_hours) * 100
-        
+
         if idle_ratio < 5:
             confidence = "MEDIUM"
-            message = f"[{truck_id}] Low idle ratio ({idle_ratio:.1f}%) - efficient operation"
+            message = (
+                f"[{truck_id}] Low idle ratio ({idle_ratio:.1f}%) - efficient operation"
+            )
         elif idle_ratio > 40:
             confidence = "MEDIUM"
             message = f"[{truck_id}] High idle ratio ({idle_ratio:.1f}%) - investigate excessive idle"
         else:
             confidence = "HIGH"
             message = f"[{truck_id}] Normal idle ratio ({idle_ratio:.1f}%)"
-            
+
         # Calculate expected daily idle based on ratio
         # If we ran 10 hours today, expect ~1-2.5 hours idle
-        expected_daily_idle = (time_period_hours * 0.4 * idle_ratio / 100)  # 40% uptime assumed
-        
+        expected_daily_idle = (
+            time_period_hours * 0.4 * idle_ratio / 100
+        )  # 40% uptime assumed
+
         if calculated_idle_hours > 0:
-            deviation_pct = ((calculated_idle_hours - expected_daily_idle) / expected_daily_idle * 100) if expected_daily_idle > 0 else 0
+            deviation_pct = (
+                (
+                    (calculated_idle_hours - expected_daily_idle)
+                    / expected_daily_idle
+                    * 100
+                )
+                if expected_daily_idle > 0
+                else 0
+            )
         else:
             deviation_pct = 0.0
-            
-        is_valid = abs(deviation_pct) <= acceptable_deviation_pct or expected_daily_idle == 0
-        
+
+        is_valid = (
+            abs(deviation_pct) <= acceptable_deviation_pct or expected_daily_idle == 0
+        )
+
         return IdleValidationResult(
             is_valid=is_valid,
             calculated_idle_hours=calculated_idle_hours,
             ecu_idle_hours=ecu_idle_hours,
             deviation_pct=round(deviation_pct, 1),
             confidence=confidence,
-            message=message + f" | Calc: {calculated_idle_hours:.2f}h vs Expected: {expected_daily_idle:.2f}h"
+            message=message
+            + f" | Calc: {calculated_idle_hours:.2f}h vs Expected: {expected_daily_idle:.2f}h",
         )
-    
+
     # No engine_hours available for ratio calculation
     return IdleValidationResult(
         is_valid=True,
@@ -649,7 +665,7 @@ def validate_idle_calculation(
         ecu_idle_hours=ecu_idle_hours,
         deviation_pct=None,
         confidence="LOW",
-        message=f"[{truck_id}] ECU idle_hours={ecu_idle_hours:.1f}h (no engine_hours for ratio)"
+        message=f"[{truck_id}] ECU idle_hours={ecu_idle_hours:.1f}h (no engine_hours for ratio)",
     )
 
 
@@ -661,15 +677,15 @@ def get_idle_statistics(
 ) -> dict:
     """
     🆕 v3.12.28: Calculate idle statistics and cost impact.
-    
+
     Uses ECU counters to provide accurate lifetime and cost analysis.
-    
+
     Args:
         ecu_idle_hours: ECU cumulative idle hours
         ecu_engine_hours: ECU cumulative engine hours
         fuel_cost_per_gallon: Current fuel price
         idle_gph: Average idle consumption rate
-        
+
     Returns:
         Dict with idle statistics and cost analysis
     """
@@ -680,13 +696,15 @@ def get_idle_statistics(
             "idle_ratio_pct": None,
             "idle_fuel_gallons": None,
             "idle_fuel_cost": None,
-            "available": False
+            "available": False,
         }
-        
-    idle_ratio = (ecu_idle_hours / ecu_engine_hours * 100) if ecu_engine_hours > 0 else 0
+
+    idle_ratio = (
+        (ecu_idle_hours / ecu_engine_hours * 100) if ecu_engine_hours > 0 else 0
+    )
     idle_fuel_gal = ecu_idle_hours * idle_gph
     idle_cost = idle_fuel_gal * fuel_cost_per_gallon
-    
+
     return {
         "idle_hours": round(ecu_idle_hours, 1),
         "engine_hours": round(ecu_engine_hours, 1),
@@ -694,7 +712,7 @@ def get_idle_statistics(
         "idle_fuel_gallons": round(idle_fuel_gal, 0),
         "idle_fuel_cost": round(idle_cost, 2),
         "available": True,
-        "rating": _get_idle_rating(idle_ratio)
+        "rating": _get_idle_rating(idle_ratio),
     }
 
 
@@ -703,8 +721,8 @@ def _get_idle_rating(idle_ratio_pct: float) -> str:
     if idle_ratio_pct < 15:
         return "EXCELLENT"  # < 15% idle is very efficient
     elif idle_ratio_pct < 25:
-        return "GOOD"       # 15-25% is typical for linehaul
+        return "GOOD"  # 15-25% is typical for linehaul
     elif idle_ratio_pct < 35:
-        return "FAIR"       # 25-35% is higher than ideal
+        return "FAIR"  # 25-35% is higher than ideal
     else:
-        return "POOR"       # > 35% needs attention
+        return "POOR"  # > 35% needs attention

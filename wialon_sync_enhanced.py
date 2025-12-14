@@ -63,6 +63,21 @@ from dtc_analyzer import process_dtc_from_sensor_data, DTCSeverity
 # 🆕 v3.12.28: Import terrain factor for altitude-based consumption adjustment
 from terrain_factor import get_terrain_fuel_factor
 
+# 🆕 v3.12.28: Import voltage monitor for battery/alternator alerts
+from voltage_monitor import (
+    analyze_voltage,
+    analyze_fleet_voltage,
+    get_voltage_alert_manager,
+    VoltageStatus,
+)
+
+# 🆕 v3.12.28: Import GPS quality for Kalman adaptive Q_L
+from gps_quality import (
+    analyze_gps_quality,
+    analyze_fleet_gps_quality,
+    GPSQuality,
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1011,6 +1026,9 @@ def process_truck(
     ambient_temp = sensor_data.get("ambient_temp")  # Outside Air Temp (°F)
     # 🆕 v5.3.3: ECU idle fuel counter (most accurate idle measurement)
     total_idle_fuel = sensor_data.get("total_idle_fuel")  # Gallons (ECU idle counter)
+    # 🆕 v3.12.28: New sensors for GPS quality and voltage monitoring
+    sats = sensor_data.get("sats")  # GPS satellites count
+    pwr_int = sensor_data.get("pwr_int")  # Internal voltage (battery)
 
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
@@ -1043,7 +1061,7 @@ def process_truck(
     consumption_lph = calculate_consumption(
         speed, rpm, fuel_rate, total_fuel_used, estimator, dt_hours, truck_status
     )
-    
+
     # 🆕 v3.12.28: Apply terrain factor to adjust consumption for grade
     # Only apply when moving and we have altitude data
     terrain_factor = 1.0
@@ -1053,11 +1071,11 @@ def process_truck(
             altitude=altitude,
             latitude=sensor_data.get("latitude"),
             longitude=sensor_data.get("longitude"),
-            speed=speed
+            speed=speed,
         )
         if consumption_lph is not None:
             consumption_lph = consumption_lph * terrain_factor
-    
+
     # 🔧 FIX v3.12.1: Use 'is not None' instead of truthy check
     # 0.0 is a valid consumption value, shouldn't become None
     consumption_gph = consumption_lph / 3.78541 if consumption_lph is not None else None
@@ -1115,6 +1133,14 @@ def process_truck(
                 gallons_added=refuel_event.get("increase_gal", 0),
             )
             reset_mpg_state(mpg_state, "REFUEL", truck_id)
+
+    # 🆕 v3.12.28: Update sensor quality before Kalman update (adaptive Q_L)
+    is_engine_running = rpm is not None and rpm > 100
+    estimator.update_sensor_quality(
+        satellites=sats,
+        voltage=pwr_int,
+        is_engine_running=is_engine_running,
+    )
 
     # Kalman update phase
     if sensor_pct is not None and not refuel_event:
@@ -1511,16 +1537,64 @@ def sync_cycle(
                     dtc_alerts = process_dtc_from_sensor_data(
                         truck_id=truck_id,
                         dtc_value=truck_data.dtc,
-                        timestamp=truck_data.timestamp
+                        timestamp=truck_data.timestamp,
                     )
                     for alert in dtc_alerts:
                         if alert.severity == DTCSeverity.CRITICAL:
                             logger.warning(f"🚨 CRITICAL DTC: {alert.message}")
                             # TODO: Send notification via alert_service
                         elif alert.severity == DTCSeverity.WARNING:
-                            logger.info(f"⚠️ DTC Warning: {truck_id} - {alert.codes[0].code}")
+                            logger.info(
+                                f"⚠️ DTC Warning: {truck_id} - {alert.codes[0].code}"
+                            )
                 except Exception as dtc_error:
                     logger.debug(f"DTC processing error for {truck_id}: {dtc_error}")
+
+            # 🆕 v3.12.28: Process voltage alerts (battery/alternator)
+            if truck_data.pwr_int is not None:
+                try:
+                    is_running = (truck_data.rpm or 0) > 100
+                    voltage_alert = analyze_voltage(
+                        pwr_int=truck_data.pwr_int,
+                        rpm=truck_data.rpm,
+                        truck_id=truck_id,
+                    )
+                    # Only process non-OK alerts through the manager
+                    if voltage_alert and voltage_alert.priority != "OK":
+                        alert_mgr = get_voltage_alert_manager()
+                        should_send = alert_mgr.process_alert(voltage_alert)
+                        if should_send:
+                            if voltage_alert.priority == "CRITICAL":
+                                logger.warning(
+                                    f"🔋 CRITICAL VOLTAGE: {voltage_alert.message}"
+                                )
+                                # TODO: Send notification via alert_service
+                            else:
+                                logger.info(
+                                    f"🔋 Voltage Warning: {truck_id} - {voltage_alert.message}"
+                                )
+                except Exception as volt_error:
+                    logger.debug(
+                        f"Voltage processing error for {truck_id}: {volt_error}"
+                    )
+
+            # 🆕 v3.12.28: Log GPS quality for monitoring
+            if truck_data.sats is not None:
+                try:
+                    gps_result = analyze_gps_quality(
+                        satellites=truck_data.sats,
+                        truck_id=truck_id,
+                    )
+                    if gps_result.quality == GPSQuality.CRITICAL:
+                        logger.warning(
+                            f"📡 GPS Critical: {truck_id} - only {truck_data.sats} satellites"
+                        )
+                    elif gps_result.quality == GPSQuality.POOR:
+                        logger.debug(
+                            f"📡 GPS Poor: {truck_id} - {truck_data.sats} satellites"
+                        )
+                except Exception as gps_error:
+                    logger.debug(f"GPS quality error for {truck_id}: {gps_error}")
 
             # Full processing with Kalman
             metrics = process_truck(

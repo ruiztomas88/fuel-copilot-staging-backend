@@ -385,14 +385,14 @@ def get_mpg_status(state: MPGState, config: MPGConfig) -> dict:
 class TruckMPGBaseline:
     """
     Per-truck MPG baseline learned from historical data.
-    
+
     Instead of comparing against fleet average (5.7 MPG), each truck
     has its own baseline based on its typical performance. This accounts for:
     - Different engine configurations
     - Different route profiles (city vs highway)
     - Different cargo types (reefer vs dry van)
     - Different driver habits
-    
+
     Attributes:
         truck_id: Truck identifier
         baseline_mpg: Learned baseline for this truck
@@ -402,33 +402,36 @@ class TruckMPGBaseline:
         last_updated: Timestamp of last update
         confidence: Confidence level based on sample count
     """
+
     truck_id: str
-    baseline_mpg: float = 5.7           # Start with fleet average
+    baseline_mpg: float = 5.7  # Start with fleet average
     min_observed: float = 5.7
     max_observed: float = 5.7
     sample_count: int = 0
     last_updated: Optional[float] = None  # Epoch timestamp
-    confidence: str = "LOW"             # LOW, MEDIUM, HIGH
-    
+    confidence: str = "LOW"  # LOW, MEDIUM, HIGH
+
     # Running statistics for online mean calculation
     _mpg_sum: float = 0.0
     _mpg_squared_sum: float = 0.0
-    
+
     @property
     def std_dev(self) -> float:
         """Calculate standard deviation from running stats"""
         if self.sample_count < 2:
             return 1.0  # Default uncertainty
         mean = self._mpg_sum / self.sample_count
-        variance = (self._mpg_squared_sum / self.sample_count) - (mean ** 2)
-        return max(variance ** 0.5, 0.1)  # At least 0.1 to avoid division issues
-    
-    def update(self, mpg_value: float, timestamp: float, config: MPGConfig = MPGConfig()):
+        variance = (self._mpg_squared_sum / self.sample_count) - (mean**2)
+        return max(variance**0.5, 0.1)  # At least 0.1 to avoid division issues
+
+    def update(
+        self, mpg_value: float, timestamp: float, config: MPGConfig = MPGConfig()
+    ):
         """
         Update baseline with new MPG observation.
-        
+
         Uses exponential moving average weighted by sample count for stability.
-        
+
         Args:
             mpg_value: New MPG observation
             timestamp: Epoch timestamp of observation
@@ -436,29 +439,31 @@ class TruckMPGBaseline:
         """
         # Validate range
         if not (config.min_mpg <= mpg_value <= config.max_mpg):
-            logger.debug(f"[{self.truck_id}] MPG {mpg_value:.2f} outside valid range, skipping baseline update")
+            logger.debug(
+                f"[{self.truck_id}] MPG {mpg_value:.2f} outside valid range, skipping baseline update"
+            )
             return
-            
+
         self.sample_count += 1
         self.last_updated = timestamp
-        
+
         # Update running statistics
         self._mpg_sum += mpg_value
-        self._mpg_squared_sum += mpg_value ** 2
-        
+        self._mpg_squared_sum += mpg_value**2
+
         # Update min/max
         self.min_observed = min(self.min_observed, mpg_value)
         self.max_observed = max(self.max_observed, mpg_value)
-        
+
         # Calculate baseline using weighted EMA
         # Weight increases with sample count for stability
         if self.sample_count == 1:
             self.baseline_mpg = mpg_value
         else:
             # Adaptive alpha: starts responsive (0.3), stabilizes (0.05)
-            alpha = max(0.05, 0.3 / (self.sample_count ** 0.5))
+            alpha = max(0.05, 0.3 / (self.sample_count**0.5))
             self.baseline_mpg = alpha * mpg_value + (1 - alpha) * self.baseline_mpg
-            
+
         # Update confidence
         if self.sample_count >= 50:
             self.confidence = "HIGH"
@@ -466,14 +471,14 @@ class TruckMPGBaseline:
             self.confidence = "MEDIUM"
         else:
             self.confidence = "LOW"
-            
+
     def get_deviation(self, current_mpg: float) -> dict:
         """
         Calculate how current MPG deviates from this truck's baseline.
-        
+
         Args:
             current_mpg: Current MPG reading
-            
+
         Returns:
             Dict with deviation analysis
         """
@@ -482,12 +487,12 @@ class TruckMPGBaseline:
                 "deviation_pct": 0.0,
                 "z_score": 0.0,
                 "status": "INSUFFICIENT_DATA",
-                "message": f"Need more data ({self.sample_count}/5 samples)"
+                "message": f"Need more data ({self.sample_count}/5 samples)",
             }
-            
+
         deviation_pct = ((current_mpg - self.baseline_mpg) / self.baseline_mpg) * 100
         z_score = (current_mpg - self.baseline_mpg) / self.std_dev
-        
+
         # Determine status based on z-score
         if abs(z_score) < 1.0:
             status = "NORMAL"
@@ -497,11 +502,13 @@ class TruckMPGBaseline:
             message = "Slightly unusual" + (" (low)" if z_score < 0 else " (high)")
         elif abs(z_score) < 3.0:
             status = "ANOMALY"
-            message = "Significant deviation" + (" - investigate" if z_score < -2 else "")
+            message = "Significant deviation" + (
+                " - investigate" if z_score < -2 else ""
+            )
         else:
             status = "CRITICAL"
             message = "Extreme deviation - immediate attention needed"
-            
+
         return {
             "deviation_pct": round(deviation_pct, 1),
             "z_score": round(z_score, 2),
@@ -509,9 +516,9 @@ class TruckMPGBaseline:
             "message": message,
             "baseline_mpg": round(self.baseline_mpg, 2),
             "std_dev": round(self.std_dev, 2),
-            "confidence": self.confidence
+            "confidence": self.confidence,
         }
-        
+
     def to_dict(self) -> dict:
         """Serialize baseline for storage"""
         return {
@@ -523,9 +530,9 @@ class TruckMPGBaseline:
             "last_updated": self.last_updated,
             "confidence": self.confidence,
             "_mpg_sum": self._mpg_sum,
-            "_mpg_squared_sum": self._mpg_squared_sum
+            "_mpg_squared_sum": self._mpg_squared_sum,
         }
-        
+
     @classmethod
     def from_dict(cls, data: dict) -> "TruckMPGBaseline":
         """Deserialize baseline from storage"""
@@ -544,97 +551,100 @@ class TruckMPGBaseline:
 class TruckBaselineManager:
     """
     Manages per-truck MPG baselines for the fleet.
-    
+
     Usage:
         manager = TruckBaselineManager()
-        
+
         # Update baseline when we get a good MPG reading
         manager.update_baseline("CO0681", 5.8, timestamp)
-        
+
         # Check if current MPG is anomalous
         deviation = manager.get_deviation("CO0681", 4.2)
         if deviation["status"] == "ANOMALY":
             send_alert(...)
     """
-    
+
     def __init__(self):
         self._baselines: dict[str, TruckMPGBaseline] = {}
-        
+
     def get_or_create(self, truck_id: str) -> TruckMPGBaseline:
         """Get existing baseline or create new one"""
         if truck_id not in self._baselines:
             self._baselines[truck_id] = TruckMPGBaseline(truck_id=truck_id)
         return self._baselines[truck_id]
-        
+
     def update_baseline(
-        self, 
-        truck_id: str, 
-        mpg_value: float, 
+        self,
+        truck_id: str,
+        mpg_value: float,
         timestamp: float,
-        config: MPGConfig = MPGConfig()
+        config: MPGConfig = MPGConfig(),
     ):
         """Update baseline for a truck"""
         baseline = self.get_or_create(truck_id)
         baseline.update(mpg_value, timestamp, config)
-        
+
     def get_deviation(self, truck_id: str, current_mpg: float) -> dict:
         """Get deviation from baseline for a truck"""
         baseline = self.get_or_create(truck_id)
         return baseline.get_deviation(current_mpg)
-        
+
     def get_fleet_summary(self) -> dict:
         """Get summary of all truck baselines"""
         if not self._baselines:
             return {"trucks": 0, "avg_baseline": 5.7, "baselines": []}
-            
+
         baselines_list = []
         total_baseline = 0.0
         high_confidence_count = 0
-        
+
         for truck_id, baseline in self._baselines.items():
-            baselines_list.append({
-                "truck_id": truck_id,
-                "baseline_mpg": round(baseline.baseline_mpg, 2),
-                "samples": baseline.sample_count,
-                "confidence": baseline.confidence,
-                "range": f"{baseline.min_observed:.1f}-{baseline.max_observed:.1f}"
-            })
+            baselines_list.append(
+                {
+                    "truck_id": truck_id,
+                    "baseline_mpg": round(baseline.baseline_mpg, 2),
+                    "samples": baseline.sample_count,
+                    "confidence": baseline.confidence,
+                    "range": f"{baseline.min_observed:.1f}-{baseline.max_observed:.1f}",
+                }
+            )
             total_baseline += baseline.baseline_mpg
             if baseline.confidence == "HIGH":
                 high_confidence_count += 1
-                
+
         avg_baseline = total_baseline / len(self._baselines)
-        
+
         return {
             "trucks": len(self._baselines),
             "avg_baseline": round(avg_baseline, 2),
             "high_confidence_count": high_confidence_count,
-            "baselines": sorted(baselines_list, key=lambda x: x["baseline_mpg"])
+            "baselines": sorted(baselines_list, key=lambda x: x["baseline_mpg"]),
         }
-        
+
     def save_to_file(self, filepath: str):
         """Save all baselines to JSON file"""
         import json
+
         data = {truck_id: bl.to_dict() for truck_id, bl in self._baselines.items()}
-        with open(filepath, 'w') as f:
+        with open(filepath, "w") as f:
             json.dump(data, f, indent=2)
         logger.info(f"Saved {len(data)} truck baselines to {filepath}")
-        
+
     def load_from_file(self, filepath: str):
         """Load baselines from JSON file"""
         import json
         from pathlib import Path
-        
+
         if not Path(filepath).exists():
             logger.info(f"No baseline file found at {filepath}, starting fresh")
             return
-            
-        with open(filepath, 'r') as f:
+
+        with open(filepath, "r") as f:
             data = json.load(f)
-            
+
         for truck_id, bl_data in data.items():
             self._baselines[truck_id] = TruckMPGBaseline.from_dict(bl_data)
-            
+
         logger.info(f"Loaded {len(self._baselines)} truck baselines from {filepath}")
 
 

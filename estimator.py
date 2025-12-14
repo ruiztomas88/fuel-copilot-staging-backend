@@ -8,10 +8,12 @@ Kalman Filter for Fuel Level Estimation with:
 - Anchor-based calibration support
 - 🆕 v5.3.0: Adaptive Q_r based on truck status (PARKED/IDLE/MOVING)
 - 🆕 v5.3.0: Kalman confidence indicator
+- 🆕 v5.4.0: GPS Quality adaptive Q_L (satellites-based)
+- 🆕 v5.4.0: Voltage quality factor integration
 
 Author: Fuel Copilot Team
-Version: 5.3.0
-Date: December 9, 2025
+Version: 5.4.0
+Date: December 2025
 """
 
 import logging
@@ -20,6 +22,25 @@ from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
+
+# 🆕 v5.4.0: Import GPS and Voltage quality modules
+try:
+    from gps_quality import (
+        AdaptiveQLManager,
+        calculate_adjusted_Q_L,
+        analyze_gps_quality,
+    )
+
+    GPS_QUALITY_AVAILABLE = True
+except ImportError:
+    GPS_QUALITY_AVAILABLE = False
+
+try:
+    from voltage_monitor import get_voltage_quality_factor, analyze_voltage
+
+    VOLTAGE_MONITOR_AVAILABLE = True
+except ImportError:
+    VOLTAGE_MONITOR_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +234,19 @@ class FuelEstimator:
         self.L = None
         self.P_L = 20.0
 
+        # 🆕 v5.4.0: GPS Quality Manager for adaptive Q_L
+        self.gps_quality_manager: Optional[AdaptiveQLManager] = None
+        if GPS_QUALITY_AVAILABLE:
+            self.gps_quality_manager = AdaptiveQLManager(
+                base_Q_L=self.Q_L_moving,
+                smoothing_factor=0.3,
+            )
+
+        # 🆕 v5.4.0: Sensor quality tracking
+        self.last_gps_quality = None
+        self.last_voltage_quality = 1.0
+        self.sensor_quality_factor = 1.0  # Combined quality factor
+
     def initialize(self, fuel_lvl_pct: float = None, sensor_pct: float = None):
         """Initialize the filter with a sensor reading"""
         pct = fuel_lvl_pct if fuel_lvl_pct is not None else sensor_pct
@@ -329,6 +363,88 @@ class FuelEstimator:
             Dict with level, score, color, description
         """
         return get_kalman_confidence(self.P)
+
+    def update_sensor_quality(
+        self,
+        satellites: Optional[int] = None,
+        voltage: Optional[float] = None,
+        is_engine_running: bool = True,
+    ) -> float:
+        """
+        🆕 v5.4.0: Update Q_L based on GPS and voltage quality.
+
+        This provides adaptive measurement noise based on sensor reliability:
+        - Poor GPS (few satellites) → more smoothing → lower Q_L
+        - Poor voltage → sensor readings less reliable → adjusted confidence
+
+        Call this before update() to adapt measurement noise.
+
+        Args:
+            satellites: Number of GPS satellites visible
+            voltage: Battery/alternator voltage (pwr_int sensor)
+            is_engine_running: Whether engine is currently running
+
+        Returns:
+            Combined sensor quality factor (0.5-1.0)
+        """
+        gps_factor = 1.0
+        voltage_factor = 1.0
+
+        # GPS Quality adaptive Q_L
+        if (
+            satellites is not None
+            and GPS_QUALITY_AVAILABLE
+            and self.gps_quality_manager
+        ):
+            adaptive_Q_L = self.gps_quality_manager.get_adaptive_Q_L(
+                self.truck_id,
+                satellites,
+            )
+            self.Q_L = adaptive_Q_L
+
+            # Store quality info
+            gps_result = analyze_gps_quality(satellites, self.truck_id)
+            self.last_gps_quality = gps_result.to_dict()
+            gps_factor = gps_result.q_l_factor
+
+            logger.debug(
+                f"[{self.truck_id}] GPS Quality: {gps_result.quality.value} "
+                f"({satellites} sats) → Q_L={adaptive_Q_L:.4f}"
+            )
+
+        # Voltage Quality factor
+        if voltage is not None and VOLTAGE_MONITOR_AVAILABLE:
+            voltage_factor = get_voltage_quality_factor(voltage, is_engine_running)
+            self.last_voltage_quality = voltage_factor
+
+            if voltage_factor < 0.9:
+                logger.debug(
+                    f"[{self.truck_id}] Voltage quality degraded: {voltage:.1f}V "
+                    f"→ factor={voltage_factor:.2f}"
+                )
+
+        # Combined quality factor (multiply both)
+        self.sensor_quality_factor = gps_factor * voltage_factor
+
+        return self.sensor_quality_factor
+
+    def get_sensor_diagnostics(self) -> Dict:
+        """
+        🆕 v5.4.0: Get current sensor quality diagnostics.
+
+        Returns:
+            Dict with GPS quality, voltage quality, and combined factor
+        """
+        return {
+            "gps_quality": self.last_gps_quality,
+            "voltage_quality_factor": self.last_voltage_quality,
+            "combined_quality_factor": self.sensor_quality_factor,
+            "current_Q_L": self.Q_L,
+            "modules_available": {
+                "gps_quality": GPS_QUALITY_AVAILABLE,
+                "voltage_monitor": VOLTAGE_MONITOR_AVAILABLE,
+            },
+        }
 
     def predict(
         self,
@@ -601,7 +717,7 @@ class FuelEstimator:
 
     def get_estimate(self) -> Dict:
         """Get current estimate with diagnostics"""
-        return {
+        estimate = {
             "level_liters": self.level_liters,
             "level_pct": self.level_pct,
             "consumption_lph": self.consumption_lph,
@@ -610,7 +726,17 @@ class FuelEstimator:
             "kalman_gain": self.P / (self.P + self.Q_L),
             "is_moving": self.is_moving,
             "ecu_consumption_available": self.ecu_consumption_available,
+            # 🆕 v5.4.0: Sensor quality info
+            "sensor_quality_factor": self.sensor_quality_factor,
+            "current_Q_L": self.Q_L,
         }
+
+        # Add GPS quality if available
+        if self.last_gps_quality:
+            estimate["gps_quality"] = self.last_gps_quality.get("quality")
+            estimate["gps_satellites"] = self.last_gps_quality.get("satellites")
+
+        return estimate
 
 
 class AnchorDetector:
