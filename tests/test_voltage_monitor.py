@@ -41,7 +41,7 @@ class TestVoltageClassification:
     def test_battery_dead_engine_off(self):
         """Critical low voltage with engine off = dead battery"""
         alert = analyze_voltage(11.2, rpm=None, truck_id="TEST001")
-        
+
         assert alert.status == VoltageStatus.CRITICAL_LOW
         assert alert.priority == "CRITICAL"
         assert "BATERÍA MUERTA" in alert.message
@@ -50,7 +50,7 @@ class TestVoltageClassification:
     def test_battery_low_engine_off(self):
         """Low voltage with engine off = battery discharging"""
         alert = analyze_voltage(12.0, rpm=None, truck_id="TEST001")
-        
+
         assert alert.status == VoltageStatus.LOW
         assert alert.priority == "HIGH"
         assert alert.is_engine_running is False
@@ -58,7 +58,7 @@ class TestVoltageClassification:
     def test_battery_normal_engine_off(self):
         """Normal voltage with engine off"""
         alert = analyze_voltage(12.6, rpm=None, truck_id="TEST001")
-        
+
         assert alert.status == VoltageStatus.NORMAL
         assert alert.priority == "OK"
         assert alert.may_affect_sensors is False
@@ -66,7 +66,7 @@ class TestVoltageClassification:
     def test_alternator_fail_engine_running(self):
         """Critical low voltage with engine running = alternator failure"""
         alert = analyze_voltage(12.3, rpm=700, truck_id="TEST001")
-        
+
         assert alert.status == VoltageStatus.CRITICAL_LOW
         assert alert.priority == "CRITICAL"
         assert "ALTERNADOR FALLANDO" in alert.message
@@ -74,7 +74,7 @@ class TestVoltageClassification:
     def test_charging_weak_engine_running(self):
         """Low charging voltage = weak alternator"""
         alert = analyze_voltage(13.0, rpm=650, truck_id="TEST001")
-        
+
         assert alert.status == VoltageStatus.LOW
         assert alert.priority == "HIGH"
         assert "Carga débil" in alert.message
@@ -82,7 +82,7 @@ class TestVoltageClassification:
     def test_charging_normal_engine_running(self):
         """Normal charging voltage"""
         alert = analyze_voltage(14.2, rpm=700, truck_id="TEST001")
-        
+
         assert alert.status == VoltageStatus.NORMAL
         assert alert.priority == "OK"
         assert alert.is_engine_running is True
@@ -90,14 +90,14 @@ class TestVoltageClassification:
     def test_overcharging_engine_running(self):
         """High voltage = overcharging"""
         alert = analyze_voltage(15.0, rpm=700, truck_id="TEST001")
-        
+
         assert alert.status == VoltageStatus.HIGH
         assert alert.priority == "MEDIUM"
 
     def test_overvoltage_critical(self):
         """Critical high voltage = dangerous"""
         alert = analyze_voltage(15.8, rpm=750, truck_id="TEST001")
-        
+
         assert alert.status == VoltageStatus.CRITICAL_HIGH
         assert alert.priority == "CRITICAL"
         assert "SOBREVOLTAJE" in alert.message
@@ -124,7 +124,7 @@ class TestSensorCorrelation:
             fuel_sensor_variance=3.0,
             fuel_drift_pct=8.0,
         )
-        
+
         assert result["is_voltage_issue"] is True
         assert result["correlation_found"] is True
         assert "correlaciona" in result["explanation"]
@@ -136,7 +136,7 @@ class TestSensorCorrelation:
             fuel_sensor_variance=1.0,
             fuel_drift_pct=2.0,
         )
-        
+
         assert result["is_voltage_issue"] is True
         assert result["correlation_found"] is False
 
@@ -147,7 +147,7 @@ class TestSensorCorrelation:
             fuel_sensor_variance=3.0,
             fuel_drift_pct=8.0,
         )
-        
+
         assert result["is_voltage_issue"] is False
         assert result["correlation_found"] is False
 
@@ -158,7 +158,7 @@ class TestSensorCorrelation:
             fuel_sensor_variance=1.0,
             fuel_drift_pct=2.0,
         )
-        
+
         assert result["is_voltage_issue"] is False
         assert "normalmente" in result["explanation"]
 
@@ -218,9 +218,9 @@ class TestFleetAnalysis:
             {"truck_id": "T003", "pwr_int": 11.2, "rpm": None},
             {"truck_id": "T004", "pwr_int": None, "rpm": None},
         ]
-        
+
         result = analyze_fleet_voltage(fleet)
-        
+
         assert result["summary"]["total_trucks"] == 4
         assert result["summary"]["critical"] == 1  # T003
         assert result["summary"]["warnings"] == 1  # T002
@@ -235,9 +235,9 @@ class TestFleetAnalysis:
             {"truck_id": "T002", "pwr_int": 13.0, "rpm": 650},  # HIGH
             {"truck_id": "T003", "pwr_int": 11.2, "rpm": None},  # CRITICAL
         ]
-        
+
         result = analyze_fleet_voltage(fleet)
-        
+
         # Critical should be first
         assert result["alerts"][0]["priority"] == "CRITICAL"
         assert result["alerts"][1]["priority"] == "HIGH"
@@ -254,7 +254,7 @@ class TestAlertManager:
     def test_critical_always_passes(self):
         """Critical alerts always pass through"""
         mgr = VoltageAlertManager(cooldown_minutes=60)
-        
+
         alert1 = VoltageAlert(
             truck_id="T001",
             voltage=11.0,
@@ -262,7 +262,7 @@ class TestAlertManager:
             is_engine_running=False,
             priority="CRITICAL",
         )
-        
+
         # First alert passes
         assert mgr.should_alert("T001", "CRITICAL") is True
         # Critical always passes even immediately after
@@ -271,7 +271,7 @@ class TestAlertManager:
     def test_non_critical_respects_cooldown(self):
         """Non-critical alerts respect cooldown"""
         mgr = VoltageAlertManager(cooldown_minutes=60)
-        
+
         # First passes
         assert mgr.should_alert("T001", "HIGH") is True
         # Second blocked by cooldown
@@ -280,7 +280,7 @@ class TestAlertManager:
     def test_process_alert_filters_ok(self):
         """OK priority alerts are filtered out"""
         mgr = VoltageAlertManager()
-        
+
         ok_alert = VoltageAlert(
             truck_id="T001",
             voltage=14.2,
@@ -288,14 +288,14 @@ class TestAlertManager:
             is_engine_running=True,
             priority="OK",
         )
-        
+
         result = mgr.process_alert(ok_alert)
         assert result is None
 
     def test_process_alert_returns_valid(self):
         """Valid alerts pass through"""
         mgr = VoltageAlertManager()
-        
+
         alert = VoltageAlert(
             truck_id="T001",
             voltage=11.0,
@@ -303,7 +303,7 @@ class TestAlertManager:
             is_engine_running=False,
             priority="CRITICAL",
         )
-        
+
         result = mgr.process_alert(alert)
         assert result is not None
         assert result.priority == "CRITICAL"
@@ -328,9 +328,9 @@ class TestAlertSerialization:
             message="Test message",
             timestamp=datetime(2025, 12, 13, 12, 0, 0),
         )
-        
+
         d = alert.to_dict()
-        
+
         assert d["truck_id"] == "TEST001"
         assert d["voltage"] == 14.2
         assert d["status"] == "NORMAL"
@@ -351,16 +351,18 @@ class TestEdgeCases:
     def test_exactly_at_threshold(self):
         """Test values exactly at thresholds"""
         thresholds = VoltageThresholds()
-        
+
         # Exactly at battery_critical_low
-        alert = analyze_voltage(thresholds.battery_critical_low, rpm=None, truck_id="T001")
+        alert = analyze_voltage(
+            thresholds.battery_critical_low, rpm=None, truck_id="T001"
+        )
         assert alert.status == VoltageStatus.LOW  # >= threshold, so not critical
-        
+
     def test_rpm_zero_vs_none(self):
         """RPM=0 vs RPM=None should both mean engine off"""
         alert_none = analyze_voltage(12.6, rpm=None, truck_id="T001")
         alert_zero = analyze_voltage(12.6, rpm=0, truck_id="T001")
-        
+
         assert alert_none.is_engine_running is False
         assert alert_zero.is_engine_running is False
 

@@ -1,12 +1,13 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                         ALERTS ROUTER v5.6.0                                   ║
+║                         ALERTS ROUTER v5.7.0                                   ║
 ║                    Alert Management & Predictive Alerts                        ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 Endpoints:
 - GET /alerts - Active fleet alerts
 - GET /alerts/predictive - ML-powered predictive alerts
+- GET /alerts/diagnostics - DTC, Voltage, GPS quality alerts (🆕 v5.7.0)
 - POST /alerts/test - Send test alert
 """
 
@@ -19,6 +20,17 @@ from pydantic import BaseModel
 
 from database import db
 from observability import logger
+
+# 🆕 v5.7.0: Import diagnostic modules
+try:
+    from voltage_monitor import analyze_voltage, VoltageStatus
+    from gps_quality import analyze_gps_quality, GPSQuality
+    from dtc_analyzer import process_dtc_from_sensor_data, DTCSeverity, get_dtc_analyzer
+
+    DIAGNOSTICS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Diagnostic modules not available: {e}")
+    DIAGNOSTICS_AVAILABLE = False
 
 router = APIRouter(prefix="/fuelAnalytics/api", tags=["Alerts"])
 
@@ -172,6 +184,178 @@ async def get_predictive_alerts(
         logger.error(f"Error in predictive alerts: {e}")
         raise HTTPException(
             status_code=500, detail=f"Error generating predictions: {str(e)}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.7.0: DIAGNOSTIC ALERTS (DTC, Voltage, GPS)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/alerts/diagnostics")
+async def get_diagnostic_alerts():
+    """
+    🆕 v5.7.0: Get real-time diagnostic alerts.
+
+    Analyzes current telemetry for:
+    - DTC (Diagnostic Trouble Codes) - Engine/transmission issues
+    - Voltage issues - Battery/alternator problems
+    - GPS quality - Poor satellite reception affecting accuracy
+
+    Returns alerts with severity and recommended actions.
+    """
+    try:
+        if not DIAGNOSTICS_AVAILABLE:
+            return JSONResponse(
+                content={
+                    "alerts": [],
+                    "summary": {"total": 0, "critical": 0, "warning": 0},
+                    "error": "Diagnostic modules not available",
+                }
+            )
+
+        from cache_service import get_cache
+
+        cache = await get_cache()
+        cache_key = "alerts:diagnostics"
+        cached = await cache.get(cache_key)
+        if cached:
+            return JSONResponse(content=cached)
+
+        # Get latest telemetry from wialon reader
+        try:
+            from wialon_reader import WialonReader
+
+            reader = WialonReader()
+            fleet_data = reader.get_fleet_data()
+        except Exception as e:
+            logger.warning(f"Could not get Wialon data: {e}")
+            fleet_data = []
+
+        alerts = []
+
+        for truck in fleet_data:
+            truck_id = (
+                truck.truck_id
+                if hasattr(truck, "truck_id")
+                else truck.get("truck_id", "UNKNOWN")
+            )
+
+            # DTC Alerts
+            dtc_value = getattr(truck, "dtc", None) or truck.get("dtc")
+            if dtc_value:
+                try:
+                    timestamp = (
+                        getattr(truck, "timestamp", None)
+                        or truck.get("timestamp")
+                        or datetime.now()
+                    )
+                    dtc_alerts = process_dtc_from_sensor_data(
+                        truck_id=truck_id,
+                        dtc_value=dtc_value,
+                        timestamp=timestamp,
+                    )
+                    for dtc_alert in dtc_alerts:
+                        severity = (
+                            "critical"
+                            if dtc_alert.severity == DTCSeverity.CRITICAL
+                            else "warning"
+                        )
+                        for code in dtc_alert.codes:
+                            alerts.append(
+                                {
+                                    "truck_id": truck_id,
+                                    "alert_type": "dtc",
+                                    "severity": severity,
+                                    "message": f"DTC {code.code}: {code.description}",
+                                    "code": code.code,
+                                    "system": code.system,
+                                    "timestamp": datetime.now().isoformat(),
+                                    "recommendation": "Schedule diagnostic inspection",
+                                }
+                            )
+                except Exception as e:
+                    logger.debug(f"DTC parse error for {truck_id}: {e}")
+
+            # Voltage Alerts
+            pwr_int = getattr(truck, "pwr_int", None) or truck.get("pwr_int")
+            rpm = getattr(truck, "rpm", None) or truck.get("rpm")
+            if pwr_int is not None:
+                voltage_alert = analyze_voltage(pwr_int, rpm, truck_id)
+                if voltage_alert and voltage_alert.priority not in ["OK", None]:
+                    alerts.append(
+                        {
+                            "truck_id": truck_id,
+                            "alert_type": "voltage",
+                            "severity": (
+                                "critical"
+                                if voltage_alert.priority == "CRITICAL"
+                                else "warning"
+                            ),
+                            "message": voltage_alert.message,
+                            "voltage": pwr_int,
+                            "status": voltage_alert.status.value,
+                            "timestamp": datetime.now().isoformat(),
+                            "recommendation": voltage_alert.action,
+                            "affects_sensors": voltage_alert.may_affect_sensors,
+                        }
+                    )
+
+            # GPS Quality Alerts
+            sats = getattr(truck, "sats", None) or truck.get("sats")
+            if sats is not None:
+                gps_result = analyze_gps_quality(sats, truck_id)
+                if gps_result.quality in [GPSQuality.POOR, GPSQuality.CRITICAL]:
+                    severity = (
+                        "critical"
+                        if gps_result.quality == GPSQuality.CRITICAL
+                        else "warning"
+                    )
+                    alerts.append(
+                        {
+                            "truck_id": truck_id,
+                            "alert_type": "gps_quality",
+                            "severity": severity,
+                            "message": gps_result.message,
+                            "satellites": sats,
+                            "quality": gps_result.quality.value,
+                            "estimated_accuracy_m": gps_result.estimated_accuracy_m,
+                            "timestamp": datetime.now().isoformat(),
+                            "recommendation": "Check GPS antenna or move to open area",
+                        }
+                    )
+
+        # Sort by severity
+        severity_order = {"critical": 0, "warning": 1, "info": 2}
+        alerts.sort(key=lambda x: severity_order.get(x.get("severity", "info"), 3))
+
+        result = {
+            "alerts": alerts,
+            "summary": {
+                "total": len(alerts),
+                "critical": sum(1 for a in alerts if a.get("severity") == "critical"),
+                "warning": sum(1 for a in alerts if a.get("severity") == "warning"),
+                "by_type": {
+                    "dtc": sum(1 for a in alerts if a.get("alert_type") == "dtc"),
+                    "voltage": sum(
+                        1 for a in alerts if a.get("alert_type") == "voltage"
+                    ),
+                    "gps_quality": sum(
+                        1 for a in alerts if a.get("alert_type") == "gps_quality"
+                    ),
+                },
+            },
+            "generated_at": datetime.now().isoformat(),
+        }
+
+        # Short cache (30 seconds) since this is real-time
+        await cache.set(cache_key, result, ttl=30)
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Error in diagnostic alerts: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error generating diagnostic alerts: {str(e)}"
         )
 
 

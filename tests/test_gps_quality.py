@@ -38,7 +38,7 @@ class TestGPSQualityClassification:
     def test_excellent_quality(self):
         """12+ satellites = excellent"""
         result = analyze_gps_quality(14, truck_id="TEST001")
-        
+
         assert result.quality == GPSQuality.EXCELLENT
         assert result.q_l_factor == 1.0
         assert result.estimated_accuracy_m == 1.0
@@ -47,7 +47,7 @@ class TestGPSQualityClassification:
     def test_good_quality(self):
         """8-11 satellites = good"""
         result = analyze_gps_quality(10, truck_id="TEST001")
-        
+
         assert result.quality == GPSQuality.GOOD
         assert result.q_l_factor == 0.85
         assert result.is_reliable_for_distance is True
@@ -55,7 +55,7 @@ class TestGPSQualityClassification:
     def test_moderate_quality(self):
         """5-7 satellites = moderate"""
         result = analyze_gps_quality(6, truck_id="TEST001")
-        
+
         assert result.quality == GPSQuality.MODERATE
         assert result.q_l_factor == 0.65
         assert result.is_reliable_for_distance is True
@@ -63,7 +63,7 @@ class TestGPSQualityClassification:
     def test_poor_quality(self):
         """3-4 satellites = poor"""
         result = analyze_gps_quality(4, truck_id="TEST001")
-        
+
         assert result.quality == GPSQuality.POOR
         assert result.q_l_factor == 0.4
         assert result.is_reliable_for_distance is False
@@ -71,7 +71,7 @@ class TestGPSQualityClassification:
     def test_critical_quality(self):
         """0-2 satellites = critical"""
         result = analyze_gps_quality(2, truck_id="TEST001")
-        
+
         assert result.quality == GPSQuality.CRITICAL
         assert result.q_l_factor == 0.2
         assert result.is_reliable_for_distance is False
@@ -79,20 +79,20 @@ class TestGPSQualityClassification:
     def test_no_satellites(self):
         """0 satellites = critical"""
         result = analyze_gps_quality(0, truck_id="TEST001")
-        
+
         assert result.quality == GPSQuality.CRITICAL
 
     def test_null_satellites(self):
         """None = critical with no data message"""
         result = analyze_gps_quality(None, truck_id="TEST001")
-        
+
         assert result.quality == GPSQuality.CRITICAL
         assert "Sin datos" in result.message
 
     def test_negative_satellites(self):
         """Negative = treated as no data"""
         result = analyze_gps_quality(-1, truck_id="TEST001")
-        
+
         assert result.quality == GPSQuality.CRITICAL
 
 
@@ -108,14 +108,14 @@ class TestQLCalculation:
         """Excellent GPS doesn't reduce Q_L"""
         base = 0.05
         adjusted = calculate_adjusted_Q_L(base, 14)
-        
+
         assert adjusted == base
 
     def test_base_Q_L_poor(self):
         """Poor GPS reduces Q_L significantly"""
         base = 0.05
         adjusted = calculate_adjusted_Q_L(base, 4)
-        
+
         assert adjusted == pytest.approx(base * 0.4)
         assert adjusted == pytest.approx(0.02)
 
@@ -123,7 +123,7 @@ class TestQLCalculation:
         """Critical GPS reduces Q_L to minimum"""
         base = 0.05
         adjusted = calculate_adjusted_Q_L(base, 2)
-        
+
         assert adjusted == pytest.approx(base * 0.2)
         assert adjusted == pytest.approx(0.01)
 
@@ -131,7 +131,7 @@ class TestQLCalculation:
         """Works with different base Q_L values"""
         base = 4.0  # Moving Q_L
         adjusted = calculate_adjusted_Q_L(base, 6)  # Moderate
-        
+
         assert adjusted == base * 0.65
         assert adjusted == 2.6
 
@@ -147,38 +147,38 @@ class TestAdaptiveQLManager:
     def test_initial_value(self):
         """First value = target value (no smoothing)"""
         mgr = AdaptiveQLManager(base_Q_L=0.05, smoothing_factor=0.3)
-        
+
         # First call uses target directly
         result = mgr.get_adaptive_Q_L("T001", 12)  # Excellent
-        
+
         assert result == 0.05
 
     def test_smoothing_applied(self):
         """Subsequent values are smoothed"""
         mgr = AdaptiveQLManager(base_Q_L=0.05, smoothing_factor=0.3)
-        
+
         # Initialize
         _ = mgr.get_adaptive_Q_L("T001", 12)  # 0.05
-        
+
         # Drop to poor (target = 0.02)
         result = mgr.get_adaptive_Q_L("T001", 4)
-        
+
         # EMA: 0.3 * 0.02 + 0.7 * 0.05 = 0.006 + 0.035 = 0.041
         assert 0.040 < result < 0.042
 
     def test_quality_change_detection(self):
         """Quality changes are detected"""
         mgr = AdaptiveQLManager(base_Q_L=0.05)
-        
+
         # Initialize
         _ = mgr.get_adaptive_Q_L("T001", 12)
         change1 = mgr.get_quality_change("T001", 12)  # Same quality
-        
+
         assert change1 is None
-        
+
         # Change to poor
         change2 = mgr.get_quality_change("T001", 4)
-        
+
         assert change2 is not None
         assert change2["from_quality"] == "EXCELLENT"
         assert change2["to_quality"] == "POOR"
@@ -187,13 +187,13 @@ class TestAdaptiveQLManager:
     def test_per_truck_state(self):
         """Each truck has independent state"""
         mgr = AdaptiveQLManager(base_Q_L=0.05)
-        
+
         # T001 starts excellent
         _ = mgr.get_adaptive_Q_L("T001", 12)
-        
+
         # T002 starts poor
         result_T002 = mgr.get_adaptive_Q_L("T002", 4)
-        
+
         # T001's state shouldn't affect T002
         assert result_T002 == pytest.approx(0.02)
 
@@ -211,20 +211,22 @@ class TestFleetAnalysis:
         fleet = [
             {"truck_id": "T001", "sats": 14},  # EXCELLENT
             {"truck_id": "T002", "sats": 10},  # GOOD
-            {"truck_id": "T003", "sats": 6},   # MODERATE
-            {"truck_id": "T004", "sats": 4},   # POOR
-            {"truck_id": "T005", "sats": None}, # No data
+            {"truck_id": "T003", "sats": 6},  # MODERATE
+            {"truck_id": "T004", "sats": 4},  # POOR
+            {"truck_id": "T005", "sats": None},  # No data
         ]
-        
+
         result = analyze_fleet_gps_quality(fleet)
-        
+
         assert result["summary"]["total_trucks"] == 5
         assert result["summary"]["no_data"] == 1
         assert result["summary"]["by_quality"]["EXCELLENT"] == 1
         assert result["summary"]["by_quality"]["GOOD"] == 1
         assert result["summary"]["by_quality"]["MODERATE"] == 1
         assert result["summary"]["by_quality"]["POOR"] == 1
-        assert result["summary"]["reliable_for_distance"] == 3  # EXCELLENT, GOOD, MODERATE
+        assert (
+            result["summary"]["reliable_for_distance"] == 3
+        )  # EXCELLENT, GOOD, MODERATE
 
     def test_average_satellites(self):
         """Average satellite count is calculated"""
@@ -232,9 +234,9 @@ class TestFleetAnalysis:
             {"truck_id": "T001", "sats": 12},
             {"truck_id": "T002", "sats": 8},
         ]
-        
+
         result = analyze_fleet_gps_quality(fleet)
-        
+
         assert result["average_satellites"] == 10.0
 
     def test_alternative_key_satellites(self):
@@ -242,12 +244,15 @@ class TestFleetAnalysis:
         fleet = [
             {"truck_id": "T001", "satellites": 14},
         ]
-        
+
         result = analyze_fleet_gps_quality(fleet)
-        
+
         # Note: current implementation only checks 'sats' key
         # This test documents current behavior
-        assert result["summary"]["no_data"] == 0 or result["summary"]["by_quality"]["EXCELLENT"] == 1
+        assert (
+            result["summary"]["no_data"] == 0
+            or result["summary"]["by_quality"]["EXCELLENT"] == 1
+        )
 
 
 # ============================================================================
@@ -262,7 +267,7 @@ class TestResultSerialization:
         """Result converts to dictionary correctly"""
         result = analyze_gps_quality(10, truck_id="TEST001")
         d = result.to_dict()
-        
+
         assert d["truck_id"] == "TEST001"
         assert d["satellites"] == 10
         assert d["quality"] == "GOOD"
@@ -322,10 +327,10 @@ class TestCustomThresholds:
             moderate_min=4,
             poor_min=2,
         )
-        
+
         # 10 satellites would be GOOD with default, but EXCELLENT with custom
         result = analyze_gps_quality(10, truck_id="T001", thresholds=custom)
-        
+
         assert result.quality == GPSQuality.EXCELLENT
 
     def test_custom_q_l_factors(self):
@@ -337,9 +342,9 @@ class TestCustomThresholds:
             q_l_poor=0.6,
             q_l_critical=0.3,
         )
-        
+
         result = analyze_gps_quality(10, truck_id="T001", thresholds=custom)
-        
+
         assert result.q_l_factor == 0.9
 
 
