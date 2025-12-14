@@ -25,6 +25,7 @@ from enum import Enum
 
 class DTCSystem(Enum):
     """Vehicle system classification for DTC codes"""
+
     ENGINE = "ENGINE"
     TRANSMISSION = "TRANSMISSION"
     AFTERTREATMENT = "AFTERTREATMENT"  # DEF/SCR/DPF
@@ -42,14 +43,16 @@ class DTCSystem(Enum):
 
 class DTCSeverity(Enum):
     """DTC severity levels"""
-    CRITICAL = "critical"    # Stop truck immediately
-    WARNING = "warning"      # Service within 24-48 hours
-    INFO = "info"            # Monitor, service at next scheduled maintenance
+
+    CRITICAL = "critical"  # Stop truck immediately
+    WARNING = "warning"  # Service within 24-48 hours
+    INFO = "info"  # Monitor, service at next scheduled maintenance
 
 
 @dataclass
 class SPNInfo:
     """SPN (Suspect Parameter Number) Information"""
+
     spn: int
     name_en: str  # English name
     name_es: str  # Spanish name
@@ -57,7 +60,7 @@ class SPNInfo:
     severity: DTCSeverity
     description_es: str  # Spanish description
     action_es: str  # Recommended action in Spanish
-    
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FMI (Failure Mode Identifier) DESCRIPTIONS
@@ -70,7 +73,7 @@ FMI_DESCRIPTIONS = {
         "severity": DTCSeverity.CRITICAL,
     },
     1: {
-        "en": "Data Valid But Below Normal Operational Range - Most Severe Level", 
+        "en": "Data Valid But Below Normal Operational Range - Most Severe Level",
         "es": "Datos válidos pero bajo el rango operacional normal - Nivel más severo",
         "severity": DTCSeverity.CRITICAL,
     },
@@ -195,7 +198,7 @@ ENGINE_SPNS = {
         system=DTCSystem.ENGINE,
         severity=DTCSeverity.CRITICAL,
         description_es="Sensor de posición del pedal del acelerador. Controla la potencia del motor.",
-        action_es="⛔ CRÍTICO: Puede causar pérdida de potencia o aceleración involuntaria. Revisar sensor y cableado."
+        action_es="⛔ CRÍTICO: Puede causar pérdida de potencia o aceleración involuntaria. Revisar sensor y cableado.",
     ),
     100: SPNInfo(
         spn=100,
@@ -204,7 +207,7 @@ ENGINE_SPNS = {
         system=DTCSystem.ENGINE,
         severity=DTCSeverity.CRITICAL,
         description_es="Presión de aceite del motor. Lubricación esencial para evitar daño al motor.",
-        action_es="⛔ PARAR INMEDIATAMENTE. Verificar nivel de aceite. NO arrancar si la presión está baja. Riesgo de daño catastrófico al motor."
+        action_es="⛔ PARAR INMEDIATAMENTE. Verificar nivel de aceite. NO arrancar si la presión está baja. Riesgo de daño catastrófico al motor.",
     ),
     102: SPNInfo(
         spn=102,
@@ -213,7 +216,7 @@ ENGINE_SPNS = {
         system=DTCSystem.AIR_INTAKE,
         severity=DTCSeverity.CRITICAL,
         description_es="Sensor de presión del múltiple de admisión. Afecta mezcla aire-combustible.",
-        action_es="⚠️ Puede causar pérdida de potencia y consumo excesivo. Programar servicio pronto."
+        action_es="⚠️ Puede causar pérdida de potencia y consumo excesivo. Programar servicio pronto.",
     ),
     110: SPNInfo(
         spn=110,
@@ -222,7 +225,7 @@ ENGINE_SPNS = {
         system=DTCSystem.COOLING,
         severity=DTCSeverity.CRITICAL,
         description_es="Temperatura del líquido refrigerante del motor.",
-        action_es="⛔ PARAR Y DEJAR ENFRIAR. Verificar nivel de refrigerante. Riesgo de sobrecalentamiento y daño al motor."
+        action_es="⛔ PARAR Y DEJAR ENFRIAR. Verificar nivel de refrigerante. Riesgo de sobrecalentamiento y daño al motor.",
     ),
     157: SPNInfo(
         spn=157,
@@ -231,7 +234,7 @@ ENGINE_SPNS = {
         system=DTCSystem.FUEL,
         severity=DTCSeverity.CRITICAL,
         description_es="Presión en el sistema de inyección de combustible.",
-        action_es="⛔ Problema de sistema de combustible. Puede causar apagado del motor. Programar servicio inmediato."
+        action_es="⛔ Problema de sistema de combustible. Puede causar apagado del motor. Programar servicio inmediato.",
     ),
     190: SPNInfo(
         spn=190,
@@ -240,7 +243,7 @@ ENGINE_SPNS = {
         system=DTCSystem.ENGINE,
         severity=DTCSeverity.CRITICAL,
         description_es="Sensor de revoluciones del motor (RPM).",
-        action_es="⛔ Sensor de RPM defectuoso. Puede causar problemas de arranque o funcionamiento errático."
+        action_es="⛔ Sensor de RPM defectuoso. Puede causar problemas de arranque o funcionamiento errático.",
     ),
     520: SPNInfo(
         spn=520,
@@ -249,7 +252,7 @@ ENGINE_SPNS = {
         system=DTCSystem.ENGINE,
         severity=DTCSeverity.INFO,
         description_es="Contador de horas de operación del motor.",
-        action_es="📋 Informativo. Usar para programar mantenimiento basado en horas."
+        action_es="📋 Informativo. Usar para programar mantenimiento basado en horas.",
     ),
     587: SPNInfo(
         spn=587,
@@ -258,7 +261,7 @@ ENGINE_SPNS = {
         system=DTCSystem.ENGINE,
         severity=DTCSeverity.WARNING,
         description_es="Control de velocidad de ralentí del motor.",
-        action_es="🔧 El motor puede tener ralentí inestable. Revisar en próximo servicio."
+        action_es="🔧 El motor puede tener ralentí inestable. Revisar en próximo servicio.",
     ),
     641: SPNInfo(
         spn=641,
@@ -267,7 +270,7 @@ ENGINE_SPNS = {
         system=DTCSystem.AIR_INTAKE,
         severity=DTCSeverity.CRITICAL,
         description_es="Control del turbocompresor de geometría variable.",
-        action_es="⛔ Turbo VGT con falla. Puede causar pérdida significativa de potencia. Servicio urgente."
+        action_es="⛔ Turbo VGT con falla. Puede causar pérdida significativa de potencia. Servicio urgente.",
     ),
     651: SPNInfo(
         spn=651,
@@ -276,9 +279,8 @@ ENGINE_SPNS = {
         system=DTCSystem.FUEL,
         severity=DTCSeverity.CRITICAL,
         description_es="Presión de combustible en el riel de inyectores.",
-        action_es="⛔ Sistema de inyección con falla. Puede causar humo, pérdida de potencia o apagado."
+        action_es="⛔ Sistema de inyección con falla. Puede causar humo, pérdida de potencia o apagado.",
     ),
-    
     # Fuel System
     94: SPNInfo(
         spn=94,
@@ -287,7 +289,7 @@ ENGINE_SPNS = {
         system=DTCSystem.FUEL,
         severity=DTCSeverity.WARNING,
         description_es="Presión de combustible antes del sistema de inyección.",
-        action_es="🔧 Verificar filtros de combustible y bomba de transferencia. Servicio en 48 horas."
+        action_es="🔧 Verificar filtros de combustible y bomba de transferencia. Servicio en 48 horas.",
     ),
     96: SPNInfo(
         spn=96,
@@ -296,7 +298,7 @@ ENGINE_SPNS = {
         system=DTCSystem.FUEL,
         severity=DTCSeverity.INFO,
         description_es="Sensor de nivel del tanque de combustible.",
-        action_es="📋 Verificar sensor si lectura es incorrecta. No crítico para operación."
+        action_es="📋 Verificar sensor si lectura es incorrecta. No crítico para operación.",
     ),
     183: SPNInfo(
         spn=183,
@@ -305,9 +307,8 @@ ENGINE_SPNS = {
         system=DTCSystem.FUEL,
         severity=DTCSeverity.INFO,
         description_es="Tasa de consumo de combustible instantánea.",
-        action_es="📋 Informativo. Usar para monitoreo de eficiencia."
+        action_es="📋 Informativo. Usar para monitoreo de eficiencia.",
     ),
-    
     # Air Intake
     105: SPNInfo(
         spn=105,
@@ -316,7 +317,7 @@ ENGINE_SPNS = {
         system=DTCSystem.AIR_INTAKE,
         severity=DTCSeverity.WARNING,
         description_es="Temperatura del aire en el múltiple de admisión.",
-        action_es="🔧 Verificar intercooler y sistema de admisión. Servicio en 48 horas."
+        action_es="🔧 Verificar intercooler y sistema de admisión. Servicio en 48 horas.",
     ),
     106: SPNInfo(
         spn=106,
@@ -325,7 +326,7 @@ ENGINE_SPNS = {
         system=DTCSystem.AIR_INTAKE,
         severity=DTCSeverity.WARNING,
         description_es="Presión de aire de admisión (boost del turbo).",
-        action_es="🔧 Posible fuga en sistema de admisión o problema de turbo."
+        action_es="🔧 Posible fuga en sistema de admisión o problema de turbo.",
     ),
     108: SPNInfo(
         spn=108,
@@ -334,7 +335,7 @@ ENGINE_SPNS = {
         system=DTCSystem.AIR_INTAKE,
         severity=DTCSeverity.INFO,
         description_es="Sensor de presión atmosférica para ajuste de inyección.",
-        action_es="📋 Generalmente solo afecta rendimiento en altitud. Monitorear."
+        action_es="📋 Generalmente solo afecta rendimiento en altitud. Monitorear.",
     ),
     171: SPNInfo(
         spn=171,
@@ -343,7 +344,7 @@ ENGINE_SPNS = {
         system=DTCSystem.AIR_INTAKE,
         severity=DTCSeverity.INFO,
         description_es="Temperatura del aire exterior.",
-        action_es="📋 Informativo para cálculos de ECU. No crítico."
+        action_es="📋 Informativo para cálculos de ECU. No crítico.",
     ),
 }
 
@@ -360,7 +361,7 @@ COOLING_SPNS = {
         system=DTCSystem.COOLING,
         severity=DTCSeverity.CRITICAL,
         description_es="Nivel del líquido refrigerante en el radiador.",
-        action_es="⛔ Nivel bajo de refrigerante. Verificar inmediatamente. Riesgo de sobrecalentamiento."
+        action_es="⛔ Nivel bajo de refrigerante. Verificar inmediatamente. Riesgo de sobrecalentamiento.",
     ),
     175: SPNInfo(
         spn=175,
@@ -369,7 +370,7 @@ COOLING_SPNS = {
         system=DTCSystem.ENGINE,
         severity=DTCSeverity.WARNING,
         description_es="Temperatura del aceite del motor.",
-        action_es="🔧 Temperatura de aceite anormal. Verificar sistema de enfriamiento."
+        action_es="🔧 Temperatura de aceite anormal. Verificar sistema de enfriamiento.",
     ),
 }
 
@@ -386,7 +387,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.CRITICAL,
         description_es="Nivel de líquido DEF (AdBlue/urea) en el tanque.",
-        action_es="⛔ DEF bajo. El motor puede reducir potencia a 5 MPH si se vacía. Rellenar urgente."
+        action_es="⛔ DEF bajo. El motor puede reducir potencia a 5 MPH si se vacía. Rellenar urgente.",
     ),
     3031: SPNInfo(
         spn=3031,
@@ -395,7 +396,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.CRITICAL,
         description_es="Sensor de calidad del líquido DEF.",
-        action_es="⛔ DEF contaminado o incorrecto. Drenar y rellenar con DEF certificado. Riesgo de derating."
+        action_es="⛔ DEF contaminado o incorrecto. Drenar y rellenar con DEF certificado. Riesgo de derating.",
     ),
     3216: SPNInfo(
         spn=3216,
@@ -404,7 +405,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.CRITICAL,
         description_es="Sistema de reducción de potencia por problemas de DEF.",
-        action_es="⛔ ¡URGENTE! Motor en modo de inducción. Potencia limitada. Reparar sistema DEF inmediatamente."
+        action_es="⛔ ¡URGENTE! Motor en modo de inducción. Potencia limitada. Reparar sistema DEF inmediatamente.",
     ),
     3226: SPNInfo(
         spn=3226,
@@ -413,7 +414,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.WARNING,
         description_es="Eficiencia de conversión del catalizador SCR.",
-        action_es="🔧 Catalizador SCR degradado. Programar reemplazo. Puede activar inducción si empeora."
+        action_es="🔧 Catalizador SCR degradado. Programar reemplazo. Puede activar inducción si empeora.",
     ),
     3242: SPNInfo(
         spn=3242,
@@ -422,7 +423,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.WARNING,
         description_es="Presión diferencial en el filtro de partículas diesel.",
-        action_es="🔧 DPF posiblemente obstruido. Puede necesitar regeneración forzada."
+        action_es="🔧 DPF posiblemente obstruido. Puede necesitar regeneración forzada.",
     ),
     3246: SPNInfo(
         spn=3246,
@@ -431,7 +432,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.WARNING,
         description_es="Nivel de acumulación de hollín en el DPF.",
-        action_es="🔧 DPF con alta carga de hollín. Realizar regeneración pronto."
+        action_es="🔧 DPF con alta carga de hollín. Realizar regeneración pronto.",
     ),
     3251: SPNInfo(
         spn=3251,
@@ -440,7 +441,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.WARNING,
         description_es="Estado del proceso de regeneración del DPF.",
-        action_es="🔧 Problema con regeneración del DPF. Verificar si se completó correctamente."
+        action_es="🔧 Problema con regeneración del DPF. Verificar si se completó correctamente.",
     ),
     4364: SPNInfo(
         spn=4364,
@@ -449,7 +450,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.CRITICAL,
         description_es="Sistema de dosificación de líquido DEF.",
-        action_es="⛔ Falla en dosificación DEF. Puede causar derating. Servicio urgente."
+        action_es="⛔ Falla en dosificación DEF. Puede causar derating. Servicio urgente.",
     ),
     5246: SPNInfo(
         spn=5246,
@@ -458,9 +459,8 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.AFTERTREATMENT,
         severity=DTCSeverity.WARNING,
         description_es="Temperatura del líquido DEF (puede congelarse).",
-        action_es="🔧 Verificar calentador del tanque DEF en clima frío."
+        action_es="🔧 Verificar calentador del tanque DEF en clima frío.",
     ),
-    
     # Exhaust System
     411: SPNInfo(
         spn=411,
@@ -469,7 +469,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.EXHAUST,
         severity=DTCSeverity.WARNING,
         description_es="Temperatura del sistema de recirculación de gases de escape.",
-        action_es="🔧 Verificar válvula EGR y enfriador. Servicio en 48 horas."
+        action_es="🔧 Verificar válvula EGR y enfriador. Servicio en 48 horas.",
     ),
     412: SPNInfo(
         spn=412,
@@ -478,7 +478,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.EXHAUST,
         severity=DTCSeverity.WARNING,
         description_es="Presión diferencial del sistema EGR.",
-        action_es="🔧 Posible obstrucción en sistema EGR. Verificar válvula y enfriador."
+        action_es="🔧 Posible obstrucción en sistema EGR. Verificar válvula y enfriador.",
     ),
     1127: SPNInfo(
         spn=1127,
@@ -487,7 +487,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.EXHAUST,
         severity=DTCSeverity.WARNING,
         description_es="Temperatura de gases a la salida del filtro de partículas.",
-        action_es="🔧 Monitorear durante regeneración. Temperaturas anormales indican problema."
+        action_es="🔧 Monitorear durante regeneración. Temperaturas anormales indican problema.",
     ),
     1173: SPNInfo(
         spn=1173,
@@ -496,7 +496,7 @@ AFTERTREATMENT_SPNS = {
         system=DTCSystem.EXHAUST,
         severity=DTCSeverity.WARNING,
         description_es="Flujo de gases recirculados por el EGR.",
-        action_es="🔧 Flujo anormal. Verificar válvula EGR y sensor de flujo."
+        action_es="🔧 Flujo anormal. Verificar válvula EGR y sensor de flujo.",
     ),
 }
 
@@ -513,7 +513,7 @@ ELECTRICAL_SPNS = {
         system=DTCSystem.ELECTRICAL,
         severity=DTCSeverity.WARNING,
         description_es="Voltaje de la batería del vehículo.",
-        action_es="🔋 Voltaje anormal. Verificar batería y alternador. Puede causar problemas de arranque."
+        action_es="🔋 Voltaje anormal. Verificar batería y alternador. Puede causar problemas de arranque.",
     ),
     167: SPNInfo(
         spn=167,
@@ -522,7 +522,7 @@ ELECTRICAL_SPNS = {
         system=DTCSystem.ELECTRICAL,
         severity=DTCSeverity.WARNING,
         description_es="Voltaje de salida del alternador.",
-        action_es="🔋 Alternador con voltaje anormal. Revisar alternador y correa."
+        action_es="🔋 Alternador con voltaje anormal. Revisar alternador y correa.",
     ),
     168: SPNInfo(
         spn=168,
@@ -531,7 +531,7 @@ ELECTRICAL_SPNS = {
         system=DTCSystem.ELECTRICAL,
         severity=DTCSeverity.WARNING,
         description_es="Estado de carga de la batería.",
-        action_es="🔋 Batería con voltaje bajo/alto. Verificar estado de batería."
+        action_es="🔋 Batería con voltaje bajo/alto. Verificar estado de batería.",
     ),
 }
 
@@ -548,7 +548,7 @@ TRANSMISSION_SPNS = {
         system=DTCSystem.TRANSMISSION,
         severity=DTCSeverity.CRITICAL,
         description_es="Presión de aceite en la transmisión automática.",
-        action_es="⛔ Presión de aceite de transmisión anormal. Puede causar daño. Verificar nivel y condición."
+        action_es="⛔ Presión de aceite de transmisión anormal. Puede causar daño. Verificar nivel y condición.",
     ),
     177: SPNInfo(
         spn=177,
@@ -557,7 +557,7 @@ TRANSMISSION_SPNS = {
         system=DTCSystem.TRANSMISSION,
         severity=DTCSeverity.CRITICAL,
         description_es="Temperatura del aceite de la transmisión.",
-        action_es="⛔ Transmisión sobrecalentada. Reducir carga. Verificar enfriador de transmisión."
+        action_es="⛔ Transmisión sobrecalentada. Reducir carga. Verificar enfriador de transmisión.",
     ),
     161: SPNInfo(
         spn=161,
@@ -566,7 +566,7 @@ TRANSMISSION_SPNS = {
         system=DTCSystem.TRANSMISSION,
         severity=DTCSeverity.WARNING,
         description_es="Sensor de velocidad del eje de entrada de la transmisión.",
-        action_es="🔧 Sensor de velocidad con falla. Puede causar cambios erráticos."
+        action_es="🔧 Sensor de velocidad con falla. Puede causar cambios erráticos.",
     ),
     191: SPNInfo(
         spn=191,
@@ -575,7 +575,7 @@ TRANSMISSION_SPNS = {
         system=DTCSystem.TRANSMISSION,
         severity=DTCSeverity.WARNING,
         description_es="Sensor de velocidad del eje de salida de la transmisión.",
-        action_es="🔧 Sensor de velocidad de salida con falla. Afecta velocímetro y cambios."
+        action_es="🔧 Sensor de velocidad de salida con falla. Afecta velocímetro y cambios.",
     ),
 }
 
@@ -592,7 +592,7 @@ BRAKES_SPNS = {
         system=DTCSystem.BRAKES,
         severity=DTCSeverity.CRITICAL,
         description_es="Estado del sistema de frenos de servicio.",
-        action_es="⛔ ¡CRÍTICO DE SEGURIDAD! Problema en sistema de frenos. No operar hasta verificar."
+        action_es="⛔ ¡CRÍTICO DE SEGURIDAD! Problema en sistema de frenos. No operar hasta verificar.",
     ),
     524: SPNInfo(
         spn=524,
@@ -601,7 +601,7 @@ BRAKES_SPNS = {
         system=DTCSystem.BRAKES,
         severity=DTCSeverity.WARNING,
         description_es="Estado del freno de estacionamiento.",
-        action_es="🔧 Verificar freno de estacionamiento. Puede no activarse correctamente."
+        action_es="🔧 Verificar freno de estacionamiento. Puede no activarse correctamente.",
     ),
     1121: SPNInfo(
         spn=1121,
@@ -610,7 +610,7 @@ BRAKES_SPNS = {
         system=DTCSystem.BRAKES,
         severity=DTCSeverity.WARNING,
         description_es="Indicador del sistema antibloqueo de frenos.",
-        action_es="🔧 ABS con falla. Frenos funcionan pero sin antibloqueo. Servicio pronto."
+        action_es="🔧 ABS con falla. Frenos funcionan pero sin antibloqueo. Servicio pronto.",
     ),
 }
 
@@ -627,7 +627,7 @@ HVAC_SPNS = {
         system=DTCSystem.HVAC,
         severity=DTCSeverity.INFO,
         description_es="Presión alta del sistema de aire acondicionado.",
-        action_es="📋 Sistema AC con presión alta. Verificar refrigerante y condensador."
+        action_es="📋 Sistema AC con presión alta. Verificar refrigerante y condensador.",
     ),
     464: SPNInfo(
         spn=464,
@@ -636,7 +636,7 @@ HVAC_SPNS = {
         system=DTCSystem.HVAC,
         severity=DTCSeverity.INFO,
         description_es="Presión del refrigerante del aire acondicionado.",
-        action_es="📋 Sistema AC puede necesitar servicio. No crítico para operación."
+        action_es="📋 Sistema AC puede necesitar servicio. No crítico para operación.",
     ),
 }
 
@@ -665,10 +665,10 @@ SPN_DATABASE: dict[int, SPNInfo] = {
 def get_spn_info(spn: int) -> Optional[SPNInfo]:
     """
     Get detailed information for a SPN code.
-    
+
     Args:
         spn: Suspect Parameter Number
-    
+
     Returns:
         SPNInfo if found, None otherwise
     """
@@ -678,52 +678,64 @@ def get_spn_info(spn: int) -> Optional[SPNInfo]:
 def get_fmi_info(fmi: int) -> dict:
     """
     Get detailed information for a FMI code.
-    
+
     Args:
         fmi: Failure Mode Identifier (0-31)
-    
+
     Returns:
         Dict with en/es descriptions and severity
     """
-    return FMI_DESCRIPTIONS.get(fmi, {
-        "en": f"Unknown FMI ({fmi})",
-        "es": f"FMI desconocido ({fmi})",
-        "severity": DTCSeverity.INFO,
-    })
+    return FMI_DESCRIPTIONS.get(
+        fmi,
+        {
+            "en": f"Unknown FMI ({fmi})",
+            "es": f"FMI desconocido ({fmi})",
+            "severity": DTCSeverity.INFO,
+        },
+    )
 
 
 def get_dtc_description(spn: int, fmi: int, language: str = "es") -> dict:
     """
     Get full description for a DTC code (SPN.FMI combination).
-    
+
     Args:
         spn: Suspect Parameter Number
         fmi: Failure Mode Identifier
         language: "en" or "es" (default Spanish)
-    
+
     Returns:
         Dict with component, failure_mode, severity, action
     """
     spn_info = get_spn_info(spn)
     fmi_info = get_fmi_info(fmi)
-    
+
     if spn_info:
         component = spn_info.name_es if language == "es" else spn_info.name_en
         description = spn_info.description_es
         action = spn_info.action_es
         system = spn_info.system.value
         # Use higher severity between SPN and FMI
-        severity = max(spn_info.severity, fmi_info["severity"], key=lambda s: 
-            {"CRITICAL": 3, "WARNING": 2, "INFO": 1}.get(s.value.upper(), 0))
+        severity = max(
+            spn_info.severity,
+            fmi_info["severity"],
+            key=lambda s: {"CRITICAL": 3, "WARNING": 2, "INFO": 1}.get(
+                s.value.upper(), 0
+            ),
+        )
     else:
-        component = f"Componente Desconocido (SPN {spn})" if language == "es" else f"Unknown Component (SPN {spn})"
+        component = (
+            f"Componente Desconocido (SPN {spn})"
+            if language == "es"
+            else f"Unknown Component (SPN {spn})"
+        )
         description = "No hay información disponible para este código."
         action = "Consultar manual del fabricante."
         system = DTCSystem.UNKNOWN.value
         severity = fmi_info["severity"]
-    
+
     failure_mode = fmi_info["es"] if language == "es" else fmi_info["en"]
-    
+
     return {
         "code": f"SPN{spn}.FMI{fmi}",
         "spn": spn,
@@ -744,19 +756,23 @@ def get_all_spns_by_system(system: DTCSystem) -> list[SPNInfo]:
 
 def get_critical_spns() -> list[int]:
     """Get list of all critical SPN codes."""
-    return [spn for spn, info in SPN_DATABASE.items() if info.severity == DTCSeverity.CRITICAL]
+    return [
+        spn
+        for spn, info in SPN_DATABASE.items()
+        if info.severity == DTCSeverity.CRITICAL
+    ]
 
 
 def get_database_stats() -> dict:
     """Get statistics about the DTC database."""
     systems = {}
     severities = {"CRITICAL": 0, "WARNING": 0, "INFO": 0}
-    
+
     for info in SPN_DATABASE.values():
         system = info.system.value
         systems[system] = systems.get(system, 0) + 1
         severities[info.severity.value.upper()] += 1
-    
+
     return {
         "total_spns": len(SPN_DATABASE),
         "total_fmis": len(FMI_DESCRIPTIONS),

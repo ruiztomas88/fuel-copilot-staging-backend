@@ -160,7 +160,7 @@ class TestMPGBaseline:
             baseline_mpg=5.85,
             std_dev=0.72,
             sample_count=100,
-            confidence="HIGH"
+            confidence="HIGH",
         )
         d = baseline.to_dict()
         assert d["truck_id"] == "TEST001"
@@ -182,7 +182,7 @@ class TestDeviationAnalysis:
             z_score=-1.8,
             status="LOW",
             message="MPG bajo",
-            confidence="HIGH"
+            confidence="HIGH",
         )
         d = analysis.to_dict()
         assert d["status"] == "LOW"
@@ -200,11 +200,35 @@ class TestCalculateBaselineFromList:
     def test_calculate_normal_data(self):
         """Should calculate correct baseline from normal data"""
         # Generate realistic MPG data (mean ~5.7) - need more samples for confidence
-        mpg_data = [5.5, 5.6, 5.7, 5.8, 5.9, 5.4, 5.8, 5.7, 5.6, 5.9, 5.5, 5.7,
-                    5.6, 5.7, 5.8, 5.5, 5.9, 5.6, 5.7, 5.8, 5.4, 5.7, 5.6, 5.8]  # 24 samples
-        
+        mpg_data = [
+            5.5,
+            5.6,
+            5.7,
+            5.8,
+            5.9,
+            5.4,
+            5.8,
+            5.7,
+            5.6,
+            5.9,
+            5.5,
+            5.7,
+            5.6,
+            5.7,
+            5.8,
+            5.5,
+            5.9,
+            5.6,
+            5.7,
+            5.8,
+            5.4,
+            5.7,
+            5.6,
+            5.8,
+        ]  # 24 samples
+
         baseline = calculate_baseline_from_list("TEST001", mpg_data, days=7)
-        
+
         assert baseline.truck_id == "TEST001"
         assert 5.4 <= baseline.baseline_mpg <= 6.0  # Should be close to mean
         assert baseline.sample_count >= 20
@@ -214,28 +238,44 @@ class TestCalculateBaselineFromList:
         """Should filter outliers from calculation"""
         # Data with outliers
         mpg_data = [5.5, 5.6, 5.7, 5.8, 20.0, 5.4, 5.8, 1.0, 5.7, 5.6, 5.9, 5.5]
-        
+
         baseline = calculate_baseline_from_list("TEST001", mpg_data, days=7)
-        
+
         # Baseline should not be skewed by outliers
         assert 5.0 <= baseline.baseline_mpg <= 6.5
 
     def test_calculate_insufficient_data(self):
         """Should mark as INSUFFICIENT with few samples"""
         mpg_data = [5.5, 5.6, 5.7]  # Only 3 samples
-        
+
         baseline = calculate_baseline_from_list("TEST001", mpg_data, days=1)
-        
+
         assert baseline.confidence == "INSUFFICIENT"
 
     def test_filters_invalid_mpg(self):
         """Should filter values outside 3-12 MPG range"""
         # Mix of valid (5.x) and invalid (2.0, 15.0, 50.0) values
-        mpg_data = [2.0, 5.5, 5.6, 5.7, 15.0, 5.8, 5.9, 5.4, 5.7, 5.6, 5.8, 50.0,
-                    5.5, 5.6, 5.7, 5.8]  # 13 valid + 3 invalid
-        
+        mpg_data = [
+            2.0,
+            5.5,
+            5.6,
+            5.7,
+            15.0,
+            5.8,
+            5.9,
+            5.4,
+            5.7,
+            5.6,
+            5.8,
+            50.0,
+            5.5,
+            5.6,
+            5.7,
+            5.8,
+        ]  # 13 valid + 3 invalid
+
         baseline = calculate_baseline_from_list("TEST001", mpg_data, days=7)
-        
+
         # Should only have valid samples (excluding 2.0, 15.0, 50.0)
         assert baseline.sample_count == 13
         # Mean should be around 5.6-5.7 (only valid values)
@@ -244,9 +284,9 @@ class TestCalculateBaselineFromList:
     def test_calculates_percentiles(self):
         """Should calculate percentiles correctly"""
         mpg_data = [4.5, 5.0, 5.2, 5.5, 5.7, 5.9, 6.0, 6.2, 6.5, 6.8, 7.0, 7.5]
-        
+
         baseline = calculate_baseline_from_list("TEST001", mpg_data, days=7)
-        
+
         assert baseline.percentile_25 < baseline.baseline_mpg < baseline.percentile_75
 
 
@@ -267,63 +307,54 @@ class TestMPGBaselineService:
     def test_analyze_deviation_normal(self):
         """Should detect normal deviation"""
         service = MPGBaselineService()
-        
+
         # Pre-populate cache
         baseline = MPGBaseline(
-            truck_id="TEST001",
-            baseline_mpg=5.7,
-            std_dev=0.5,
-            confidence="HIGH"
+            truck_id="TEST001", baseline_mpg=5.7, std_dev=0.5, confidence="HIGH"
         )
         service._baselines_cache["TEST001"] = baseline
-        
+
         # Analyze a normal reading
         analysis = service.analyze_deviation("TEST001", current_mpg=5.8)
-        
+
         assert analysis.status == "NORMAL"
         assert abs(analysis.z_score) < 1.0
 
     def test_analyze_deviation_low(self):
         """Should detect LOW status for below baseline"""
         service = MPGBaselineService()
-        
+
         baseline = MPGBaseline(
-            truck_id="TEST001",
-            baseline_mpg=5.7,
-            std_dev=0.5,
-            confidence="HIGH"
+            truck_id="TEST001", baseline_mpg=5.7, std_dev=0.5, confidence="HIGH"
         )
         service._baselines_cache["TEST001"] = baseline
-        
+
         # Analyze a low reading (2+ std devs below)
         analysis = service.analyze_deviation("TEST001", current_mpg=4.5)
-        
+
         assert analysis.status == "LOW"
         assert analysis.z_score < -2.0
 
     def test_analyze_deviation_critical_low(self):
         """Should detect CRITICAL_LOW for very low MPG"""
         service = MPGBaselineService()
-        
+
         baseline = MPGBaseline(
-            truck_id="TEST001",
-            baseline_mpg=5.7,
-            std_dev=0.5,
-            confidence="HIGH"
+            truck_id="TEST001", baseline_mpg=5.7, std_dev=0.5, confidence="HIGH"
         )
         service._baselines_cache["TEST001"] = baseline
-        
+
         # Analyze critical low reading
         analysis = service.analyze_deviation("TEST001", current_mpg=3.2)
-        
+
         assert analysis.status == "CRITICAL_LOW"
 
     def test_analyze_deviation_without_cached_baseline(self):
         """Should use default baseline if not cached"""
         service = MPGBaselineService()
-        
+
         analysis = service.analyze_deviation("UNKNOWN_TRUCK", current_mpg=5.5)
-        
+
         # Should use default baseline (5.7)
         assert analysis.baseline_mpg == 5.7
 
@@ -331,7 +362,7 @@ class TestMPGBaselineService:
         """Should return default summary when no baselines"""
         service = MPGBaselineService()
         summary = service.get_fleet_summary()
-        
+
         assert summary["total_trucks"] == 0
         assert summary["avg_baseline_mpg"] == 5.7
 
@@ -347,35 +378,35 @@ class TestCompareToFleetAverage:
     def test_above_average(self):
         """Should detect truck above fleet average"""
         baseline = MPGBaseline(truck_id="TEST001", baseline_mpg=6.5)
-        
+
         result = compare_to_fleet_average(baseline, fleet_average=5.7)
-        
+
         assert result["status"] == "ABOVE_AVERAGE"
         assert result["difference_mpg"] > 0
 
     def test_below_average(self):
         """Should detect truck below fleet average"""
         baseline = MPGBaseline(truck_id="TEST001", baseline_mpg=4.8)
-        
+
         result = compare_to_fleet_average(baseline, fleet_average=5.7)
-        
+
         assert result["status"] == "BELOW_AVERAGE"
         assert result["difference_mpg"] < 0
 
     def test_average(self):
         """Should detect truck at fleet average"""
         baseline = MPGBaseline(truck_id="TEST001", baseline_mpg=5.8)
-        
+
         result = compare_to_fleet_average(baseline, fleet_average=5.7)
-        
+
         assert result["status"] == "AVERAGE"
 
     def test_custom_fleet_average(self):
         """Should use custom fleet average"""
         baseline = MPGBaseline(truck_id="TEST001", baseline_mpg=5.5)
-        
+
         result = compare_to_fleet_average(baseline, fleet_average=6.0)
-        
+
         assert result["fleet_average"] == 6.0
 
 
@@ -390,33 +421,33 @@ class TestEdgeCases:
     def test_all_same_mpg_values(self):
         """Should handle all identical values"""
         mpg_data = [5.7] * 20
-        
+
         baseline = calculate_baseline_from_list("TEST001", mpg_data, days=7)
-        
+
         assert baseline.baseline_mpg == 5.7
         assert baseline.std_dev == 0.0  # No variance
 
     def test_extreme_variance(self):
         """Should handle high variance data"""
         mpg_data = [3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 11.5]
-        
+
         baseline = calculate_baseline_from_list("TEST001", mpg_data, days=30)
-        
+
         assert baseline.std_dev > 2.0  # High variance
 
     def test_zero_std_dev_in_analysis(self):
         """Should handle zero std_dev without division error"""
         service = MPGBaselineService()
-        
+
         baseline = MPGBaseline(
             truck_id="TEST001",
             baseline_mpg=5.7,
             std_dev=0.0,  # Zero variance
-            confidence="HIGH"
+            confidence="HIGH",
         )
         service._baselines_cache["TEST001"] = baseline
-        
+
         # Should not raise ZeroDivisionError
         analysis = service.analyze_deviation("TEST001", current_mpg=5.8)
-        
+
         assert analysis.z_score == 0.0  # Graceful handling

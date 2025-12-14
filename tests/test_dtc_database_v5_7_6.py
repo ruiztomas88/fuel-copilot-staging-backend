@@ -38,7 +38,31 @@ class TestDatabaseStructure:
     def test_fmi_descriptions_complete(self):
         """Should have FMI descriptions for common values"""
         # Standard FMI codes 0-21 and 31
-        standard_fmis = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 31]
+        standard_fmis = [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            31,
+        ]
         for fmi in standard_fmis:
             assert fmi in FMI_DESCRIPTIONS
 
@@ -87,11 +111,11 @@ class TestSPNLookup:
         # SPN 100 = Engine Oil Pressure
         info = get_spn_info(100)
         assert info.system == DTCSystem.ENGINE
-        
+
         # SPN 1761 = DEF Tank Level
         info = get_spn_info(1761)
         assert info.system == DTCSystem.AFTERTREATMENT
-        
+
         # SPN 127 = Transmission Oil Pressure
         info = get_spn_info(127)
         assert info.system == DTCSystem.TRANSMISSION
@@ -145,7 +169,7 @@ class TestDTCDescription:
     def test_get_description_known_dtc(self):
         """Should generate full description for known DTC"""
         desc = get_dtc_description(100, 4)  # Oil Pressure - Voltage Low
-        
+
         assert desc["code"] == "SPN100.FMI4"
         assert desc["spn"] == 100
         assert desc["fmi"] == 4
@@ -226,7 +250,7 @@ class TestDatabaseStats:
     def test_stats_structure(self):
         """Should return stats with expected structure"""
         stats = get_database_stats()
-        
+
         assert "total_spns" in stats
         assert "total_fmis" in stats
         assert "by_system" in stats
@@ -235,14 +259,14 @@ class TestDatabaseStats:
     def test_stats_counts(self):
         """Stats should have correct counts"""
         stats = get_database_stats()
-        
+
         assert stats["total_spns"] == len(SPN_DATABASE)
         assert stats["total_fmis"] == len(FMI_DESCRIPTIONS)
 
     def test_severity_distribution(self):
         """Should have SPNs of each severity"""
         stats = get_database_stats()
-        
+
         # Should have at least some critical and warning SPNs
         assert stats["by_severity"]["CRITICAL"] > 0
         assert stats["by_severity"]["WARNING"] > 0
@@ -278,8 +302,9 @@ class TestSpanishContent:
         for spn, info in SPN_DATABASE.items():
             if info.severity == DTCSeverity.CRITICAL:
                 # Should have ⛔ or ⚠️ icon
-                assert "⛔" in info.action_es or "⚠️" in info.action_es, \
-                    f"Critical SPN {spn} missing warning icon"
+                assert (
+                    "⛔" in info.action_es or "⚠️" in info.action_es
+                ), f"Critical SPN {spn} missing warning icon"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -300,7 +325,10 @@ class TestRealWorldExamples:
         """SPN157.FMI3 = Fuel Rail Pressure - Voltage High"""
         desc = get_dtc_description(157, 3)
         assert desc["severity"] == "critical"
-        assert "combustible" in desc["action"].lower() or "fuel" in desc["component"].lower()
+        assert (
+            "combustible" in desc["action"].lower()
+            or "fuel" in desc["component"].lower()
+        )
 
     def test_common_dtc_3031_2(self):
         """SPN3031.FMI2 = DEF Quality - Erratic"""
@@ -311,4 +339,7 @@ class TestRealWorldExamples:
         """SPN110.FMI0 = Coolant Temp - Above Normal (Overheating)"""
         desc = get_dtc_description(110, 0)
         assert desc["severity"] == "critical"
-        assert "refrigerante" in desc["component"].lower() or "coolant" in desc["component"].lower()
+        assert (
+            "refrigerante" in desc["component"].lower()
+            or "coolant" in desc["component"].lower()
+        )

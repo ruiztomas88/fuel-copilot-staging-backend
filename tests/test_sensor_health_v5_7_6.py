@@ -169,10 +169,7 @@ class TestIdleDetection:
 
     def test_detect_idle_mode_with_config(self):
         """Test idle detection with custom config"""
-        config = IdleConfig(
-            normal_max_gph=1.0,  # Lower threshold
-            reefer_max_gph=2.0
-        )
+        config = IdleConfig(normal_max_gph=1.0, reefer_max_gph=2.0)  # Lower threshold
         # 1.1 GPH would be REEFER with custom config (above normal_max 1.0)
         result = detect_idle_mode(1.1, config=config)
         assert result == IdleMode.REEFER

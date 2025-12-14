@@ -1,0 +1,546 @@
+"""
+Voltage Trending Service v5.7.6
+═══════════════════════════════════════════════════════════════════════════════
+
+Historical voltage data analysis and trending for fleet trucks.
+Provides data for voltage history graphs and trend analysis.
+
+Features:
+- Get voltage history for a truck (last N hours/days)
+- Calculate voltage trends (increasing, stable, decreasing)
+- Detect voltage anomalies over time
+- Aggregate voltage stats by time period
+
+Usage:
+    service = VoltageTrendingService(db_pool)
+
+    # Get last 24 hours of voltage data
+    history = await service.get_voltage_history("CO0681", hours=24)
+
+    # Get trend analysis
+    trend = await service.analyze_voltage_trend("CO0681", hours=24)
+
+Author: Fuel Analytics Team
+Version: 5.7.6
+"""
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Optional
+import statistics
+
+logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DATA CLASSES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class VoltageDataPoint:
+    """Single voltage reading with timestamp"""
+
+    timestamp: datetime
+    voltage: float
+    rpm: Optional[float] = None
+    engine_running: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "timestamp": self.timestamp.isoformat(),
+            "voltage": round(self.voltage, 2),
+            "rpm": round(self.rpm, 0) if self.rpm else None,
+            "engine_running": self.engine_running,
+        }
+
+
+@dataclass
+class VoltageStats:
+    """Aggregated voltage statistics"""
+
+    truck_id: str
+    period_hours: int
+    sample_count: int
+
+    # Basic stats
+    avg_voltage: float = 0.0
+    min_voltage: float = 0.0
+    max_voltage: float = 0.0
+    std_dev: float = 0.0
+
+    # When engine running vs off
+    avg_running: float = 0.0
+    avg_stopped: float = 0.0
+    samples_running: int = 0
+    samples_stopped: int = 0
+
+    # Time range
+    first_reading: Optional[datetime] = None
+    last_reading: Optional[datetime] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "truck_id": self.truck_id,
+            "period_hours": self.period_hours,
+            "sample_count": self.sample_count,
+            "avg_voltage": round(self.avg_voltage, 2),
+            "min_voltage": round(self.min_voltage, 2),
+            "max_voltage": round(self.max_voltage, 2),
+            "std_dev": round(self.std_dev, 2),
+            "avg_running": round(self.avg_running, 2),
+            "avg_stopped": round(self.avg_stopped, 2),
+            "samples_running": self.samples_running,
+            "samples_stopped": self.samples_stopped,
+            "first_reading": (
+                self.first_reading.isoformat() if self.first_reading else None
+            ),
+            "last_reading": (
+                self.last_reading.isoformat() if self.last_reading else None
+            ),
+        }
+
+
+@dataclass
+class VoltageTrend:
+    """Voltage trend analysis"""
+
+    truck_id: str
+    period_hours: int
+
+    # Trend direction
+    direction: str = "stable"  # "increasing", "stable", "decreasing"
+    change_per_hour: float = 0.0  # Voltage change rate
+
+    # Status
+    status: str = "NORMAL"  # NORMAL, LOW, CRITICAL_LOW, HIGH, CRITICAL_HIGH
+    message: str = ""
+
+    # Anomalies detected
+    anomalies: list = field(default_factory=list)
+    anomaly_count: int = 0
+
+    # Current vs historical
+    current_voltage: float = 0.0
+    avg_historical: float = 0.0
+    deviation_pct: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "truck_id": self.truck_id,
+            "period_hours": self.period_hours,
+            "direction": self.direction,
+            "change_per_hour": round(self.change_per_hour, 3),
+            "status": self.status,
+            "message": self.message,
+            "anomaly_count": self.anomaly_count,
+            "anomalies": self.anomalies,
+            "current_voltage": round(self.current_voltage, 2),
+            "avg_historical": round(self.avg_historical, 2),
+            "deviation_pct": round(self.deviation_pct, 1),
+        }
+
+
+@dataclass
+class VoltageHistoryResponse:
+    """Complete voltage history response"""
+
+    truck_id: str
+    period_hours: int
+    data_points: list[VoltageDataPoint]
+    stats: VoltageStats
+    trend: VoltageTrend
+
+    def to_dict(self) -> dict:
+        return {
+            "truck_id": self.truck_id,
+            "period_hours": self.period_hours,
+            "data_points": [dp.to_dict() for dp in self.data_points],
+            "stats": self.stats.to_dict(),
+            "trend": self.trend.to_dict(),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VOLTAGE THRESHOLDS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Voltage thresholds for Class 8 trucks (12V system)
+VOLTAGE_THRESHOLDS = {
+    "critical_low": 11.5,  # Won't start
+    "low": 12.2,  # Battery draining
+    "normal_min": 12.2,  # Minimum healthy
+    "normal_max": 14.8,  # Maximum healthy (charging)
+    "high": 15.0,  # Overcharge warning
+    "critical_high": 15.5,  # Damage risk
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TRENDING SERVICE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class VoltageTrendingService:
+    """
+    Service for voltage history and trend analysis.
+
+    Uses pwr_ext (truck battery voltage) from fuel_metrics table.
+    """
+
+    def __init__(self, db_pool=None):
+        self.db_pool = db_pool
+        self._cache: dict = {}
+
+    async def get_voltage_history(
+        self, truck_id: str, hours: int = 24, resolution_minutes: int = 5
+    ) -> VoltageHistoryResponse:
+        """
+        Get voltage history for a truck.
+
+        Args:
+            truck_id: Truck identifier
+            hours: Number of hours of history (default 24)
+            resolution_minutes: Time resolution for data points (default 5 min)
+
+        Returns:
+            VoltageHistoryResponse with data points, stats, and trend
+        """
+        if not self.db_pool:
+            logger.warning(f"[{truck_id}] No database pool, returning mock data")
+            return self._generate_mock_response(truck_id, hours)
+
+        try:
+            async with self.db_pool.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    # Query voltage data from fuel_metrics
+                    # Using pwr_ext (battery_voltage) which maps to voltage in _enrich_truck_record
+                    query = """
+                        SELECT 
+                            timestamp_utc,
+                            battery_voltage,
+                            rpm
+                        FROM fuel_metrics
+                        WHERE truck_id = %s
+                          AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+                          AND battery_voltage IS NOT NULL
+                          AND battery_voltage BETWEEN 10.0 AND 18.0
+                        ORDER BY timestamp_utc ASC
+                        LIMIT 5000
+                    """
+
+                    await cursor.execute(query, (truck_id, hours))
+                    rows = await cursor.fetchall()
+
+            return self._process_voltage_data(truck_id, rows, hours, resolution_minutes)
+
+        except Exception as e:
+            logger.error(f"[{truck_id}] Error getting voltage history: {e}")
+            return self._generate_mock_response(truck_id, hours)
+
+    def _process_voltage_data(
+        self, truck_id: str, rows: list, hours: int, resolution_minutes: int
+    ) -> VoltageHistoryResponse:
+        """
+        Process raw voltage data into response.
+        """
+        if not rows:
+            return self._generate_empty_response(truck_id, hours)
+
+        # Convert to data points
+        all_points = []
+        for row in rows:
+            timestamp, voltage, rpm = row
+            if timestamp and voltage:
+                all_points.append(
+                    VoltageDataPoint(
+                        timestamp=timestamp,
+                        voltage=float(voltage),
+                        rpm=float(rpm) if rpm else None,
+                        engine_running=rpm is not None and rpm > 100,
+                    )
+                )
+
+        if not all_points:
+            return self._generate_empty_response(truck_id, hours)
+
+        # Downsample to resolution
+        data_points = self._downsample(all_points, resolution_minutes)
+
+        # Calculate statistics
+        stats = self._calculate_stats(truck_id, all_points, hours)
+
+        # Calculate trend
+        trend = self._calculate_trend(truck_id, all_points, hours)
+
+        return VoltageHistoryResponse(
+            truck_id=truck_id,
+            period_hours=hours,
+            data_points=data_points,
+            stats=stats,
+            trend=trend,
+        )
+
+    def _downsample(
+        self, points: list[VoltageDataPoint], resolution_minutes: int
+    ) -> list[VoltageDataPoint]:
+        """
+        Downsample data points to target resolution.
+        """
+        if not points or resolution_minutes <= 0:
+            return points
+
+        # Target number of points
+        max_points = 500
+        if len(points) <= max_points:
+            return points
+
+        # Simple every-Nth selection
+        step = len(points) // max_points
+        return points[:: max(1, step)]
+
+    def _calculate_stats(
+        self, truck_id: str, points: list[VoltageDataPoint], hours: int
+    ) -> VoltageStats:
+        """
+        Calculate aggregated statistics from data points.
+        """
+        voltages = [p.voltage for p in points]
+        running_voltages = [p.voltage for p in points if p.engine_running]
+        stopped_voltages = [p.voltage for p in points if not p.engine_running]
+
+        return VoltageStats(
+            truck_id=truck_id,
+            period_hours=hours,
+            sample_count=len(points),
+            avg_voltage=statistics.mean(voltages) if voltages else 0.0,
+            min_voltage=min(voltages) if voltages else 0.0,
+            max_voltage=max(voltages) if voltages else 0.0,
+            std_dev=statistics.stdev(voltages) if len(voltages) > 1 else 0.0,
+            avg_running=statistics.mean(running_voltages) if running_voltages else 0.0,
+            avg_stopped=statistics.mean(stopped_voltages) if stopped_voltages else 0.0,
+            samples_running=len(running_voltages),
+            samples_stopped=len(stopped_voltages),
+            first_reading=points[0].timestamp if points else None,
+            last_reading=points[-1].timestamp if points else None,
+        )
+
+    def _calculate_trend(
+        self, truck_id: str, points: list[VoltageDataPoint], hours: int
+    ) -> VoltageTrend:
+        """
+        Calculate voltage trend analysis.
+        """
+        trend = VoltageTrend(truck_id=truck_id, period_hours=hours)
+
+        if len(points) < 5:
+            trend.status = "INSUFFICIENT_DATA"
+            trend.message = "No hay suficientes datos para análisis de tendencia"
+            return trend
+
+        voltages = [p.voltage for p in points]
+
+        # Calculate trend direction using linear regression approximation
+        n = len(voltages)
+        if n > 10:
+            # Compare first 20% vs last 20%
+            first_segment = voltages[: n // 5]
+            last_segment = voltages[-n // 5 :]
+
+            first_avg = statistics.mean(first_segment)
+            last_avg = statistics.mean(last_segment)
+
+            change = last_avg - first_avg
+
+            if change > 0.3:
+                trend.direction = "increasing"
+                trend.change_per_hour = change / hours
+            elif change < -0.3:
+                trend.direction = "decreasing"
+                trend.change_per_hour = change / hours
+            else:
+                trend.direction = "stable"
+                trend.change_per_hour = 0.0
+
+        # Current voltage status
+        current = voltages[-1]
+        avg = statistics.mean(voltages)
+        trend.current_voltage = current
+        trend.avg_historical = avg
+        trend.deviation_pct = ((current - avg) / avg * 100) if avg > 0 else 0
+
+        # Detect anomalies
+        anomalies = []
+        for i, v in enumerate(voltages):
+            if v < VOLTAGE_THRESHOLDS["critical_low"]:
+                anomalies.append(
+                    {
+                        "type": "CRITICAL_LOW",
+                        "voltage": round(v, 2),
+                        "index": i,
+                    }
+                )
+            elif v > VOLTAGE_THRESHOLDS["critical_high"]:
+                anomalies.append(
+                    {
+                        "type": "CRITICAL_HIGH",
+                        "voltage": round(v, 2),
+                        "index": i,
+                    }
+                )
+
+        trend.anomalies = anomalies[:10]  # Limit to 10
+        trend.anomaly_count = len(anomalies)
+
+        # Determine status
+        trend.status, trend.message = self._get_voltage_status(
+            current, avg, trend.direction
+        )
+
+        return trend
+
+    def _get_voltage_status(
+        self, current: float, avg: float, direction: str
+    ) -> tuple[str, str]:
+        """
+        Determine voltage status and message.
+        """
+        if current < VOLTAGE_THRESHOLDS["critical_low"]:
+            return (
+                "CRITICAL_LOW",
+                f"⛔ Voltaje crítico ({current:.1f}V) - El camión no arrancará",
+            )
+
+        if current < VOLTAGE_THRESHOLDS["low"]:
+            if direction == "decreasing":
+                return (
+                    "LOW",
+                    f"⚠️ Voltaje bajo y bajando ({current:.1f}V) - Verificar alternador",
+                )
+            return "LOW", f"⚠️ Voltaje bajo ({current:.1f}V) - Batería descargándose"
+
+        if current > VOLTAGE_THRESHOLDS["critical_high"]:
+            return (
+                "CRITICAL_HIGH",
+                f"⛔ Sobrevoltaje ({current:.1f}V) - Riesgo de daño a electrónicos",
+            )
+
+        if current > VOLTAGE_THRESHOLDS["high"]:
+            return (
+                "HIGH",
+                f"⚠️ Voltaje alto ({current:.1f}V) - Verificar regulador de alternador",
+            )
+
+        if direction == "decreasing" and current < 13.0:
+            return (
+                "WATCH",
+                f"👀 Voltaje estable pero bajo ({current:.1f}V) - Monitorear",
+            )
+
+        return "NORMAL", f"✅ Voltaje normal ({current:.1f}V)"
+
+    def _generate_mock_response(
+        self, truck_id: str, hours: int
+    ) -> VoltageHistoryResponse:
+        """
+        Generate mock response for testing without database.
+        """
+        import random
+
+        now = datetime.utcnow()
+        points = []
+
+        for i in range(hours * 6):  # 6 points per hour
+            timestamp = now - timedelta(minutes=i * 10)
+            voltage = 13.5 + random.uniform(-0.5, 0.5)
+            rpm = random.choice([0, 0, 650, 1200, 1500])
+
+            points.append(
+                VoltageDataPoint(
+                    timestamp=timestamp,
+                    voltage=voltage,
+                    rpm=rpm,
+                    engine_running=rpm > 100,
+                )
+            )
+
+        points.reverse()  # Oldest first
+
+        return VoltageHistoryResponse(
+            truck_id=truck_id,
+            period_hours=hours,
+            data_points=points,
+            stats=self._calculate_stats(truck_id, points, hours),
+            trend=self._calculate_trend(truck_id, points, hours),
+        )
+
+    def _generate_empty_response(
+        self, truck_id: str, hours: int
+    ) -> VoltageHistoryResponse:
+        """
+        Generate empty response when no data available.
+        """
+        return VoltageHistoryResponse(
+            truck_id=truck_id,
+            period_hours=hours,
+            data_points=[],
+            stats=VoltageStats(truck_id=truck_id, period_hours=hours, sample_count=0),
+            trend=VoltageTrend(
+                truck_id=truck_id,
+                period_hours=hours,
+                status="NO_DATA",
+                message="No hay datos de voltaje disponibles",
+            ),
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STANDALONE FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def analyze_voltage_list(voltages: list[float], hours: int = 24) -> VoltageTrend:
+    """
+    Analyze trend from a list of voltage readings.
+
+    Useful for testing or when data is already loaded.
+
+    Args:
+        voltages: List of voltage readings
+        hours: Time span of data
+
+    Returns:
+        VoltageTrend analysis
+    """
+    service = VoltageTrendingService()
+    points = [
+        VoltageDataPoint(
+            timestamp=datetime.utcnow()
+            - timedelta(hours=hours * (1 - i / len(voltages))),
+            voltage=v,
+        )
+        for i, v in enumerate(voltages)
+    ]
+    return service._calculate_trend("TEST", points, hours)
+
+
+def get_voltage_status_simple(voltage: float) -> dict:
+    """
+    Get simple voltage status without historical data.
+
+    Args:
+        voltage: Current voltage reading
+
+    Returns:
+        Dict with status and message
+    """
+    if voltage < VOLTAGE_THRESHOLDS["critical_low"]:
+        return {"status": "CRITICAL_LOW", "message": "Voltaje crítico - no arrancará"}
+    if voltage < VOLTAGE_THRESHOLDS["low"]:
+        return {"status": "LOW", "message": "Voltaje bajo - batería descargándose"}
+    if voltage > VOLTAGE_THRESHOLDS["critical_high"]:
+        return {"status": "CRITICAL_HIGH", "message": "Sobrevoltaje - riesgo de daño"}
+    if voltage > VOLTAGE_THRESHOLDS["high"]:
+        return {"status": "HIGH", "message": "Voltaje alto - verificar alternador"}
+    return {"status": "NORMAL", "message": "Voltaje normal"}
