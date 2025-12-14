@@ -658,3 +658,404 @@ def get_baseline_manager() -> TruckBaselineManager:
     if _baseline_manager is None:
         _baseline_manager = TruckBaselineManager()
     return _baseline_manager
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.7.8: ALGORITHM 1 - LOAD-AWARE CONSUMPTION FACTOR
+# Adjusts expected consumption based on engine load percentage
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def calculate_load_factor(engine_load_pct: Optional[float]) -> float:
+    """
+    🆕 v5.7.8: Calculate consumption adjustment factor based on engine load.
+
+    Engine load significantly affects fuel consumption:
+    - Idle/low load (0-20%): ~50% baseline consumption
+    - Medium load (40-60%): ~75-90% baseline consumption
+    - High load (80-100%): 100-110% baseline consumption
+
+    Formula: load_factor = 0.5 + (engine_load / 200)
+    This gives: 0.5 at 0% load, 1.0 at 100% load
+
+    Args:
+        engine_load_pct: Engine load percentage (0-100), None if unavailable
+
+    Returns:
+        Float factor to multiply against baseline consumption.
+        Returns 1.0 (no adjustment) if engine_load is None.
+
+    Examples:
+        >>> calculate_load_factor(0)      # Idle
+        0.5
+        >>> calculate_load_factor(50)     # Medium load
+        0.75
+        >>> calculate_load_factor(100)    # Full load
+        1.0
+        >>> calculate_load_factor(None)   # No data
+        1.0
+    """
+    if engine_load_pct is None:
+        return 1.0  # No adjustment if data unavailable
+
+    # Clamp to valid range
+    engine_load_pct = max(0.0, min(100.0, engine_load_pct))
+
+    # Linear relationship: 0% load = 0.5 factor, 100% load = 1.0 factor
+    load_factor = 0.5 + (engine_load_pct / 200.0)
+
+    return round(load_factor, 3)
+
+
+def get_load_adjusted_consumption(
+    base_consumption_lph: float,
+    engine_load_pct: Optional[float],
+) -> dict:
+    """
+    🆕 v5.7.8: Get consumption adjusted for engine load.
+
+    Args:
+        base_consumption_lph: Base fuel consumption in liters per hour
+        engine_load_pct: Current engine load percentage
+
+    Returns:
+        Dict with adjusted consumption and factor details
+    """
+    load_factor = calculate_load_factor(engine_load_pct)
+    adjusted_consumption = base_consumption_lph * load_factor
+
+    return {
+        "base_consumption_lph": round(base_consumption_lph, 2),
+        "load_factor": load_factor,
+        "adjusted_consumption_lph": round(adjusted_consumption, 2),
+        "engine_load_pct": engine_load_pct,
+        "adjustment_applied": engine_load_pct is not None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.7.8: ALGORITHM 2 - WEATHER MPG ADJUSTMENT FACTOR
+# Adjusts expected MPG based on ambient temperature
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def calculate_weather_mpg_factor(ambient_temp_f: Optional[float]) -> float:
+    """
+    🆕 v5.7.8: Calculate MPG adjustment factor based on ambient temperature.
+
+    Temperature affects fuel economy:
+    - Cold weather (<32°F): Increases fuel consumption due to:
+      - Thicker engine oil viscosity
+      - Longer warm-up periods
+      - Heater usage
+    - Hot weather (>95°F): Slightly increases consumption due to:
+      - A/C usage
+      - Engine cooling demands
+
+    Optimal temperature range: 50-75°F (no adjustment needed)
+
+    Args:
+        ambient_temp_f: Ambient temperature in Fahrenheit, None if unavailable
+
+    Returns:
+        Float factor to multiply against expected MPG.
+        Returns 1.0 (no adjustment) if temperature is None or in optimal range.
+
+    Reference ranges (based on EPA and fleet studies):
+    - <20°F: 0.88-0.90 (10-12% worse MPG)
+    - 20-32°F: 0.92-0.95 (5-8% worse)
+    - 32-50°F: 0.96-0.98 (2-4% worse)
+    - 50-75°F: 1.0 (optimal)
+    - 75-95°F: 0.98-1.0 (0-2% worse)
+    - >95°F: 0.95-0.97 (3-5% worse)
+
+    Examples:
+        >>> calculate_weather_mpg_factor(70)    # Optimal
+        1.0
+        >>> calculate_weather_mpg_factor(20)    # Very cold
+        0.88
+        >>> calculate_weather_mpg_factor(100)   # Hot
+        0.96
+        >>> calculate_weather_mpg_factor(None)  # No data
+        1.0
+    """
+    if ambient_temp_f is None:
+        return 1.0  # No adjustment if data unavailable
+
+    # Very cold: < 20°F
+    if ambient_temp_f < 20:
+        return 0.88
+
+    # Cold: 20-32°F
+    if ambient_temp_f < 32:
+        # Linear interpolation: 0.88 at 20°F to 0.92 at 32°F
+        return 0.88 + ((ambient_temp_f - 20) / 12) * 0.04
+
+    # Cool: 32-50°F
+    if ambient_temp_f < 50:
+        # Linear interpolation: 0.92 at 32°F to 0.96 at 50°F
+        return 0.92 + ((ambient_temp_f - 32) / 18) * 0.04
+
+    # Optimal: 50-75°F
+    if ambient_temp_f <= 75:
+        return 1.0
+
+    # Warm: 75-95°F
+    if ambient_temp_f <= 95:
+        # Linear interpolation: 1.0 at 75°F to 0.97 at 95°F
+        return 1.0 - ((ambient_temp_f - 75) / 20) * 0.03
+
+    # Hot: > 95°F
+    if ambient_temp_f <= 110:
+        # Linear interpolation: 0.97 at 95°F to 0.94 at 110°F
+        return 0.97 - ((ambient_temp_f - 95) / 15) * 0.03
+
+    # Extreme heat: > 110°F
+    return 0.94
+
+
+def get_weather_adjusted_mpg(
+    base_mpg: float,
+    ambient_temp_f: Optional[float],
+) -> dict:
+    """
+    🆕 v5.7.8: Get MPG expectation adjusted for weather.
+
+    Args:
+        base_mpg: Expected MPG under normal conditions
+        ambient_temp_f: Current ambient temperature in Fahrenheit
+
+    Returns:
+        Dict with adjusted MPG and factor details
+    """
+    weather_factor = calculate_weather_mpg_factor(ambient_temp_f)
+    adjusted_mpg = base_mpg * weather_factor
+
+    # Determine weather category
+    if ambient_temp_f is None:
+        category = "UNKNOWN"
+    elif ambient_temp_f < 32:
+        category = "COLD"
+    elif ambient_temp_f < 50:
+        category = "COOL"
+    elif ambient_temp_f <= 75:
+        category = "OPTIMAL"
+    elif ambient_temp_f <= 95:
+        category = "WARM"
+    else:
+        category = "HOT"
+
+    return {
+        "base_mpg": round(base_mpg, 2),
+        "weather_factor": round(weather_factor, 3),
+        "adjusted_mpg": round(adjusted_mpg, 2),
+        "ambient_temp_f": ambient_temp_f,
+        "weather_category": category,
+        "adjustment_applied": ambient_temp_f is not None,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.7.8: ALGORITHM 3 - DAYS-TO-FAILURE PREDICTION
+# Estimates time until maintenance needed based on trend analysis
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def calculate_days_to_failure(
+    current_value: float,
+    threshold: float,
+    trend_slope_per_day: float,
+    min_days: float = 0.5,
+    max_days: float = 365.0,
+) -> Optional[float]:
+    """
+    🆕 v5.7.8: Calculate estimated days until a metric crosses a threshold.
+
+    This is a simple linear extrapolation based on observed trend.
+    Used for predictive maintenance scheduling.
+
+    Formula: days = (threshold - current_value) / trend_slope_per_day
+
+    Args:
+        current_value: Current sensor/metric value
+        threshold: Failure/warning threshold to reach
+        trend_slope_per_day: Rate of change per day (positive = increasing)
+        min_days: Minimum days to return (avoid near-zero predictions)
+        max_days: Maximum days to cap predictions
+
+    Returns:
+        Estimated days until threshold is crossed, or None if:
+        - Trend is moving away from threshold
+        - Trend is near zero
+
+    Note: If already at threshold, returns min_days.
+
+    Examples:
+        >>> calculate_days_to_failure(70.0, 100.0, 5.0)  # Approaching upper threshold
+        6.0  # 30 points to go / 5 per day = 6 days
+
+        >>> calculate_days_to_failure(70.0, 50.0, -5.0)  # Approaching lower threshold
+        4.0  # 20 points to go / 5 per day = 4 days
+
+        >>> calculate_days_to_failure(70.0, 100.0, -5.0)  # Moving away from threshold
+        None  # Not approaching threshold
+    """
+    # Near-zero trend - can't predict
+    if abs(trend_slope_per_day) < 0.001:
+        return None  # No meaningful trend
+
+    # Calculate direction to threshold
+    distance_to_threshold = threshold - current_value
+
+    # Already at threshold - return min_days
+    if abs(distance_to_threshold) < 0.001:
+        return min_days
+
+    # Determine if we're approaching or moving away from threshold
+    # Approaching means: (threshold - current) and slope have the same sign
+    # i.e., if threshold > current (distance > 0), we need slope > 0 to approach
+    # if threshold < current (distance < 0), we need slope < 0 to approach
+
+    approaching = (distance_to_threshold > 0 and trend_slope_per_day > 0) or (
+        distance_to_threshold < 0 and trend_slope_per_day < 0
+    )
+
+    if not approaching:
+        # Moving away from threshold
+        return None
+
+    # Calculate days (both values have same sign, so result is positive)
+    days = abs(distance_to_threshold) / abs(trend_slope_per_day)
+
+    # Clamp to reasonable range
+    days = max(min_days, min(max_days, days))
+
+    return round(days, 1)
+
+
+def predict_maintenance_timing(
+    sensor_name: str,
+    current_value: float,
+    history: list,
+    warning_threshold: float,
+    critical_threshold: float,
+    is_higher_worse: bool = True,
+) -> dict:
+    """
+    🆕 v5.7.8: Comprehensive maintenance timing prediction for a sensor.
+
+    Analyzes recent history to determine trend and predicts when
+    maintenance will be needed.
+
+    Args:
+        sensor_name: Name of the sensor/metric
+        current_value: Current sensor value
+        history: List of recent values (oldest first)
+        warning_threshold: Threshold for warning state
+        critical_threshold: Threshold for critical state
+        is_higher_worse: If True, increasing values are bad (e.g., temperature)
+                        If False, decreasing values are bad (e.g., battery voltage)
+
+    Returns:
+        Dict with prediction details
+    """
+    result = {
+        "sensor": sensor_name,
+        "current_value": round(current_value, 2),
+        "warning_threshold": warning_threshold,
+        "critical_threshold": critical_threshold,
+        "trend_slope_per_day": None,
+        "trend_direction": "UNKNOWN",
+        "days_to_warning": None,
+        "days_to_critical": None,
+        "urgency": "UNKNOWN",
+        "recommendation": "Insufficient data for prediction",
+    }
+
+    # Need at least 3 data points for trend
+    if len(history) < 3:
+        return result
+
+    # Calculate trend using linear regression (simple least squares)
+    n = len(history)
+    x_values = list(range(n))  # Assumes evenly spaced readings
+    x_mean = sum(x_values) / n
+    y_mean = sum(history) / n
+
+    numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, history))
+    denominator = sum((x - x_mean) ** 2 for x in x_values)
+
+    if denominator == 0:
+        return result
+
+    slope = numerator / denominator  # Units per reading interval
+
+    # Assume readings are daily (adjust this based on actual data frequency)
+    readings_per_day = 1.0  # If hourly, use 24.0
+    trend_slope_per_day = slope * readings_per_day
+
+    result["trend_slope_per_day"] = round(trend_slope_per_day, 4)
+
+    # Determine trend direction relative to "worse"
+    if is_higher_worse:
+        if trend_slope_per_day > 0.1:
+            result["trend_direction"] = "DEGRADING"
+        elif trend_slope_per_day < -0.1:
+            result["trend_direction"] = "IMPROVING"
+        else:
+            result["trend_direction"] = "STABLE"
+    else:
+        if trend_slope_per_day < -0.1:
+            result["trend_direction"] = "DEGRADING"
+        elif trend_slope_per_day > 0.1:
+            result["trend_direction"] = "IMPROVING"
+        else:
+            result["trend_direction"] = "STABLE"
+
+    # Calculate days to thresholds
+    if is_higher_worse:
+        days_to_warning = calculate_days_to_failure(
+            current_value, warning_threshold, trend_slope_per_day
+        )
+        days_to_critical = calculate_days_to_failure(
+            current_value, critical_threshold, trend_slope_per_day
+        )
+    else:
+        # For "lower is worse", we track decreasing toward threshold
+        days_to_warning = calculate_days_to_failure(
+            current_value, warning_threshold, trend_slope_per_day
+        )
+        days_to_critical = calculate_days_to_failure(
+            current_value, critical_threshold, trend_slope_per_day
+        )
+
+    result["days_to_warning"] = days_to_warning
+    result["days_to_critical"] = days_to_critical
+
+    # Determine urgency and recommendation
+    if days_to_critical is not None and days_to_critical < 7:
+        result["urgency"] = "CRITICAL"
+        result["recommendation"] = (
+            f"Schedule maintenance within {int(days_to_critical)} days"
+        )
+    elif days_to_warning is not None and days_to_warning < 7:
+        result["urgency"] = "HIGH"
+        result["recommendation"] = (
+            f"Monitor closely, warning expected in ~{int(days_to_warning)} days"
+        )
+    elif days_to_critical is not None and days_to_critical < 30:
+        result["urgency"] = "MEDIUM"
+        result["recommendation"] = (
+            f"Plan maintenance within {int(days_to_critical)} days"
+        )
+    elif result["trend_direction"] == "DEGRADING":
+        result["urgency"] = "LOW"
+        result["recommendation"] = "Gradual degradation detected, continue monitoring"
+    elif result["trend_direction"] == "IMPROVING":
+        result["urgency"] = "NONE"
+        result["recommendation"] = "Condition improving, no action needed"
+    else:
+        result["urgency"] = "NONE"
+        result["recommendation"] = "Stable condition, routine monitoring"
+
+    return result
