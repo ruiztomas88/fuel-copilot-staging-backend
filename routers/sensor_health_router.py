@@ -55,19 +55,31 @@ router = APIRouter(prefix="/fuelAnalytics/api/sensor-health", tags=["Sensor Heal
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+class ExpectedRange(BaseModel):
+    """Expected idle GPH range"""
+
+    min_gph: float = 0.4
+    max_gph: float = 1.2
+
+
 class IdleValidationResponse(BaseModel):
-    """Idle validation result for a truck"""
+    """Idle validation result for a truck - matches frontend IdleValidation type"""
 
     truck_id: str
+    timestamp: str
+    idle_mode: str  # ENGINE_OFF, NORMAL, REEFER, HEAVY
+    idle_gph: float
     is_valid: bool
-    confidence: str
-    calculated_idle_hours: float
-    ecu_idle_hours: Optional[float]
-    deviation_pct: Optional[float]
-    idle_ratio_pct: Optional[float]
-    needs_investigation: bool
+    validation_status: str  # VALID, ANOMALY, SENSOR_ERROR, UNKNOWN
+    expected_range: ExpectedRange
+    confidence: float  # 0.0 - 1.0
     message: str
-    last_validated: str
+    # Legacy fields for backwards compatibility
+    calculated_idle_hours: Optional[float] = None
+    ecu_idle_hours: Optional[float] = None
+    deviation_pct: Optional[float] = None
+    idle_ratio_pct: Optional[float] = None
+    needs_investigation: bool = False
 
 
 class SensorHealthSummary(BaseModel):
@@ -96,6 +108,40 @@ class VoltageDataPoint(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+# 🆕 v5.7.6: In-memory cache for expensive operations
+_idle_validation_cache: Dict[str, Any] = {}
+_idle_cache_timestamp: Optional[datetime] = None
+IDLE_CACHE_TTL_SECONDS = 60  # Cache for 60 seconds
+
+
+def _get_expected_range(idle_mode: str) -> ExpectedRange:
+    """Get expected idle GPH range based on idle mode"""
+    ranges = {
+        "ENGINE_OFF": ExpectedRange(min_gph=0.0, max_gph=0.1),
+        "NORMAL": ExpectedRange(min_gph=0.4, max_gph=1.2),
+        "REEFER": ExpectedRange(min_gph=1.0, max_gph=2.0),
+        "HEAVY": ExpectedRange(min_gph=1.5, max_gph=2.5),
+    }
+    return ranges.get(idle_mode, ExpectedRange(min_gph=0.4, max_gph=1.2))
+
+
+def _map_to_validation_status(validation) -> str:
+    """Map validation result to frontend status"""
+    if validation.is_valid:
+        return "VALID"
+    if validation.needs_investigation:
+        return "ANOMALY"
+    if validation.confidence == "LOW":
+        return "SENSOR_ERROR"
+    return "UNKNOWN"
+
+
+def _confidence_to_float(confidence_str: str) -> float:
+    """Convert confidence string to float"""
+    mapping = {"HIGH": 0.9, "MEDIUM": 0.7, "LOW": 0.4}
+    return mapping.get(confidence_str, 0.5)
+
+
 @router.get("/idle-validation", response_model=List[IdleValidationResponse])
 async def get_idle_validation_status(
     truck_id: Optional[str] = Query(None, description="Filter by truck ID"),
@@ -109,15 +155,31 @@ async def get_idle_validation_status(
     Compares our calculated idle hours against ECU idle_hours sensor
     to validate accuracy of our idle tracking.
 
+    🔧 v5.7.6: Added caching (60s TTL) for performance.
+
     Returns:
         List of validation results per truck
     """
+    global _idle_validation_cache, _idle_cache_timestamp
+
     if not IDLE_VALIDATION_AVAILABLE:
         raise HTTPException(
             status_code=503, detail="Idle validation module not available"
         )
 
     try:
+        # Check cache (only for full fleet requests without truck_id filter)
+        cache_key = f"idle_validation:{truck_id or 'all'}:{only_issues}"
+        now = datetime.now(timezone.utc)
+
+        if (
+            cache_key in _idle_validation_cache
+            and _idle_cache_timestamp
+            and (now - _idle_cache_timestamp).total_seconds() < IDLE_CACHE_TTL_SECONDS
+        ):
+            logger.debug(f"Cache hit for {cache_key}")
+            return _idle_validation_cache[cache_key]
+
         # Get latest truck data with idle info
         trucks = db.get_all_trucks()
         results = []
@@ -131,10 +193,29 @@ async def get_idle_validation_status(
                 if not record:
                     continue
 
-                # Get idle data
+                # Get idle data from record
+                idle_gph = record.get("idle_gph") or record.get("consumption_gph", 0)
+                idle_mode_raw = record.get("idle_mode") or record.get(
+                    "idle_method", "NOT_IDLE"
+                )
+
+                # Map idle mode to standard values
+                idle_mode = "ENGINE_OFF"
+                if (
+                    idle_mode_raw == "NOT_IDLE"
+                    or record.get("truck_status") == "MOVING"
+                ):
+                    idle_mode = "ENGINE_OFF"
+                elif "REEFER" in str(idle_mode_raw).upper():
+                    idle_mode = "REEFER"
+                elif "HEAVY" in str(idle_mode_raw).upper() or idle_gph > 1.5:
+                    idle_mode = "HEAVY"
+                elif record.get("truck_status") == "STOPPED" or idle_gph > 0:
+                    idle_mode = "NORMAL"
+
                 ecu_idle = record.get("idle_hours_ecu")
                 ecu_engine = record.get("engine_hours")
-                calc_idle = record.get("idle_gph", 0) * 24  # Rough estimate from GPH
+                calc_idle = idle_gph * 24  # Rough estimate from GPH
 
                 # Validate
                 validation = validate_idle_calculation(
@@ -156,21 +237,30 @@ async def get_idle_validation_status(
                 results.append(
                     IdleValidationResponse(
                         truck_id=tid,
+                        timestamp=record.get("timestamp", now.isoformat()),
+                        idle_mode=idle_mode,
+                        idle_gph=round(idle_gph, 2) if idle_gph else 0.0,
                         is_valid=validation.is_valid,
-                        confidence=validation.confidence,
+                        validation_status=_map_to_validation_status(validation),
+                        expected_range=_get_expected_range(idle_mode),
+                        confidence=_confidence_to_float(validation.confidence),
+                        message=validation.message,
                         calculated_idle_hours=validation.calculated_idle_hours,
                         ecu_idle_hours=validation.ecu_idle_hours,
                         deviation_pct=validation.deviation_pct,
                         idle_ratio_pct=round(idle_ratio, 1) if idle_ratio else None,
                         needs_investigation=validation.needs_investigation,
-                        message=validation.message,
-                        last_validated=datetime.now(timezone.utc).isoformat(),
                     )
                 )
 
             except Exception as e:
                 logger.debug(f"Error validating idle for {tid}: {e}")
                 continue
+
+        # Update cache
+        _idle_validation_cache[cache_key] = results
+        _idle_cache_timestamp = now
+        logger.debug(f"Cached {len(results)} idle validation results")
 
         return results
 
