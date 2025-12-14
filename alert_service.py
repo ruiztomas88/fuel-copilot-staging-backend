@@ -762,6 +762,15 @@ class AlertManager:
         self._last_alert_by_truck: Dict[str, datetime] = {}
         self._min_alert_interval_seconds = 300  # 5 minutes between alerts per truck
 
+        # 🔧 v5.7.4: Rate limiting per alert TYPE + truck (prevents DTC/Voltage spam)
+        self._last_alert_by_type: Dict[str, datetime] = (
+            {}
+        )  # key = "truck_id:alert_type"
+        self._critical_alert_interval_seconds = (
+            1800  # 30 min for CRITICAL (was unlimited!)
+        )
+        self._type_alert_interval_seconds = 3600  # 1 hour for same type on same truck
+
     def _format_alert_message(self, alert: Alert) -> str:
         """Format alert for SMS/WhatsApp"""
         priority_emoji = {
@@ -802,17 +811,33 @@ class AlertManager:
 
     def _should_send_alert(self, alert: Alert) -> bool:
         """Check rate limiting and filters"""
-        # Critical alerts always go through
-        if alert.priority == AlertPriority.CRITICAL:
-            return True
+        # 🔧 v5.7.4: Rate limit by alert TYPE + truck_id to prevent spam
+        type_key = f"{alert.truck_id}:{alert.alert_type.value}"
+        last_type_alert = self._last_alert_by_type.get(type_key)
 
-        # Check rate limit per truck
+        if last_type_alert:
+            elapsed = (utc_now() - last_type_alert).total_seconds()
+
+            # Critical alerts: rate limit to 30 min (was unlimited!)
+            if alert.priority == AlertPriority.CRITICAL:
+                if elapsed < self._critical_alert_interval_seconds:
+                    logger.debug(
+                        f"Rate limited CRITICAL: {type_key} (last {elapsed:.0f}s ago, need {self._critical_alert_interval_seconds}s)"
+                    )
+                    return False
+            else:
+                # Non-critical: 1 hour per type per truck
+                if elapsed < self._type_alert_interval_seconds:
+                    logger.debug(f"Rate limited: {type_key} (last {elapsed:.0f}s ago)")
+                    return False
+
+        # Also check general per-truck limit (any alert type)
         last_alert = self._last_alert_by_truck.get(alert.truck_id)
         if last_alert:
             elapsed = (utc_now() - last_alert).total_seconds()
             if elapsed < self._min_alert_interval_seconds:
                 logger.debug(
-                    f"Rate limited: {alert.truck_id} (last alert {elapsed:.0f}s ago)"
+                    f"Rate limited (general): {alert.truck_id} (last alert {elapsed:.0f}s ago)"
                 )
                 return False
 
@@ -838,8 +863,11 @@ class AlertManager:
         if not self._should_send_alert(alert):
             return False
 
-        # Update last alert time
+        # Update last alert time (both general and per-type)
         self._last_alert_by_truck[alert.truck_id] = utc_now()
+        # 🔧 v5.7.4: Track per alert type to prevent same-type spam
+        type_key = f"{alert.truck_id}:{alert.alert_type.value}"
+        self._last_alert_by_type[type_key] = utc_now()
 
         # Default channels based on priority
         if channels is None:

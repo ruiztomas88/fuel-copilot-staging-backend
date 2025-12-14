@@ -30,30 +30,32 @@ def diagnose_truck(truck_id: str = None):
     """Check all available sensors for a truck or all trucks"""
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     # Get truck mapping
     from wialon_reader import TRUCK_UNIT_MAPPING
-    
+
     if truck_id:
         # Find specific truck
-        matching = {k: v for k, v in TRUCK_UNIT_MAPPING.items() if truck_id.upper() in k.upper()}
+        matching = {
+            k: v for k, v in TRUCK_UNIT_MAPPING.items() if truck_id.upper() in k.upper()
+        }
         if not matching:
             print(f"❌ Truck {truck_id} not found in mapping")
             return
     else:
         matching = dict(list(TRUCK_UNIT_MAPPING.items())[:5])  # First 5 trucks
-    
+
     print("=" * 70)
     print("DIAGNÓSTICO DE SENSORES WIALON")
     print("=" * 70)
-    
+
     # Sensors we're looking for
     target_sensors = ["dtc", "sats", "pwr_int", "pwr_ext", "fuel_lvl", "rpm"]
-    
+
     for tid, unit_id in matching.items():
         print(f"\n🚛 {tid} (unit_id: {unit_id})")
         print("-" * 50)
-        
+
         # Get ALL unique parameter names for this truck in last hour
         query = """
             SELECT DISTINCT p as param_name
@@ -64,12 +66,12 @@ def diagnose_truck(truck_id: str = None):
         """
         cursor.execute(query, (unit_id,))
         all_params = [row["param_name"] for row in cursor.fetchall()]
-        
+
         print(f"📊 Parámetros disponibles ({len(all_params)}):")
         for p in all_params:
             marker = "⭐" if p in target_sensors else "  "
             print(f"   {marker} {p}")
-        
+
         # Check for target sensors specifically
         print(f"\n🎯 Sensores críticos:")
         for sensor in target_sensors:
@@ -83,15 +85,26 @@ def diagnose_truck(truck_id: str = None):
             """
             cursor.execute(query, (unit_id, sensor))
             row = cursor.fetchone()
-            
+
             if row:
                 print(f"   ✅ {sensor}: {row['value']} ({row['ts']})")
             else:
                 # Try variations
                 variations = {
-                    "dtc": ["dtc_code", "dtc_codes", "diagnostic_code", "fault_code", "active_dtc"],
+                    "dtc": [
+                        "dtc_code",
+                        "dtc_codes",
+                        "diagnostic_code",
+                        "fault_code",
+                        "active_dtc",
+                    ],
                     "sats": ["satellites", "gps_sats", "sat_count", "sat_num"],
-                    "pwr_int": ["battery_int", "int_voltage", "internal_voltage", "bat_int"],
+                    "pwr_int": [
+                        "battery_int",
+                        "int_voltage",
+                        "internal_voltage",
+                        "bat_int",
+                    ],
                 }
                 found = False
                 for var in variations.get(sensor, []):
@@ -101,10 +114,10 @@ def diagnose_truck(truck_id: str = None):
                         print(f"   ⚠️ {sensor} encontrado como '{var}': {row['value']}")
                         found = True
                         break
-                
+
                 if not found:
                     print(f"   ❌ {sensor}: NO DISPONIBLE")
-        
+
         # Special check for DTC - look for ANY parameter containing "dtc" or "fault"
         query = """
             SELECT p, value, FROM_UNIXTIME(m) as ts
@@ -117,12 +130,12 @@ def diagnose_truck(truck_id: str = None):
         """
         cursor.execute(query, (unit_id,))
         dtc_rows = cursor.fetchall()
-        
+
         if dtc_rows:
             print(f"\n🔧 Parámetros relacionados con DTC:")
             for row in dtc_rows:
                 print(f"   • {row['p']}: {row['value']} ({row['ts']})")
-    
+
     cursor.close()
     conn.close()
 
@@ -131,30 +144,30 @@ def check_cache_file():
     """Check the fleet_sensors.json cache"""
     import json
     from pathlib import Path
-    
+
     cache_file = Path("cache/fleet_sensors.json")
-    
+
     print("\n" + "=" * 70)
     print("VERIFICACIÓN DE CACHE")
     print("=" * 70)
-    
+
     if not cache_file.exists():
         print("❌ Cache file does not exist!")
         print(f"   Expected at: {cache_file.absolute()}")
         return
-    
+
     with open(cache_file, "r") as f:
         data = json.load(f)
-    
+
     print(f"✅ Cache file exists")
     print(f"📅 Updated at: {data.get('updated_at')}")
     print(f"🚛 Trucks in cache: {len(data.get('data', []))}")
-    
+
     # Check how many have each sensor
     trucks_with_dtc = 0
     trucks_with_sats = 0
     trucks_with_pwr_int = 0
-    
+
     for truck in data.get("data", []):
         if truck.get("dtc"):
             trucks_with_dtc += 1
@@ -162,12 +175,12 @@ def check_cache_file():
             trucks_with_sats += 1
         if truck.get("pwr_int") is not None:
             trucks_with_pwr_int += 1
-    
+
     print(f"\n📊 Sensor coverage:")
     print(f"   DTC:     {trucks_with_dtc} trucks")
     print(f"   GPS (sats): {trucks_with_sats} trucks")
     print(f"   Voltage (pwr_int): {trucks_with_pwr_int} trucks")
-    
+
     # Show first 3 trucks with DTC
     dtc_trucks = [t for t in data.get("data", []) if t.get("dtc")]
     if dtc_trucks:
@@ -178,13 +191,13 @@ def check_cache_file():
 
 if __name__ == "__main__":
     import sys
-    
+
     truck_id = sys.argv[1] if len(sys.argv) > 1 else None
-    
+
     print("\n🔍 Diagnóstico iniciando...\n")
     diagnose_truck(truck_id)
     check_cache_file()
-    
+
     print("\n" + "=" * 70)
     print("DIAGNÓSTICO COMPLETO")
     print("=" * 70)

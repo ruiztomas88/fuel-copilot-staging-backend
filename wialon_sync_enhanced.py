@@ -1370,63 +1370,69 @@ def process_truck(
 def save_dtc_event(connection, truck_id: str, alert, sensor_data: Dict) -> bool:
     """
     🆕 v5.7.3: Save DTC event to dtc_events table for history and ML.
-    
+
     Args:
         connection: MySQL connection
         truck_id: Truck identifier
         alert: DTCAlert from dtc_analyzer
         sensor_data: Current sensor data for context
-    
+
     Returns:
         True if saved successfully
     """
     if not alert.codes:
         return False
-    
+
     try:
         with connection.cursor() as cursor:
             for code in alert.codes:
                 # Check for duplicate (same truck, code, within 5 minutes)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id FROM dtc_events 
                     WHERE truck_id = %s AND dtc_code = %s 
                     AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 5 MINUTE)
                     LIMIT 1
-                """, (truck_id, code.code))
-                
+                """,
+                    (truck_id, code.code),
+                )
+
                 if cursor.fetchone():
                     logger.debug(f"Skipping duplicate DTC {code.code} for {truck_id}")
                     continue
-                
-                cursor.execute("""
+
+                cursor.execute(
+                    """
                     INSERT INTO dtc_events 
                     (truck_id, carrier_id, timestamp_utc, spn, fmi, dtc_code, raw_value,
                      severity, system, description, recommended_action,
                      latitude, longitude, speed_mph, engine_hours, odometer_mi)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    truck_id,
-                    sensor_data.get("carrier_id"),
-                    datetime.now(timezone.utc),
-                    code.spn,
-                    code.fmi,
-                    code.code,
-                    code.raw,
-                    alert.severity.value,
-                    getattr(code, 'system', 'UNKNOWN'),
-                    code.description or alert.message,
-                    getattr(code, 'recommended_action', None),
-                    sensor_data.get("lat"),
-                    sensor_data.get("lon"),
-                    sensor_data.get("speed"),
-                    sensor_data.get("engine_hours"),
-                    sensor_data.get("odometer"),
-                ))
-            
+                """,
+                    (
+                        truck_id,
+                        sensor_data.get("carrier_id"),
+                        datetime.now(timezone.utc),
+                        code.spn,
+                        code.fmi,
+                        code.code,
+                        code.raw,
+                        alert.severity.value,
+                        getattr(code, "system", "UNKNOWN"),
+                        code.description or alert.message,
+                        getattr(code, "recommended_action", None),
+                        sensor_data.get("lat"),
+                        sensor_data.get("lon"),
+                        sensor_data.get("speed"),
+                        sensor_data.get("engine_hours"),
+                        sensor_data.get("odometer"),
+                    ),
+                )
+
             connection.commit()
             logger.info(f"💾 Saved {len(alert.codes)} DTC(s) for {truck_id}")
             return True
-            
+
     except Exception as e:
         logger.error(f"Error saving DTC for {truck_id}: {e}")
         return False
@@ -1575,21 +1581,23 @@ _last_idle_reset_date: Optional[str] = None
 def _reset_idle_tracking_if_new_day(state_manager: "StateManager") -> None:
     """
     🆕 v5.7.3: Reset idle_tracking accumulator at midnight for accurate daily validation.
-    
+
     The idle validation compares our calculated idle hours vs ECU over 24h periods.
     Resetting daily ensures meaningful comparison windows.
     """
     global _last_idle_reset_date
-    
+
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    
+
     if _last_idle_reset_date != today:
         if state_manager.idle_tracking:
             truck_count = len(state_manager.idle_tracking)
             # Reset calculated hours but keep ECU reference
             for truck_id in state_manager.idle_tracking:
                 state_manager.idle_tracking[truck_id]["calc_idle_hours"] = 0.0
-            logger.info(f"🔄 Daily idle tracking reset for {truck_count} trucks (new day: {today})")
+            logger.info(
+                f"🔄 Daily idle tracking reset for {truck_count} trucks (new day: {today})"
+            )
         _last_idle_reset_date = today
 
 
@@ -1682,17 +1690,27 @@ def sync_cycle(
                             alert=alert,
                             sensor_data=sensor_data,
                         )
-                        
+
                         if alert.severity == DTCSeverity.CRITICAL:
                             logger.warning(f"🚨 CRITICAL DTC: {alert.message}")
                             # 🆕 v5.7.3: Send notification via alert_service
                             send_dtc_alert(
                                 truck_id=truck_id,
-                                dtc_code=alert.codes[0].code if alert.codes else "UNKNOWN",
+                                dtc_code=(
+                                    alert.codes[0].code if alert.codes else "UNKNOWN"
+                                ),
                                 severity="CRITICAL",
                                 description=alert.message,
-                                system=getattr(alert.codes[0], 'system', 'UNKNOWN') if alert.codes else 'UNKNOWN',
-                                recommended_action=getattr(alert.codes[0], 'recommended_action', None) if alert.codes else None,
+                                system=(
+                                    getattr(alert.codes[0], "system", "UNKNOWN")
+                                    if alert.codes
+                                    else "UNKNOWN"
+                                ),
+                                recommended_action=(
+                                    getattr(alert.codes[0], "recommended_action", None)
+                                    if alert.codes
+                                    else None
+                                ),
                             )
                         elif alert.severity == DTCSeverity.WARNING:
                             logger.info(
@@ -1701,10 +1719,16 @@ def sync_cycle(
                             # Send email-only for warnings
                             send_dtc_alert(
                                 truck_id=truck_id,
-                                dtc_code=alert.codes[0].code if alert.codes else "UNKNOWN",
+                                dtc_code=(
+                                    alert.codes[0].code if alert.codes else "UNKNOWN"
+                                ),
                                 severity="WARNING",
                                 description=alert.message,
-                                system=getattr(alert.codes[0], 'system', 'UNKNOWN') if alert.codes else 'UNKNOWN',
+                                system=(
+                                    getattr(alert.codes[0], "system", "UNKNOWN")
+                                    if alert.codes
+                                    else "UNKNOWN"
+                                ),
                             )
                 except Exception as dtc_error:
                     logger.debug(f"DTC processing error for {truck_id}: {dtc_error}")
