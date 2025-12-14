@@ -107,6 +107,9 @@ class DatabaseManager:
         3. Default 0.8 GPH (if engine is running)
 
         Also adds health_score and health_category
+        
+        🆕 v5.7.5: Added voltage, gps_satellites, gps_quality, voltage_status
+        mappings for frontend compatibility
         """
         truck_status = record.get("truck_status", "OFFLINE")
         consumption_gph = record.get("consumption_gph")
@@ -156,6 +159,72 @@ class DatabaseManager:
             record["health_category"] = "warning"
         else:
             record["health_category"] = "healthy"
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # 🆕 v5.7.5: Frontend compatibility mappings for diagnostics display
+        # ═══════════════════════════════════════════════════════════════════════
+        
+        # Map battery_voltage -> voltage (frontend expects 'voltage')
+        battery_voltage = record.get("battery_voltage")
+        if battery_voltage is not None and not pd.isna(battery_voltage):
+            record["voltage"] = float(battery_voltage)
+            # Calculate voltage_status based on engine state
+            rpm_val = record.get("rpm", 0) or 0
+            is_running = rpm_val > 100
+            if is_running:
+                # Engine running: expect 13.5-14.8V
+                if battery_voltage < 12.0:
+                    record["voltage_status"] = "CRITICAL_LOW"
+                elif battery_voltage < 13.2:
+                    record["voltage_status"] = "LOW"
+                elif battery_voltage > 15.5:
+                    record["voltage_status"] = "CRITICAL_HIGH"
+                elif battery_voltage > 14.8:
+                    record["voltage_status"] = "HIGH"
+                else:
+                    record["voltage_status"] = "NORMAL"
+            else:
+                # Engine off: expect 12.2-12.8V
+                if battery_voltage < 11.5:
+                    record["voltage_status"] = "CRITICAL_LOW"
+                elif battery_voltage < 12.2:
+                    record["voltage_status"] = "LOW"
+                elif battery_voltage > 13.2:
+                    record["voltage_status"] = "HIGH"  # Unusual when off
+                else:
+                    record["voltage_status"] = "NORMAL"
+        
+        # Map sats -> gps_satellites (frontend expects 'gps_satellites')
+        sats = record.get("sats")
+        if sats is not None and not pd.isna(sats):
+            record["gps_satellites"] = int(sats)
+        
+        # Parse gps_quality from descriptive format "GOOD|sats=10|acc=3m" to simple "GOOD"
+        gps_quality_raw = record.get("gps_quality")
+        if gps_quality_raw and isinstance(gps_quality_raw, str) and "|" in gps_quality_raw:
+            # Extract just the quality level (first part before |)
+            record["gps_quality"] = gps_quality_raw.split("|")[0]
+        elif gps_quality_raw:
+            # Already simple format
+            record["gps_quality"] = gps_quality_raw
+
+        # 🆕 v5.7.5: Map DTC data for frontend
+        # dtc_code contains actual codes (e.g., "100.4,157.3")
+        # dtc may be a count (0-N) or flag (0/1)
+        dtc_code = record.get("dtc_code")
+        dtc_flag = record.get("dtc")
+        
+        if dtc_code and str(dtc_code).strip():
+            # We have actual codes - use them directly
+            record["dtc_codes"] = str(dtc_code)
+            record["dtc_count"] = len(str(dtc_code).split(","))
+        elif dtc_flag is not None and not pd.isna(dtc_flag):
+            dtc_val = float(dtc_flag) if dtc_flag else 0
+            if dtc_val > 0:
+                # We have a count/flag indicating active DTCs but no codes
+                count = int(dtc_val) if dtc_val > 1 else 1
+                record["dtc_count"] = count
+                # Note: dtc_codes will be None - frontend should show count instead
 
         return record
 

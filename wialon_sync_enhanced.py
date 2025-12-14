@@ -1360,6 +1360,9 @@ def process_truck(
         "pwr_int": pwr_int,
         "gps_quality": gps_quality_str,  # 🆕 v5.7.3: Descriptive format QUALITY|sats=X|acc=Ym
         "idle_hours_ecu": sensor_data.get("idle_hours"),
+        # 🆕 v5.7.5: DTC data for diagnostic display
+        "dtc": sensor_data.get("dtc"),  # Count/flag (0=none, >0=active)
+        "dtc_code": sensor_data.get("dtc_code"),  # Actual codes like "100.4,157.3"
     }
 
 
@@ -1453,6 +1456,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
             # 🆕 v5.3.3: Added ambient_temp_f and intake_air_temp_f columns
             # 🔧 FIX v5.4.7: Added idle_gph to INSERT (was missing - BUG #1 from audit)
             # 🆕 v5.7.1: Added sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu
+            # 🆕 v5.7.5: Added dtc, dtc_code for diagnostic tracking
             query = """
                 INSERT INTO fuel_metrics 
                 (timestamp_utc, truck_id, carrier_id, truck_status,
@@ -1467,8 +1471,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  oil_pressure_psi, oil_temp_f, battery_voltage, 
                  engine_load_pct, def_level_pct,
                  ambient_temp_f, intake_air_temp_f,
-                 sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu,
+                 dtc, dtc_code)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -1506,7 +1511,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     pwr_int = VALUES(pwr_int),
                     terrain_factor = VALUES(terrain_factor),
                     gps_quality = VALUES(gps_quality),
-                    idle_hours_ecu = VALUES(idle_hours_ecu)
+                    idle_hours_ecu = VALUES(idle_hours_ecu),
+                    dtc = VALUES(dtc),
+                    dtc_code = VALUES(dtc_code)
             """
 
             values = (
@@ -1556,6 +1563,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 metrics.get("terrain_factor"),
                 metrics.get("gps_quality"),
                 metrics.get("idle_hours_ecu"),
+                # 🆕 v5.7.5: DTC columns
+                metrics.get("dtc"),
+                metrics.get("dtc_code"),
             )
 
             cursor.execute(query, values)
@@ -1678,8 +1688,15 @@ def sync_cycle(
 
             # 🆕 v3.12.28 / v5.7.5: Process DTC codes and generate alerts
             # Prefer dtc_code (actual codes like "100.4,157.3") over dtc (which may be just 0/1 flag)
-            dtc_to_process = truck_data.dtc_code if truck_data.dtc_code else (
-                truck_data.dtc if truck_data.dtc and str(truck_data.dtc) not in ["0", "1", "0.0", "1.0"] else None
+            dtc_to_process = (
+                truck_data.dtc_code
+                if truck_data.dtc_code
+                else (
+                    truck_data.dtc
+                    if truck_data.dtc
+                    and str(truck_data.dtc) not in ["0", "1", "0.0", "1.0"]
+                    else None
+                )
             )
             if dtc_to_process:
                 try:

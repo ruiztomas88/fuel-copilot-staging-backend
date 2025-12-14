@@ -261,7 +261,15 @@ async def get_diagnostic_alerts():
             dtc_code = getattr(truck, "dtc_code", None) or truck.get("dtc_code")
             dtc_flag = getattr(truck, "dtc", None) or truck.get("dtc")
             # Use dtc_code if available (actual codes), otherwise dtc if it's not just a flag
-            dtc_value = dtc_code if dtc_code else (dtc_flag if dtc_flag and str(dtc_flag) not in ["0", "1", "0.0", "1.0"] else None)
+            dtc_value = (
+                dtc_code
+                if dtc_code
+                else (
+                    dtc_flag
+                    if dtc_flag and str(dtc_flag) not in ["0", "1", "0.0", "1.0"]
+                    else None
+                )
+            )
             if dtc_value:
                 try:
                     timestamp = (

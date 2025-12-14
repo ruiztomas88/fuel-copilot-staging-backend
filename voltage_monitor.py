@@ -118,7 +118,7 @@ def analyze_voltage(
 ) -> Optional[VoltageAlert]:
     """
     Analizar voltaje del sistema y generar alertas.
-    
+
     🔧 v5.7.5: Parameter renamed from pwr_int to voltage for clarity.
     Use pwr_ext (truck battery 12-14V), NOT pwr_int (GPS backup 3-4V).
 
