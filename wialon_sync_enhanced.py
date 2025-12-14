@@ -1089,6 +1089,18 @@ def process_truck(
         if consumption_lph is not None:
             consumption_lph = consumption_lph * terrain_factor
 
+    # 🆕 v5.7.10: Apply load_factor to adjust consumption for engine load
+    # Engine load significantly affects fuel consumption
+    load_factor = 1.0
+    if engine_load is not None and consumption_lph is not None:
+        from mpg_engine import calculate_load_factor
+
+        load_factor = calculate_load_factor(engine_load)
+        consumption_lph = consumption_lph * load_factor
+        logger.debug(
+            f"[LOAD] {truck_id}: engine_load={engine_load}% -> load_factor={load_factor:.3f}"
+        )
+
     # 🔧 FIX v3.12.1: Use 'is not None' instead of truthy check
     # 0.0 is a valid consumption value, shouldn't become None
     consumption_gph = consumption_lph / 3.78541 if consumption_lph is not None else None
@@ -1306,6 +1318,26 @@ def process_truck(
     sensor_data["idle_gph"] = idle_gph
     state_manager.last_sensor_data[truck_id] = sensor_data
 
+    # 🆕 v5.7.10: Calculate weather-adjusted MPG
+    # If ambient_temp is available, adjust expected MPG for display
+    weather_adjusted_mpg = None
+    weather_mpg_factor = None
+    if mpg_current is not None:
+        from mpg_engine import calculate_weather_mpg_factor
+
+        weather_mpg_factor = calculate_weather_mpg_factor(ambient_temp)
+        # weather_factor reduces expected MPG in extreme temps
+        # So actual MPG / weather_factor = what we'd expect in optimal conditions
+        # For display: show the raw MPG but include the factor for context
+        weather_adjusted_mpg = mpg_current
+        if weather_mpg_factor < 1.0 and ambient_temp is not None:
+            # Show what MPG "would be" in optimal conditions (inverse adjustment)
+            weather_adjusted_mpg = mpg_current / weather_mpg_factor
+            logger.debug(
+                f"[WEATHER] {truck_id}: ambient={ambient_temp}°F -> factor={weather_mpg_factor:.3f}, "
+                f"raw_mpg={mpg_current:.2f}, adjusted={weather_adjusted_mpg:.2f}"
+            )
+
     # Return complete metrics
     return {
         "timestamp_utc": timestamp,
@@ -1324,6 +1356,13 @@ def process_truck(
         "consumption_lph": round(consumption_lph, 2) if consumption_lph else None,
         "consumption_gph": round(consumption_gph, 3) if consumption_gph else None,
         "mpg_current": round(mpg_current, 2) if mpg_current else None,
+        # 🆕 v5.7.10: Weather-adjusted MPG for display
+        "mpg_weather_adjusted": (
+            round(weather_adjusted_mpg, 2) if weather_adjusted_mpg else None
+        ),
+        "weather_mpg_factor": (
+            round(weather_mpg_factor, 3) if weather_mpg_factor else None
+        ),
         "rpm": int(rpm) if rpm else None,
         "engine_hours": engine_hours,
         "odometer_mi": odometer,
@@ -1355,6 +1394,8 @@ def process_truck(
         "ambient_temp_f": ambient_temp,
         # 🆕 v3.12.28: Terrain factor for grade-adjusted consumption
         "terrain_factor": round(terrain_factor, 3),
+        # 🆕 v5.7.10: Load factor for engine-load-adjusted consumption
+        "load_factor": round(load_factor, 3),
         # 🆕 v5.7.1: New sensor data for ML and diagnostics
         "sats": sats,
         "pwr_int": pwr_int,

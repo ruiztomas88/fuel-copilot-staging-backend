@@ -336,9 +336,7 @@ class TestSensorThresholds:
 
         for sensor, config in SENSOR_THRESHOLDS.items():
             for field in required_fields:
-                assert (
-                    field in config
-                ), f"Sensor {sensor} missing field: {field}"
+                assert field in config, f"Sensor {sensor} missing field: {field}"
 
     def test_voltage_thresholds_are_logical(self):
         """Test that voltage thresholds make sense"""
@@ -447,9 +445,7 @@ class TestFleetMaintenanceDashboardModels:
             high_count=1,
             medium_count=0,
             forecasts=[],
-            summary_by_sensor={
-                "battery_voltage": {"critical": 1, "high": 0}
-            },
+            summary_by_sensor={"battery_voltage": {"critical": 1, "high": 0}},
             last_updated="2025-12-14T12:00:00Z",
         )
         assert dashboard.total_trucks == 10
@@ -464,7 +460,7 @@ class TestDaysToFailureEndpoint:
         """Test prediction returns STABLE for flat data"""
         # Stable voltage around 13.0V - perfectly flat
         history = [13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 13.0]
-        
+
         result = predict_maintenance_timing(
             sensor_name="battery_voltage",
             current_value=13.0,
@@ -473,7 +469,7 @@ class TestDaysToFailureEndpoint:
             critical_threshold=11.5,
             is_higher_worse=False,
         )
-        
+
         assert result["trend_direction"] == "STABLE"
         assert result["urgency"] == "NONE"
         # Stable trend may still show max days (365) or None
@@ -483,7 +479,7 @@ class TestDaysToFailureEndpoint:
         """Test prediction returns DEGRADING for declining data"""
         # Voltage steadily dropping
         history = [13.5, 13.3, 13.1, 12.9, 12.7, 12.5, 12.3]
-        
+
         result = predict_maintenance_timing(
             sensor_name="battery_voltage",
             current_value=12.1,
@@ -492,16 +488,19 @@ class TestDaysToFailureEndpoint:
             critical_threshold=11.5,
             is_higher_worse=False,
         )
-        
+
         assert result["trend_direction"] == "DEGRADING"
         # Should have calculated days to thresholds
-        assert result["days_to_warning"] is not None or result["days_to_critical"] is not None
+        assert (
+            result["days_to_warning"] is not None
+            or result["days_to_critical"] is not None
+        )
 
     def test_prediction_urgency_levels(self):
         """Test that urgency is correctly assigned based on days to failure"""
         # Fast drop in voltage: ~ -0.2V/day
         history = [12.5, 12.3, 12.1, 11.9, 11.7]
-        
+
         result = predict_maintenance_timing(
             sensor_name="battery_voltage",
             current_value=11.6,  # Very close to critical (11.5)
@@ -510,7 +509,7 @@ class TestDaysToFailureEndpoint:
             critical_threshold=11.5,
             is_higher_worse=False,
         )
-        
+
         # Should be CRITICAL since close to threshold
         assert result["urgency"] in ["CRITICAL", "HIGH"]
         assert "maintenance" in result["recommendation"].lower()
@@ -519,7 +518,7 @@ class TestDaysToFailureEndpoint:
         """Test that temperature prediction works (higher is worse)"""
         # Temperature rising
         history = [195, 198, 201, 204, 207]
-        
+
         result = predict_maintenance_timing(
             sensor_name="coolant_temp_f",
             current_value=210,
@@ -528,17 +527,17 @@ class TestDaysToFailureEndpoint:
             critical_threshold=230,
             is_higher_worse=True,
         )
-        
+
         assert result["trend_direction"] == "DEGRADING"
         assert result["trend_slope_per_day"] > 0
 
     def test_integration_alert_and_prediction(self):
         """Test that alert type and prediction work together"""
         from alert_service import AlertType
-        
+
         # Verify alert type exists
         assert AlertType.MAINTENANCE_PREDICTION is not None
-        
+
         # Run a prediction that would trigger alert
         history = [12.2, 12.0, 11.8, 11.6, 11.55]
         result = predict_maintenance_timing(
@@ -549,7 +548,7 @@ class TestDaysToFailureEndpoint:
             critical_threshold=11.5,
             is_higher_worse=False,
         )
-        
+
         # This should be critical
         assert result["urgency"] in ["CRITICAL", "HIGH"]
         assert result["days_to_critical"] is not None
