@@ -51,12 +51,19 @@ def register_v3_12_21_routers(app: FastAPI) -> None:
     try:
         from routers.sensor_health_router import router as sensor_health_router
 
-        app.include_router(
-            sensor_health_router, prefix="/api/v2", tags=["Sensor Health"]
-        )
+        app.include_router(sensor_health_router, tags=["Sensor Health"])
         logger.info("✅ Registered sensor_health_router")
     except ImportError as e:
         logger.warning(f"⚠️ Could not import sensor_health_router: {e}")
+
+    # 🆕 v5.7.6: MPG Baseline Router
+    try:
+        from routers.mpg_baseline_router import router as mpg_baseline_router
+
+        app.include_router(mpg_baseline_router, tags=["MPG Baseline"])
+        logger.info("✅ Registered mpg_baseline_router")
+    except ImportError as e:
+        logger.warning(f"⚠️ Could not import mpg_baseline_router: {e}")
 
     logger.info("🚀 v3.12.21 routers registration complete")
 
