@@ -464,12 +464,13 @@ from time import time as current_time
 _rate_limit_store: Dict[str, list] = defaultdict(list)
 
 # Rate limits by role (requests per minute)
+# 🔧 v5.7.8: Increased anonymous from 30 to 120 for dashboard loading
 RATE_LIMITS = {
     "super_admin": 1000,
     "carrier_admin": 300,
     "admin": 300,
-    "viewer": 100,
-    "anonymous": 30,
+    "viewer": 150,
+    "anonymous": 120,  # Increased from 30 - dashboards need ~50-80 calls on load
 }
 
 
