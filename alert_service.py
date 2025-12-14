@@ -74,6 +74,9 @@ class AlertType(Enum):
     VOLTAGE_ALERT = "voltage_alert"  # 🆕 v5.7.3: Battery/alternator issue
     IDLE_DEVIATION = "idle_deviation"  # 🆕 v5.7.6: Idle calculation vs ECU mismatch
     GPS_QUALITY = "gps_quality"  # 🆕 v5.7.6: Poor GPS signal
+    MAINTENANCE_PREDICTION = (
+        "maintenance_prediction"  # 🆕 v5.7.9: Days-to-failure alert
+    )
 
 
 @dataclass
@@ -796,6 +799,7 @@ class AlertManager:
             AlertType.VOLTAGE_ALERT: "🔋",  # 🆕 v5.7.3
             AlertType.IDLE_DEVIATION: "⏱️",  # 🆕 v5.7.6
             AlertType.GPS_QUALITY: "📡",  # 🆕 v5.7.6
+            AlertType.MAINTENANCE_PREDICTION: "⚠️",  # 🆕 v5.7.9
         }
 
         emoji = f"{priority_emoji.get(alert.priority, '📢')} {type_emoji.get(alert.alert_type, '📢')}"
@@ -1249,6 +1253,77 @@ class AlertManager:
         )
         return self.send_alert(alert, channels=channels)
 
+    def alert_maintenance_prediction(
+        self,
+        truck_id: str,
+        sensor: str,
+        current_value: float,
+        threshold: float,
+        days_to_failure: float,
+        urgency: str,
+        unit: str = "",
+    ) -> bool:
+        """
+        🆕 v5.7.9: Send predictive maintenance alert for days-to-failure < 7.
+
+        Alerts when a sensor is trending toward failure threshold.
+
+        Args:
+            truck_id: Truck identifier
+            sensor: Sensor name (e.g., "battery_voltage", "coolant_temp_f")
+            current_value: Current sensor value
+            threshold: Threshold value being approached
+            days_to_failure: Estimated days until threshold is crossed
+            urgency: CRITICAL, HIGH, or MEDIUM
+            unit: Unit of measurement (e.g., "V", "°F", "PSI")
+
+        Returns:
+            True if alert sent successfully
+        """
+        # Determine priority based on urgency
+        if urgency == "CRITICAL" or days_to_failure < 3:
+            priority = AlertPriority.CRITICAL
+            channels = ["sms", "email"]
+            emoji = "🚨⚠️"
+            message = "URGENT: MAINTENANCE NEEDED SOON"
+        elif urgency == "HIGH" or days_to_failure < 5:
+            priority = AlertPriority.HIGH
+            channels = ["email"]
+            emoji = "⚠️🔧"
+            message = "MAINTENANCE ALERT"
+        else:
+            priority = AlertPriority.MEDIUM
+            channels = ["email"]
+            emoji = "📊🔧"
+            message = "MAINTENANCE PREDICTION"
+
+        # Format sensor name for display
+        sensor_display = sensor.replace("_", " ").title()
+
+        alert = Alert(
+            alert_type=AlertType.MAINTENANCE_PREDICTION,
+            priority=priority,
+            truck_id=truck_id,
+            message=f"{emoji} {message}\n"
+            f"Sensor: {sensor_display}\n"
+            f"Current: {current_value:.1f}{unit}\n"
+            f"Threshold: {threshold:.1f}{unit}\n"
+            f"Days to failure: ~{days_to_failure:.0f} days",
+            details={
+                "sensor": sensor,
+                "current_value": f"{current_value:.1f}{unit}",
+                "threshold": f"{threshold:.1f}{unit}",
+                "days_to_failure": f"{days_to_failure:.0f} days",
+                "urgency": urgency,
+                "action": (
+                    "Schedule immediate maintenance"
+                    if days_to_failure < 3
+                    else f"Schedule maintenance within {int(days_to_failure)} days"
+                ),
+            },
+        )
+        return self.send_alert(alert, channels=channels)
+
     def alert_gps_quality(
         self,
         truck_id: str,
@@ -1410,6 +1485,21 @@ def send_gps_quality_alert(
     """🆕 v5.7.6: Quick function to send GPS quality alert"""
     return get_alert_manager().alert_gps_quality(
         truck_id, satellites, quality_level, estimated_accuracy_m
+    )
+
+
+def send_maintenance_prediction_alert(
+    truck_id: str,
+    sensor: str,
+    current_value: float,
+    threshold: float,
+    days_to_failure: float,
+    urgency: str,
+    unit: str = "",
+) -> bool:
+    """🆕 v5.7.9: Quick function to send predictive maintenance alert"""
+    return get_alert_manager().alert_maintenance_prediction(
+        truck_id, sensor, current_value, threshold, days_to_failure, urgency, unit
     )
 
 

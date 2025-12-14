@@ -739,3 +739,395 @@ async def get_fleet_voltage_trending():
     except Exception as e:
         logger.error(f"Error getting fleet voltage trending: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.7.9: DAYS-TO-FAILURE DASHBOARD
+# Provides predictive maintenance insights for the entire fleet
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Import maintenance prediction
+try:
+    from mpg_engine import predict_maintenance_timing, calculate_days_to_failure
+
+    PREDICTION_AVAILABLE = True
+except ImportError:
+    PREDICTION_AVAILABLE = False
+    logger.warning("Maintenance prediction module not available")
+
+
+class MaintenancePrediction(BaseModel):
+    """Maintenance prediction for a single sensor/metric"""
+
+    sensor: str
+    current_value: float
+    warning_threshold: float
+    critical_threshold: float
+    trend_direction: str  # DEGRADING, STABLE, IMPROVING, UNKNOWN
+    days_to_warning: Optional[float] = None
+    days_to_critical: Optional[float] = None
+    urgency: str  # CRITICAL, HIGH, MEDIUM, LOW, NONE
+    recommendation: str
+
+
+class TruckMaintenanceForecast(BaseModel):
+    """Complete maintenance forecast for a truck"""
+
+    truck_id: str
+    overall_urgency: str  # Highest urgency across all sensors
+    predictions: List[MaintenancePrediction]
+    needs_attention: bool
+    last_updated: str
+
+
+class FleetMaintenanceDashboard(BaseModel):
+    """Fleet-wide maintenance dashboard"""
+
+    total_trucks: int
+    trucks_needing_attention: int
+    critical_count: int
+    high_count: int
+    medium_count: int
+    forecasts: List[TruckMaintenanceForecast]
+    summary_by_sensor: Dict[str, Dict[str, int]]
+    last_updated: str
+
+
+# Sensor thresholds for predictive maintenance
+SENSOR_THRESHOLDS = {
+    "battery_voltage": {
+        "warning": 12.0,
+        "critical": 11.5,
+        "is_higher_worse": False,  # Lower voltage is worse
+        "unit": "V",
+    },
+    "coolant_temp_f": {
+        "warning": 210.0,
+        "critical": 230.0,
+        "is_higher_worse": True,  # Higher temp is worse
+        "unit": "°F",
+    },
+    "oil_pressure_psi": {
+        "warning": 25.0,
+        "critical": 15.0,
+        "is_higher_worse": False,  # Lower pressure is worse
+        "unit": "PSI",
+    },
+    "def_level_pct": {
+        "warning": 15.0,
+        "critical": 5.0,
+        "is_higher_worse": False,  # Lower DEF is worse
+        "unit": "%",
+    },
+    "dpf_soot_pct": {
+        "warning": 80.0,
+        "critical": 95.0,
+        "is_higher_worse": True,  # Higher soot is worse
+        "unit": "%",
+    },
+}
+
+
+async def _get_sensor_history(
+    truck_id: str, sensor_field: str, days: int = 30
+) -> List[float]:
+    """Get daily aggregated sensor history for a truck"""
+    try:
+        from database_mysql import get_sqlalchemy_engine
+        from sqlalchemy import text
+
+        engine = get_sqlalchemy_engine()
+
+        with engine.connect() as conn:
+            query = text(
+                f"""
+                SELECT 
+                    DATE(timestamp_utc) as day,
+                    AVG({sensor_field}) as avg_value
+                FROM fuel_metrics
+                WHERE truck_id = :truck_id
+                AND timestamp_utc > DATE_SUB(NOW(), INTERVAL :days DAY)
+                AND {sensor_field} IS NOT NULL
+                GROUP BY DATE(timestamp_utc)
+                ORDER BY day ASC
+            """
+            )
+
+            result = conn.execute(query, {"truck_id": truck_id, "days": days})
+            rows = result.fetchall()
+
+            return [float(row.avg_value) for row in rows if row.avg_value is not None]
+
+    except Exception as e:
+        logger.debug(f"Error getting sensor history for {truck_id}/{sensor_field}: {e}")
+        return []
+
+
+@router.get("/days-to-failure/{truck_id}")
+async def get_truck_maintenance_forecast(
+    truck_id: str,
+    days_back: int = Query(30, ge=7, le=90, description="Days of history to analyze"),
+):
+    """
+    🆕 v5.7.9: Get maintenance forecast for a specific truck.
+
+    Analyzes sensor trends and predicts when maintenance will be needed.
+
+    Args:
+        truck_id: Truck ID to analyze
+        days_back: Days of history to analyze (7-90, default 30)
+
+    Returns:
+        TruckMaintenanceForecast with predictions for all monitored sensors
+    """
+    if not PREDICTION_AVAILABLE:
+        raise HTTPException(
+            status_code=503, detail="Maintenance prediction module not available"
+        )
+
+    try:
+        predictions = []
+        highest_urgency = "NONE"
+        urgency_order = {
+            "CRITICAL": 5,
+            "HIGH": 4,
+            "MEDIUM": 3,
+            "LOW": 2,
+            "NONE": 1,
+            "UNKNOWN": 0,
+        }
+
+        # Get current values
+        record = db.get_truck_latest_record(truck_id)
+        if not record:
+            raise HTTPException(status_code=404, detail=f"Truck {truck_id} not found")
+
+        # Map of record fields to sensor names
+        field_mapping = {
+            "battery_voltage": ["battery_voltage", "voltage", "pwr_int"],
+            "coolant_temp_f": ["coolant_temp_f", "coolant_temp"],
+            "oil_pressure_psi": ["oil_pressure_psi", "oil_press"],
+            "def_level_pct": ["def_level_pct", "def_level"],
+            "dpf_soot_pct": ["dpf_soot_pct", "dpf_soot"],
+        }
+
+        for sensor_name, config in SENSOR_THRESHOLDS.items():
+            # Get current value from record
+            current_value = None
+            db_field = sensor_name
+
+            for field in field_mapping.get(sensor_name, [sensor_name]):
+                current_value = record.get(field)
+                if current_value is not None:
+                    db_field = field
+                    break
+
+            if current_value is None:
+                continue
+
+            # Get history
+            history = await _get_sensor_history(truck_id, db_field, days_back)
+
+            if len(history) < 3:
+                # Not enough data for prediction
+                predictions.append(
+                    MaintenancePrediction(
+                        sensor=sensor_name,
+                        current_value=round(float(current_value), 2),
+                        warning_threshold=config["warning"],
+                        critical_threshold=config["critical"],
+                        trend_direction="UNKNOWN",
+                        days_to_warning=None,
+                        days_to_critical=None,
+                        urgency="UNKNOWN",
+                        recommendation=f"Insufficient data ({len(history)}/3 days minimum)",
+                    )
+                )
+                continue
+
+            # Run prediction
+            prediction = predict_maintenance_timing(
+                sensor_name=sensor_name,
+                current_value=float(current_value),
+                history=history,
+                warning_threshold=config["warning"],
+                critical_threshold=config["critical"],
+                is_higher_worse=config["is_higher_worse"],
+            )
+
+            pred_model = MaintenancePrediction(
+                sensor=sensor_name,
+                current_value=prediction["current_value"],
+                warning_threshold=config["warning"],
+                critical_threshold=config["critical"],
+                trend_direction=prediction["trend_direction"],
+                days_to_warning=prediction["days_to_warning"],
+                days_to_critical=prediction["days_to_critical"],
+                urgency=prediction["urgency"],
+                recommendation=prediction["recommendation"],
+            )
+            predictions.append(pred_model)
+
+            # 🆕 v5.7.9: Send alert if days-to-critical < 7
+            if (
+                ALERTS_AVAILABLE
+                and prediction["days_to_critical"] is not None
+                and prediction["days_to_critical"] < 7
+                and prediction["urgency"] in ["CRITICAL", "HIGH"]
+            ):
+                try:
+                    from alert_service import send_maintenance_prediction_alert
+
+                    send_maintenance_prediction_alert(
+                        truck_id=truck_id,
+                        sensor=sensor_name,
+                        current_value=prediction["current_value"],
+                        threshold=config["critical"],
+                        days_to_failure=prediction["days_to_critical"],
+                        urgency=prediction["urgency"],
+                        unit=config.get("unit", ""),
+                    )
+                    logger.info(
+                        f"⚠️ Maintenance alert sent for {truck_id}/{sensor_name}: "
+                        f"{prediction['days_to_critical']:.0f} days to critical"
+                    )
+                except Exception as alert_err:
+                    logger.debug(f"Failed to send maintenance alert: {alert_err}")
+
+            # Track highest urgency
+            if urgency_order.get(prediction["urgency"], 0) > urgency_order.get(
+                highest_urgency, 0
+            ):
+                highest_urgency = prediction["urgency"]
+
+        needs_attention = highest_urgency in ["CRITICAL", "HIGH", "MEDIUM"]
+
+        return TruckMaintenanceForecast(
+            truck_id=truck_id,
+            overall_urgency=highest_urgency,
+            predictions=predictions,
+            needs_attention=needs_attention,
+            last_updated=datetime.now(timezone.utc).isoformat(),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting maintenance forecast for {truck_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/days-to-failure", response_model=FleetMaintenanceDashboard)
+async def get_fleet_maintenance_dashboard(
+    days_back: int = Query(30, ge=7, le=90, description="Days of history to analyze"),
+    only_attention: bool = Query(
+        False, description="Only show trucks needing attention"
+    ),
+):
+    """
+    🆕 v5.7.9: Get fleet-wide maintenance dashboard with days-to-failure predictions.
+
+    Provides an overview of all trucks with predicted maintenance needs.
+
+    Args:
+        days_back: Days of history to analyze (7-90, default 30)
+        only_attention: If True, only return trucks needing attention
+
+    Returns:
+        FleetMaintenanceDashboard with all truck forecasts and summary statistics
+    """
+    if not PREDICTION_AVAILABLE:
+        raise HTTPException(
+            status_code=503, detail="Maintenance prediction module not available"
+        )
+
+    try:
+        from config import get_allowed_trucks
+
+        allowed_trucks = get_allowed_trucks()
+        if not allowed_trucks:
+            return FleetMaintenanceDashboard(
+                total_trucks=0,
+                trucks_needing_attention=0,
+                critical_count=0,
+                high_count=0,
+                medium_count=0,
+                forecasts=[],
+                summary_by_sensor={},
+                last_updated=datetime.now(timezone.utc).isoformat(),
+            )
+
+        forecasts = []
+        critical_count = 0
+        high_count = 0
+        medium_count = 0
+
+        # Track sensor-level summary
+        sensor_summary: Dict[str, Dict[str, int]] = {}
+        for sensor in SENSOR_THRESHOLDS.keys():
+            sensor_summary[sensor] = {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "none": 0,
+                "unknown": 0,
+            }
+
+        for truck_id in allowed_trucks[:50]:  # Limit to 50 trucks for performance
+            try:
+                forecast = await get_truck_maintenance_forecast(truck_id, days_back)
+
+                if only_attention and not forecast.needs_attention:
+                    continue
+
+                forecasts.append(forecast)
+
+                # Count urgencies
+                if forecast.overall_urgency == "CRITICAL":
+                    critical_count += 1
+                elif forecast.overall_urgency == "HIGH":
+                    high_count += 1
+                elif forecast.overall_urgency == "MEDIUM":
+                    medium_count += 1
+
+                # Update sensor summary
+                for pred in forecast.predictions:
+                    if pred.sensor in sensor_summary:
+                        urgency_key = pred.urgency.lower()
+                        if urgency_key in sensor_summary[pred.sensor]:
+                            sensor_summary[pred.sensor][urgency_key] += 1
+
+            except HTTPException:
+                continue
+            except Exception as e:
+                logger.debug(f"Error forecasting {truck_id}: {e}")
+                continue
+
+        # Sort by urgency (critical first)
+        urgency_order = {
+            "CRITICAL": 0,
+            "HIGH": 1,
+            "MEDIUM": 2,
+            "LOW": 3,
+            "NONE": 4,
+            "UNKNOWN": 5,
+        }
+        forecasts.sort(key=lambda f: urgency_order.get(f.overall_urgency, 99))
+
+        return FleetMaintenanceDashboard(
+            total_trucks=len(allowed_trucks),
+            trucks_needing_attention=critical_count + high_count + medium_count,
+            critical_count=critical_count,
+            high_count=high_count,
+            medium_count=medium_count,
+            forecasts=forecasts,
+            summary_by_sensor=sensor_summary,
+            last_updated=datetime.now(timezone.utc).isoformat(),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting fleet maintenance dashboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

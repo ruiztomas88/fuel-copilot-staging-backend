@@ -992,8 +992,22 @@ def predict_maintenance_timing(
 
     slope = numerator / denominator  # Units per reading interval
 
-    # Assume readings are daily (adjust this based on actual data frequency)
-    readings_per_day = 1.0  # If hourly, use 24.0
+    # Convert slope from "per reading" to "per day"
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 🔧 v5.7.9: IMPORTANT - readings_per_day assumption
+    # ═══════════════════════════════════════════════════════════════════════════
+    # This value assumes the `history` list contains DAILY aggregated values,
+    # NOT raw sensor readings (which come every ~15 seconds = 5760/day).
+    #
+    # The callers of this function should pass pre-aggregated daily data:
+    # - voltage_history.py: Uses daily AVG from fuel_metrics
+    # - sensor_health_router.py: Uses daily rollup queries
+    # - predictive_maintenance.py: Uses daily trend data
+    #
+    # If you pass raw sensor data, multiply result by 5760 or pass hourly
+    # data and set readings_per_day=24 in a future version.
+    # ═══════════════════════════════════════════════════════════════════════════
+    readings_per_day = 1.0  # Assumes daily aggregated history values
     trend_slope_per_day = slope * readings_per_day
 
     result["trend_slope_per_day"] = round(trend_slope_per_day, 4)
