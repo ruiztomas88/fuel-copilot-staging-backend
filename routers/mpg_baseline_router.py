@@ -188,6 +188,7 @@ async def analyze_deviation(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/fleet", response_model=FleetBaselineResponse)
 @router.get("/fleet/summary", response_model=FleetBaselineResponse)
 async def get_fleet_baselines(
     days: int = Query(30, ge=7, le=365, description="Days of history to analyze")
