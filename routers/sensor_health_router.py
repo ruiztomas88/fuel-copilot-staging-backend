@@ -47,7 +47,7 @@ try:
 except ImportError:
     VOLTAGE_AVAILABLE = False
 
-router = APIRouter(prefix="/fuelAnalytics/sensor-health", tags=["Sensor Health"])
+router = APIRouter(prefix="/fuelAnalytics/api/sensor-health", tags=["Sensor Health"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -432,34 +432,34 @@ async def get_gps_quality_overview():
 async def get_voltage_summary():
     """
     🆕 v5.7.6: Get voltage summary for all trucks in the fleet.
-    
+
     Returns current voltage status and trends for each truck.
     Useful for identifying battery/alternator issues fleet-wide.
     """
     try:
         trucks = db.get_all_trucks()
         results = []
-        
+
         status_counts = {
             "CRITICAL_LOW": 0,
             "LOW": 0,
             "NORMAL": 0,
             "HIGH": 0,
             "CRITICAL_HIGH": 0,
-            "UNKNOWN": 0
+            "UNKNOWN": 0,
         }
-        
+
         for tid in trucks:
             try:
                 record = db.get_truck_latest_record(tid)
                 if not record:
                     continue
-                    
+
                 voltage = record.get("voltage") or record.get("pwr_int")
                 if voltage is None:
                     status_counts["UNKNOWN"] += 1
                     continue
-                
+
                 # Determine status
                 if voltage < 11.5:
                     status = "CRITICAL_LOW"
@@ -471,35 +471,44 @@ async def get_voltage_summary():
                     status = "HIGH"
                 else:
                     status = "CRITICAL_HIGH"
-                
+
                 status_counts[status] += 1
-                
-                results.append({
-                    "truck_id": tid,
-                    "voltage": round(voltage, 2),
-                    "status": status,
-                    "timestamp": record.get("timestamp_utc", "").isoformat() if hasattr(record.get("timestamp_utc", ""), "isoformat") else str(record.get("timestamp_utc", ""))
-                })
-                
+
+                results.append(
+                    {
+                        "truck_id": tid,
+                        "voltage": round(voltage, 2),
+                        "status": status,
+                        "timestamp": (
+                            record.get("timestamp_utc", "").isoformat()
+                            if hasattr(record.get("timestamp_utc", ""), "isoformat")
+                            else str(record.get("timestamp_utc", ""))
+                        ),
+                    }
+                )
+
             except Exception as e:
                 logger.debug(f"Error checking voltage for {tid}: {e}")
                 continue
-        
+
         # Calculate summary stats
         voltages = [r["voltage"] for r in results if r.get("voltage")]
         avg_voltage = sum(voltages) / len(voltages) if voltages else 0
-        
+
         return {
             "trucks": results,
             "summary": {
                 "total": len(trucks),
                 "avg_voltage": round(avg_voltage, 2),
                 "by_status": status_counts,
-                "issues_count": status_counts["CRITICAL_LOW"] + status_counts["LOW"] + status_counts["HIGH"] + status_counts["CRITICAL_HIGH"]
+                "issues_count": status_counts["CRITICAL_LOW"]
+                + status_counts["LOW"]
+                + status_counts["HIGH"]
+                + status_counts["CRITICAL_HIGH"],
             },
-            "last_updated": datetime.now(timezone.utc).isoformat()
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         }
-        
+
     except Exception as e:
         logger.error(f"Error getting voltage summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
