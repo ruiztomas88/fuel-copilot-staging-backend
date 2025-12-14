@@ -565,6 +565,112 @@ def detect_refuel(
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENHANCED THEFT DETECTION v5.8.0
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def get_time_of_day_factor(timestamp: Optional[datetime] = None) -> Tuple[float, str]:
+    """
+    🆕 v5.8.0: Get theft confidence multiplier based on time of day.
+
+    Night (10PM - 5AM): 1.3x (more suspicious)
+    Weekend night: 1.4x (most suspicious)
+    Business hours: 0.8x (less suspicious - more witnesses)
+    Weekend day: 1.0x (neutral)
+
+    Returns:
+        Tuple of (factor, description)
+    """
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc)
+
+    hour = timestamp.hour
+    weekday = timestamp.weekday()  # 0=Monday, 6=Sunday
+    is_weekend = weekday >= 5
+
+    # Night hours (10 PM - 5 AM)
+    is_night = hour >= 22 or hour <= 5
+
+    if is_night:
+        if is_weekend:
+            return (1.4, "WEEKEND_NIGHT")
+        return (1.3, "NIGHT")
+
+    # Business hours (8 AM - 6 PM)
+    is_business = 8 <= hour <= 18
+
+    if is_business and not is_weekend:
+        return (0.8, "BUSINESS_HOURS")
+
+    if is_weekend:
+        return (1.0, "WEEKEND_DAY")
+
+    return (1.0, "EVENING")
+
+
+def get_sensor_health_factor(
+    voltage: Optional[float] = None,
+    gps_quality: Optional[str] = None,
+    sats: Optional[int] = None,
+) -> Tuple[float, str, List[str]]:
+    """
+    🆕 v5.8.0: Check sensor health to distinguish theft vs sensor failure.
+
+    Signs of sensor failure (NOT theft):
+    - Low voltage (< 12V) - battery issues affect sensor accuracy
+    - Poor GPS (< 4 satellites) - location/data transmission issues
+    - Very poor GPS quality string
+
+    Returns:
+        Tuple of (factor, status, issues_list)
+        - factor: 0.3-1.0 (lower = probably sensor issue, not theft)
+        - status: HEALTHY, DEGRADED, FAILING, UNKNOWN
+        - issues: List of detected issues
+    """
+    issues = []
+    factor = 1.0
+    status = "HEALTHY"
+
+    # Check voltage
+    if voltage is not None:
+        if voltage < 11.5:
+            issues.append(f"Critical voltage: {voltage:.1f}V")
+            factor *= 0.3
+            status = "FAILING"
+        elif voltage < 12.5:
+            issues.append(f"Low voltage: {voltage:.1f}V")
+            factor *= 0.6
+            if status == "HEALTHY":
+                status = "DEGRADED"
+
+    # Check GPS satellites
+    if sats is not None:
+        if sats < 3:
+            issues.append(f"Very poor GPS: {sats} sats")
+            factor *= 0.4
+            status = "FAILING"
+        elif sats < 5:
+            issues.append(f"Weak GPS: {sats} sats")
+            factor *= 0.7
+            if status == "HEALTHY":
+                status = "DEGRADED"
+
+    # Check GPS quality string
+    if gps_quality is not None:
+        quality_lower = gps_quality.lower()
+        if "poor" in quality_lower or "none" in quality_lower:
+            issues.append(f"GPS quality: {gps_quality}")
+            factor *= 0.5
+            if status == "HEALTHY":
+                status = "DEGRADED"
+
+    if not issues:
+        return (1.0, "HEALTHY", [])
+
+    return (max(0.3, factor), status, issues)
+
+
 def detect_fuel_theft(
     sensor_pct: float,
     estimated_pct: float,
@@ -572,14 +678,26 @@ def detect_fuel_theft(
     truck_status: str,
     time_gap_hours: float,
     tank_capacity_gal: float = 200.0,
+    # 🆕 v5.8.0: New optional parameters for enhanced detection
+    timestamp: Optional[datetime] = None,
+    voltage: Optional[float] = None,
+    gps_quality: Optional[str] = None,
+    sats: Optional[int] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
 ) -> Optional[Dict]:
     """
-    🆕 v3.12.21: Enhanced Fuel theft detection with multiple heuristics.
+    🆕 v5.8.0: Enhanced Fuel theft detection with multi-factor analysis.
 
     Detection criteria (ANY match triggers alert):
     1. STOPPED theft: Large drop (>10%) while truck was stopped
     2. RAPID theft: Very large drop (>20%) in short time (<1 hour)
     3. PATTERN theft: Multiple moderate drops (>5%) when consumption doesn't explain it
+
+    🆕 v5.8.0 Enhancements:
+    4. TIME-OF-DAY: Night/weekend drops are more suspicious
+    5. SENSOR HEALTH: Low voltage/GPS issues reduce confidence (likely sensor, not theft)
+    6. GEOFENCE-READY: lat/lon passed for future safe-zone detection
 
     Args:
         sensor_pct: Current sensor reading (%)
@@ -588,6 +706,12 @@ def detect_fuel_theft(
         truck_status: MOVING, STOPPED, or IDLE
         time_gap_hours: Time since last reading
         tank_capacity_gal: Tank capacity for gallon calculations
+        timestamp: Event timestamp (for time-of-day analysis)
+        voltage: Battery voltage (for sensor health)
+        gps_quality: GPS quality string (for sensor health)
+        sats: Number of GPS satellites (for sensor health)
+        latitude: GPS latitude (for future geofence)
+        longitude: GPS longitude (for future geofence)
 
     Returns:
         Dict with theft details or None if no theft detected
@@ -602,26 +726,27 @@ def detect_fuel_theft(
     if fuel_drop_pct <= 3:
         return None
 
-    theft_confidence = 0.0
+    # Base confidence calculation
+    base_confidence = 0.0
     theft_type = None
     reasons = []
+    adjustments = []
 
     # 1. STOPPED theft: Drop while truck was stationary
     if truck_status == "STOPPED":
         if fuel_drop_pct > 10:
-            theft_confidence = 0.9
+            base_confidence = 0.9
             theft_type = "STOPPED_THEFT"
             reasons.append(f"Large drop ({fuel_drop_pct:.1f}%) while stopped")
         elif fuel_drop_pct > 5:
-            theft_confidence = 0.6
+            base_confidence = 0.6
             theft_type = "STOPPED_SUSPICIOUS"
             reasons.append(f"Moderate drop ({fuel_drop_pct:.1f}%) while stopped")
 
     # 2. RAPID theft: Very large drop in short time
     if fuel_drop_pct > 20 and time_gap_hours < 1.0:
-        # This is suspicious regardless of status
-        if theft_confidence < 0.85:
-            theft_confidence = 0.85
+        if base_confidence < 0.85:
+            base_confidence = 0.85
             theft_type = "RAPID_LOSS"
             reasons.append(
                 f"Rapid loss ({fuel_drop_pct:.1f}%) in {time_gap_hours*60:.0f} min"
@@ -634,34 +759,88 @@ def detect_fuel_theft(
             fuel_drop_pct - expected_drop if expected_drop > 0 else fuel_drop_pct
         )
 
-        if unexplained_drop > 8:  # >8% more than expected
-            if theft_confidence < 0.7:
-                theft_confidence = 0.7
+        if unexplained_drop > 8:
+            if base_confidence < 0.7:
+                base_confidence = 0.7
                 theft_type = "UNEXPLAINED_LOSS"
             reasons.append(f"Unexplained loss of {unexplained_drop:.1f}%")
 
-    # 4. IDLE theft: Drop while engine running but not moving (siphoning)
+    # 4. IDLE theft: Drop while engine running but not moving
     if truck_status == "IDLE" and fuel_drop_pct > 8:
-        if theft_confidence < 0.65:
-            theft_confidence = 0.65
+        if base_confidence < 0.65:
+            base_confidence = 0.65
             theft_type = "IDLE_LOSS"
             reasons.append(f"Significant drop ({fuel_drop_pct:.1f}%) while idling")
 
-    # Only report if confidence is high enough
-    if theft_confidence >= 0.6:
+    # If no base suspicion, exit early
+    if base_confidence < 0.5:
+        return None
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 🆕 v5.8.0: APPLY ENHANCEMENT FACTORS
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    final_confidence = base_confidence
+
+    # 5. TIME-OF-DAY FACTOR
+    time_factor, time_period = get_time_of_day_factor(timestamp)
+    if time_factor != 1.0:
+        old_conf = final_confidence
+        final_confidence = min(0.99, final_confidence * time_factor)
+        if time_factor > 1.0:
+            adjustments.append(f"Time ({time_period}): +{(time_factor-1)*100:.0f}%")
+        else:
+            adjustments.append(f"Time ({time_period}): {(time_factor-1)*100:.0f}%")
+
+    # 6. SENSOR HEALTH FACTOR
+    sensor_factor, sensor_status, sensor_issues = get_sensor_health_factor(
+        voltage=voltage, gps_quality=gps_quality, sats=sats
+    )
+    if sensor_factor < 1.0:
+        old_conf = final_confidence
+        final_confidence = final_confidence * sensor_factor
+        adjustments.append(f"Sensor ({sensor_status}): {(sensor_factor-1)*100:.0f}%")
+        for issue in sensor_issues:
+            reasons.append(f"⚠️ {issue}")
+
+    # 7. GEOFENCE FACTOR (placeholder for future)
+    # TODO: Implement geofence check when safe zones are defined
+    geofence_info = None
+    if latitude is not None and longitude is not None:
+        # Future: check_geofence(latitude, longitude)
+        geofence_info = {"lat": latitude, "lon": longitude, "in_safe_zone": None}
+
+    # Final threshold check
+    if final_confidence >= 0.5:
+        # Generate recommendation based on final confidence
+        if final_confidence >= 0.85:
+            recommendation = "🚨 HIGH PRIORITY: Investigate immediately"
+        elif final_confidence >= 0.7:
+            recommendation = "⚠️ MEDIUM: Investigate within 24 hours"
+        else:
+            recommendation = "📋 LOW: Monitor and review patterns"
+
         logger.warning(
             f"🚨 POSSIBLE FUEL THEFT ({theft_type}): -{fuel_drop_pct:.1f}% "
             f"({fuel_drop_gal:.1f} gal) while {truck_status} for {time_gap_hours*60:.0f} min. "
-            f"Confidence: {theft_confidence:.0%}"
+            f"Base: {base_confidence:.0%} → Final: {final_confidence:.0%} "
+            f"[{', '.join(adjustments) if adjustments else 'no adjustments'}]"
         )
+
         return {
             "type": theft_type,
             "drop_pct": fuel_drop_pct,
             "drop_gal": fuel_drop_gal,
             "time_gap_hours": time_gap_hours,
-            "confidence": theft_confidence,
+            "base_confidence": base_confidence,
+            "confidence": final_confidence,  # Final adjusted confidence
             "reasons": reasons,
+            "adjustments": adjustments,
             "truck_status": truck_status,
+            "time_period": time_period,
+            "sensor_status": sensor_status,
+            "geofence": geofence_info,
+            "recommendation": recommendation,
         }
 
     return None
@@ -1183,7 +1362,7 @@ def process_truck(
     if sensor_pct is not None and not refuel_event:
         estimator.update(sensor_pct)
 
-    # Check for theft
+    # Check for theft with advanced detection (Time-of-Day + Sensor Health factors)
     theft_event = detect_fuel_theft(
         sensor_pct=sensor_pct,
         estimated_pct=estimator.level_pct,
@@ -1191,6 +1370,13 @@ def process_truck(
         truck_status=truck_status,
         time_gap_hours=time_gap_hours,
         tank_capacity_gal=tank_capacity_gal,
+        # Advanced detection parameters
+        timestamp=timestamp,
+        voltage=pwr_ext,
+        gps_quality=gps_quality_str,
+        sats=sats,
+        latitude=latitude,
+        longitude=longitude,
     )
 
     # Update estimator timestamp
