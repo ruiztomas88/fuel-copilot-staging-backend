@@ -997,15 +997,36 @@ async def _get_all_sensor_histories_batch(
             )
 
             result = conn.execute(query, params)
+
+            # Get column names BEFORE fetchall
+            columns = (
+                list(result.keys())
+                if hasattr(result, "keys")
+                else [
+                    "truck_id",
+                    "day",
+                    "avg_battery_voltage",
+                    "avg_coolant_temp_f",
+                    "avg_oil_pressure_psi",
+                    "avg_def_level_pct",
+                    "avg_dpf_soot_pct",
+                ]
+            )
+
             rows = result.fetchall()
-            
-            # Get column names from result
-            columns = result.keys()
 
             # Process results - use index-based access for compatibility
             for row in rows:
                 # Convert row to dict for easier access
-                row_dict = dict(zip(columns, row))
+                try:
+                    # Try _mapping first (SQLAlchemy 2.0+)
+                    if hasattr(row, "_mapping"):
+                        row_dict = dict(row._mapping)
+                    else:
+                        row_dict = dict(zip(columns, row))
+                except Exception:
+                    row_dict = dict(zip(columns, row))
+
                 tid = row_dict.get("truck_id")
                 if tid not in result_dict:
                     continue
@@ -1022,7 +1043,7 @@ async def _get_all_sensor_histories_batch(
 
     except Exception as e:
         logger.error(f"Error in batch sensor history query: {e}")
-        return {}
+        return result_dict  # Return empty structure instead of empty dict
 
 
 @router.get("/days-to-failure/{truck_id}")
