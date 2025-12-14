@@ -1083,7 +1083,19 @@ def process_truck(
     # Kalman predict phase (only if reasonable time delta)
     if dt_hours > 0 and dt_hours < 1.0:
         # Calculate adaptive noise based on conditions
-        Q_L = estimator.calculate_adaptive_noise(speed, altitude, timestamp)
+        base_Q_L = estimator.calculate_adaptive_noise(speed, altitude, timestamp)
+
+        # 🔧 FIX v5.7.1: Apply sensor quality factor from GPS/Voltage analysis
+        # If sensor quality is degraded, increase Q_L (more uncertainty)
+        sensor_quality_factor = getattr(estimator, "sensor_quality_factor", 1.0)
+        if sensor_quality_factor < 1.0:
+            # Inverse: lower quality = higher Q_L (more noise)
+            Q_L = base_Q_L / max(sensor_quality_factor, 0.2)
+            logger.debug(
+                f"[KALMAN] {truck_id}: Q_L adjusted {base_Q_L:.4f} -> {Q_L:.4f} (sensor_quality={sensor_quality_factor:.2f})"
+            )
+        else:
+            Q_L = base_Q_L
 
         # Predict
         estimator.predict(
@@ -1596,6 +1608,26 @@ def sync_cycle(
                 except Exception as gps_error:
                     logger.debug(f"GPS quality error for {truck_id}: {gps_error}")
 
+            # 🆕 v5.7.1: Validate idle calculation against ECU when data available
+            if (
+                truck_data.idle_hours is not None
+                and truck_data.engine_hours is not None
+            ):
+                try:
+                    # Note: For full validation, we'd need to track accumulated idle hours
+                    # For now, we just log ECU values for monitoring
+                    if truck_data.idle_hours > 0 and truck_data.engine_hours > 0:
+                        idle_ratio = truck_data.idle_hours / truck_data.engine_hours
+                        if idle_ratio > 0.5:  # More than 50% idle time is concerning
+                            logger.warning(
+                                f"⚠️ High idle ratio: {truck_id} - {idle_ratio*100:.1f}% idle "
+                                f"({truck_data.idle_hours:.1f}h/{truck_data.engine_hours:.1f}h)"
+                            )
+                except Exception as idle_val_error:
+                    logger.debug(
+                        f"Idle validation error for {truck_id}: {idle_val_error}"
+                    )
+
             # Full processing with Kalman
             metrics = process_truck(
                 truck_id=truck_id,
@@ -1808,6 +1840,48 @@ def sync_cycle(
                 )
         except Exception as e:
             logger.error(f"Error saving stale refuel for {finalized['truck_id']}: {e}")
+
+    # 🆕 v5.7.1: Cache latest sensor data for /alerts/diagnostics endpoint
+    # Using file-based cache since sync is synchronous and cache_service is async
+    try:
+        import json
+        from pathlib import Path
+
+        cache_dir = Path("cache")
+        cache_dir.mkdir(exist_ok=True)
+        cache_file = cache_dir / "fleet_sensors.json"
+
+        # Build sensor cache from all_truck_data (which is a list)
+        sensor_cache = []
+        for truck_data in all_truck_data:
+            if truck_data:
+                sensor_cache.append(
+                    {
+                        "truck_id": truck_data.truck_id,
+                        "dtc": truck_data.dtc,
+                        "pwr_int": truck_data.pwr_int,
+                        "sats": truck_data.sats,
+                        "rpm": truck_data.rpm,
+                        "timestamp": (
+                            truck_data.timestamp.isoformat()
+                            if truck_data.timestamp
+                            else None
+                        ),
+                    }
+                )
+
+        if sensor_cache:
+            with open(cache_file, "w") as f:
+                json.dump(
+                    {
+                        "data": sensor_cache,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    f,
+                )
+            logger.debug(f"📦 Cached sensor data for {len(sensor_cache)} trucks")
+    except Exception as cache_error:
+        logger.debug(f"Could not cache sensor data: {cache_error}")
 
     # Save states periodically
     state_manager.save_states()

@@ -39,6 +39,9 @@ class DTCCode:
     severity: DTCSeverity = DTCSeverity.WARNING
     description: str = ""
     recommended_action: str = ""
+    system: str = (
+        "UNKNOWN"  # 🆕 v5.7.1: System classification (ENGINE, TRANSMISSION, etc)
+    )
 
     @property
     def code(self) -> str:

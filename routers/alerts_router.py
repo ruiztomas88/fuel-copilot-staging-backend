@@ -222,15 +222,31 @@ async def get_diagnostic_alerts():
         if cached:
             return JSONResponse(content=cached)
 
-        # Get latest telemetry from wialon reader
-        try:
-            from wialon_reader import WialonReader
+        # 🔧 FIX v5.7.1: Get data from file cache (populated by wialon_sync)
+        # instead of direct Wialon query (which requires config)
+        import json
+        from pathlib import Path
 
-            reader = WialonReader()
-            fleet_data = reader.get_fleet_data()
-        except Exception as e:
-            logger.warning(f"Could not get Wialon data: {e}")
-            fleet_data = []
+        cache_file = Path("cache/fleet_sensors.json")
+        fleet_data = []
+
+        if cache_file.exists():
+            try:
+                with open(cache_file, "r") as f:
+                    cached = json.load(f)
+                    fleet_data = cached.get("data", [])
+                    logger.debug(f"Got {len(fleet_data)} trucks from sensor cache")
+            except Exception as e:
+                logger.warning(f"Could not read sensor cache: {e}")
+
+        if not fleet_data:
+            # Fallback: try to get from database latest readings
+            try:
+                fleet_data = db.get_fleet_summary().get("truck_details", [])
+                logger.debug(f"Got {len(fleet_data)} trucks from DB fallback")
+            except Exception as e:
+                logger.warning(f"Could not get fleet data: {e}")
+                fleet_data = []
 
         alerts = []
 
@@ -269,9 +285,12 @@ async def get_diagnostic_alerts():
                                     "severity": severity,
                                     "message": f"DTC {code.code}: {code.description}",
                                     "code": code.code,
-                                    "system": code.system,
+                                    "system": getattr(
+                                        code, "system", "UNKNOWN"
+                                    ),  # 🔧 Safe access
                                     "timestamp": datetime.now().isoformat(),
-                                    "recommendation": "Schedule diagnostic inspection",
+                                    "recommendation": code.recommended_action
+                                    or "Schedule diagnostic inspection",
                                 }
                             )
                 except Exception as e:
