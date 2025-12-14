@@ -1342,6 +1342,11 @@ def process_truck(
         "ambient_temp_f": ambient_temp,
         # 🆕 v3.12.28: Terrain factor for grade-adjusted consumption
         "terrain_factor": round(terrain_factor, 3),
+        # 🆕 v5.7.1: New sensor data for ML and diagnostics
+        "sats": sats,
+        "pwr_int": pwr_int,
+        "gps_quality": f"sats={sats}" if sats else None,  # Basic quality indicator
+        "idle_hours_ecu": sensor_data.get("idle_hours"),
     }
 
 
@@ -1363,6 +1368,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
         with connection.cursor() as cursor:
             # 🆕 v5.3.3: Added ambient_temp_f and intake_air_temp_f columns
             # 🔧 FIX v5.4.7: Added idle_gph to INSERT (was missing - BUG #1 from audit)
+            # 🆕 v5.7.1: Added sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu
             query = """
                 INSERT INTO fuel_metrics 
                 (timestamp_utc, truck_id, carrier_id, truck_status,
@@ -1376,8 +1382,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  anchor_detected, anchor_type, data_age_min,
                  oil_pressure_psi, oil_temp_f, battery_voltage, 
                  engine_load_pct, def_level_pct,
-                 ambient_temp_f, intake_air_temp_f)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 ambient_temp_f, intake_air_temp_f,
+                 sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -1410,7 +1417,12 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     engine_load_pct = VALUES(engine_load_pct),
                     def_level_pct = VALUES(def_level_pct),
                     ambient_temp_f = VALUES(ambient_temp_f),
-                    intake_air_temp_f = VALUES(intake_air_temp_f)
+                    intake_air_temp_f = VALUES(intake_air_temp_f),
+                    sats = VALUES(sats),
+                    pwr_int = VALUES(pwr_int),
+                    terrain_factor = VALUES(terrain_factor),
+                    gps_quality = VALUES(gps_quality),
+                    idle_hours_ecu = VALUES(idle_hours_ecu)
             """
 
             values = (
@@ -1454,6 +1466,12 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 # 🆕 v5.3.3: Temperature sensors for weather-adjusted alerts
                 metrics.get("ambient_temp_f"),
                 metrics.get("intake_air_temp_f"),
+                # 🆕 v5.7.1: New sensor columns for ML and diagnostics
+                metrics.get("sats"),
+                metrics.get("pwr_int"),
+                metrics.get("terrain_factor"),
+                metrics.get("gps_quality"),
+                metrics.get("idle_hours_ecu"),
             )
 
             cursor.execute(query, values)
