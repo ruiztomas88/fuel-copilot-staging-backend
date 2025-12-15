@@ -136,5 +136,5 @@ def include_all_routers(app, auth_dependency=None):
     # 🆕 v5.7.6: MPG Baseline router
     app.include_router(mpg_baseline_router)  # /mpg-baseline/* (5 endpoints)
 
-    # 🆕 v5.8.3: Alerts router (diagnostics, predictive alerts)
-    app.include_router(alerts_router)  # /alerts/* (4 endpoints)
+    # NOTE: alerts_router NOT included here because /alerts and /alerts/predictive
+    # already exist in main.py. Only /alerts/diagnostics is missing - adding it separately.

@@ -2828,6 +2828,33 @@ async def get_predictive_alerts(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.8.3: DIAGNOSTICS ALERTS ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/fuelAnalytics/api/alerts/diagnostics", tags=["Alerts"])
+async def get_diagnostics_alerts():
+    """
+    🆕 v5.8.3: Get diagnostic alerts (DTC, Voltage, GPS quality).
+    
+    Returns alerts for:
+    - DTC codes (engine trouble codes)
+    - Low/high voltage issues
+    - Poor GPS quality
+    """
+    try:
+        from routers.alerts_router import get_diagnostic_alerts, DIAGNOSTICS_AVAILABLE
+        
+        if not DIAGNOSTICS_AVAILABLE:
+            return {"alerts": [], "message": "Diagnostic modules not available"}
+        
+        return await get_diagnostic_alerts()
+    except Exception as e:
+        logger.error(f"Error getting diagnostic alerts: {e}")
+        return {"alerts": [], "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 v5.8.3: UNIFIED ALERTS ENDPOINT
 # ═══════════════════════════════════════════════════════════════════════════════
 
