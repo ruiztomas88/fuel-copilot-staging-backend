@@ -668,3 +668,74 @@ class TestAutoResync:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+# ============================================================================
+# 13. ADAPTIVE Q_r AND KALMAN CONFIDENCE TESTS
+# ============================================================================
+
+
+class TestAdaptiveQr:
+    """Tests for adaptive Q_r calculation"""
+
+    def test_parked_low_noise(self):
+        """Parked status should have very low process noise"""
+        from estimator import calculate_adaptive_Q_r
+        Q_r = calculate_adaptive_Q_r("PARKED", 0.0)
+        assert Q_r == 0.01
+
+    def test_stopped_low_noise(self):
+        """Stopped status should have low process noise"""
+        from estimator import calculate_adaptive_Q_r
+        Q_r = calculate_adaptive_Q_r("STOPPED", 0.0)
+        assert Q_r == 0.05
+
+    def test_idle_scales_with_consumption(self):
+        """Idle noise should scale with consumption"""
+        from estimator import calculate_adaptive_Q_r
+        Q_r_low = calculate_adaptive_Q_r("IDLE", 0.0)
+        Q_r_high = calculate_adaptive_Q_r("IDLE", 10.0)
+        assert Q_r_high > Q_r_low
+
+    def test_moving_higher_noise(self):
+        """Moving status should have higher process noise"""
+        from estimator import calculate_adaptive_Q_r
+        Q_r_moving = calculate_adaptive_Q_r("MOVING", 10.0)
+        Q_r_parked = calculate_adaptive_Q_r("PARKED", 0.0)
+        assert Q_r_moving > Q_r_parked
+
+
+class TestKalmanConfidence:
+    """Tests for Kalman confidence conversion"""
+
+    def test_high_confidence(self):
+        """Low P should give high confidence"""
+        from estimator import get_kalman_confidence
+        result = get_kalman_confidence(0.3)
+        assert result["level"] == "HIGH"
+        assert result["score"] == 95
+        assert result["color"] == "green"
+
+    def test_medium_confidence(self):
+        """Medium P should give medium confidence"""
+        from estimator import get_kalman_confidence
+        result = get_kalman_confidence(1.0)
+        assert result["level"] == "MEDIUM"
+        assert result["score"] == 75
+        assert result["color"] == "yellow"
+
+    def test_low_confidence(self):
+        """Higher P should give low confidence"""
+        from estimator import get_kalman_confidence
+        result = get_kalman_confidence(3.0)
+        assert result["level"] == "LOW"
+        assert result["score"] == 50
+        assert result["color"] == "orange"
+
+    def test_very_low_confidence(self):
+        """Very high P should give very low confidence"""
+        from estimator import get_kalman_confidence
+        result = get_kalman_confidence(10.0)
+        assert result["level"] == "VERY_LOW"
+        assert result["score"] == 25
+        assert result["color"] == "red"

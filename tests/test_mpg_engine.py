@@ -302,3 +302,225 @@ class TestIntegrationScenarios:
         assert state.window_count == 2  # Only valid windows counted
         assert state.total_accepted == 2
         assert state.total_discarded == 1
+
+
+class TestIQROutlierFilter:
+    """Test IQR outlier rejection"""
+
+    def test_filter_outliers_basic(self):
+        """Should remove obvious outliers"""
+        from mpg_engine import filter_outliers_iqr
+
+        readings = [5.0, 5.5, 6.0, 15.0, 5.2]  # 15 is outlier
+        filtered = filter_outliers_iqr(readings)
+        assert 15.0 not in filtered
+        assert len(filtered) < len(readings)
+
+    def test_filter_not_enough_data(self):
+        """Should return original if < 4 readings"""
+        from mpg_engine import filter_outliers_iqr
+
+        readings = [5.0, 15.0, 5.5]
+        filtered = filter_outliers_iqr(readings)
+        assert filtered == readings
+
+    def test_filter_no_outliers(self):
+        """Should return all data if no outliers"""
+        from mpg_engine import filter_outliers_iqr
+
+        readings = [5.0, 5.5, 6.0, 5.8, 5.2]
+        filtered = filter_outliers_iqr(readings)
+        assert len(filtered) == len(readings)
+
+
+class TestDynamicAlpha:
+    """Test dynamic EMA alpha calculation"""
+
+    def test_dynamic_alpha_disabled(self):
+        """Should use static alpha when disabled"""
+        from mpg_engine import get_dynamic_alpha
+
+        state = MPGState()
+        config = MPGConfig(ema_alpha=0.5, use_dynamic_alpha=False)
+        alpha = get_dynamic_alpha(state, config)
+        assert alpha == 0.5
+
+    def test_dynamic_alpha_low_variance(self):
+        """Should use higher alpha when variance is low"""
+        from mpg_engine import get_dynamic_alpha
+
+        state = MPGState()
+        state.mpg_history = [6.0, 6.1, 5.9, 6.0, 6.05]  # Low variance
+        config = MPGConfig(
+            use_dynamic_alpha=True,
+            alpha_high_variance=0.3,
+            alpha_low_variance=0.6,
+            variance_threshold=0.25,
+        )
+        alpha = get_dynamic_alpha(state, config)
+        assert alpha == 0.6  # High alpha for low variance
+
+    def test_dynamic_alpha_high_variance(self):
+        """Should use lower alpha when variance is high"""
+        from mpg_engine import get_dynamic_alpha
+
+        state = MPGState()
+        state.mpg_history = [4.0, 7.0, 5.0, 8.0, 4.5]  # High variance
+        config = MPGConfig(
+            use_dynamic_alpha=True,
+            alpha_high_variance=0.3,
+            alpha_low_variance=0.6,
+            variance_threshold=0.25,
+        )
+        alpha = get_dynamic_alpha(state, config)
+        assert alpha == 0.3  # Low alpha for high variance
+
+
+class TestMPGStateHistory:
+    """Test MPG state history tracking"""
+
+    def test_add_to_history(self):
+        """Should add values to history"""
+        state = MPGState(max_history_size=5)
+        state.add_to_history(6.0)
+        state.add_to_history(6.5)
+        assert len(state.mpg_history) == 2
+        assert 6.0 in state.mpg_history
+        assert 6.5 in state.mpg_history
+
+    def test_history_max_size(self):
+        """Should maintain max size"""
+        state = MPGState(max_history_size=3)
+        for val in [5.0, 5.5, 6.0, 6.5, 7.0]:
+            state.add_to_history(val)
+        assert len(state.mpg_history) == 3
+        assert state.mpg_history == [6.0, 6.5, 7.0]  # Oldest removed
+
+    def test_get_variance_not_enough_data(self):
+        """Should return 0 with < 3 values"""
+        state = MPGState()
+        state.mpg_history = [6.0, 6.5]
+        assert state.get_variance() == 0.0
+
+    def test_get_variance_calculation(self):
+        """Should calculate variance correctly"""
+        state = MPGState()
+        state.mpg_history = [5.0, 6.0, 7.0, 6.0]  # mean=6.0, variance=0.5
+        variance = state.get_variance()
+        assert variance == pytest.approx(0.5, rel=0.1)
+
+
+class TestTruckMPGBaseline:
+    """Test per-truck MPG baseline"""
+
+    def test_baseline_initial_state(self):
+        """Should start with fleet average"""
+        from mpg_engine import TruckMPGBaseline
+
+        baseline = TruckMPGBaseline(truck_id="T101")
+        assert baseline.baseline_mpg == 5.7
+        assert baseline.confidence == "LOW"
+        assert baseline.sample_count == 0
+
+    def test_baseline_update(self):
+        """Should update baseline with new observations"""
+        from mpg_engine import TruckMPGBaseline
+        import time
+
+        baseline = TruckMPGBaseline(truck_id="T101")
+        baseline.update(6.5, time.time())
+        assert baseline.baseline_mpg == 6.5
+        assert baseline.sample_count == 1
+        # Note: min_observed starts at 5.7 (fleet average) and is updated with min()
+        # First update sets max but min stays at initial if value > initial
+        assert baseline.max_observed == 6.5
+
+    def test_baseline_confidence_levels(self):
+        """Should update confidence based on sample count"""
+        from mpg_engine import TruckMPGBaseline
+        import time
+
+        baseline = TruckMPGBaseline(truck_id="T101")
+
+        # LOW confidence (< 20 samples)
+        for _ in range(19):
+            baseline.update(6.0, time.time())
+        assert baseline.confidence == "LOW"
+
+        # MEDIUM confidence (>= 20 samples)
+        baseline.update(6.0, time.time())
+        assert baseline.confidence == "MEDIUM"
+
+        # HIGH confidence (>= 50 samples)
+        for _ in range(30):
+            baseline.update(6.0, time.time())
+        assert baseline.confidence == "HIGH"
+
+    def test_baseline_skip_invalid_mpg(self):
+        """Should skip MPG values outside valid range"""
+        from mpg_engine import TruckMPGBaseline
+        import time
+
+        baseline = TruckMPGBaseline(truck_id="T101")
+        baseline.update(6.0, time.time())  # Valid
+        baseline.update(50.0, time.time())  # Invalid - too high
+        baseline.update(1.0, time.time())  # Invalid - too low
+        assert baseline.sample_count == 1
+        assert baseline.baseline_mpg == 6.0
+
+    def test_baseline_deviation(self):
+        """Should calculate deviation from baseline"""
+        from mpg_engine import TruckMPGBaseline
+        import time
+
+        baseline = TruckMPGBaseline(truck_id="T101")
+
+        # Add enough samples to have valid baseline
+        for mpg in [6.0, 6.1, 5.9, 6.0, 6.2]:
+            baseline.update(mpg, time.time())
+
+        deviation = baseline.get_deviation(6.0)
+        assert deviation["status"] == "NORMAL"
+        assert abs(deviation["z_score"]) < 1.0
+
+    def test_baseline_deviation_insufficient_data(self):
+        """Should return insufficient data status"""
+        from mpg_engine import TruckMPGBaseline
+
+        baseline = TruckMPGBaseline(truck_id="T101")
+        deviation = baseline.get_deviation(6.0)
+        assert deviation["status"] == "INSUFFICIENT_DATA"
+
+    def test_baseline_std_dev_property(self):
+        """Should calculate standard deviation"""
+        from mpg_engine import TruckMPGBaseline
+        import time
+
+        baseline = TruckMPGBaseline(truck_id="T101")
+
+        # Add samples with known std dev
+        for mpg in [5.0, 6.0, 7.0, 6.0, 6.0]:
+            baseline.update(mpg, time.time())
+
+        std_dev = baseline.std_dev
+        assert std_dev > 0.1
+        assert std_dev < 2.0
+
+
+class TestMPGConfigValidation:
+    """Test MPG config validation"""
+
+    def test_invalid_min_miles(self):
+        """Should raise error for non-positive min_miles"""
+        with pytest.raises(ValueError, match="min_miles must be positive"):
+            MPGConfig(min_miles=0)
+
+    def test_invalid_min_fuel_gal(self):
+        """Should raise error for non-positive min_fuel_gal"""
+        with pytest.raises(ValueError, match="min_fuel_gal must be positive"):
+            MPGConfig(min_fuel_gal=-1)
+
+    def test_invalid_negative_min_miles(self):
+        """Should raise error for negative min_miles"""
+        with pytest.raises(ValueError, match="min_miles must be positive"):
+            MPGConfig(min_miles=-5)

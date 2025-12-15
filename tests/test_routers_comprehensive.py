@@ -99,6 +99,28 @@ class TestAlertsRouterComprehensive:
         response = client.post("/fuelAnalytics/api/alerts/test?alert_type=fuel_low")
         assert response.status_code in [200, 400]  # May require valid alert_type enum
 
+    def test_unified_alerts_default(self, client):
+        """GET /alerts/unified returns combined alerts"""
+        response = client.get("/fuelAnalytics/api/alerts/unified")
+        assert response.status_code == 200
+        data = response.json()
+        assert "system_alerts" in data
+        assert "predictive_alerts" in data
+        assert "diagnostic_alerts" in data
+        assert "summary" in data
+
+    def test_unified_alerts_only_predictive(self, client):
+        """GET /alerts/unified with only predictive"""
+        response = client.get(
+            "/fuelAnalytics/api/alerts/unified?include_system=false&include_diagnostics=false"
+        )
+        assert response.status_code == 200
+
+    def test_unified_alerts_days_ahead(self, client):
+        """GET /alerts/unified with days_ahead parameter"""
+        response = client.get("/fuelAnalytics/api/alerts/unified?days_ahead=14")
+        assert response.status_code == 200
+
     def test_test_alert_custom_severity(self, client):
         """POST /alerts/test with custom severity"""
         response = client.post("/fuelAnalytics/api/alerts/test?severity=critical")

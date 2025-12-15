@@ -425,3 +425,115 @@ async def send_test_alert(
         raise HTTPException(
             status_code=500, detail=f"Error sending test alert: {str(e)}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.8.3: UNIFIED ALERTS ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/alerts/unified")
+async def get_unified_alerts(
+    include_predictive: bool = Query(True, description="Include predictive alerts"),
+    include_diagnostics: bool = Query(True, description="Include diagnostic alerts"),
+    include_system: bool = Query(True, description="Include system alerts"),
+    days_ahead: int = Query(7, ge=1, le=30, description="Days ahead for predictions"),
+):
+    """
+    🆕 v5.8.3: Unified alerts endpoint combining all alert types.
+
+    Returns a single response with:
+    - System alerts (drift, offline, anomalies)
+    - Predictive alerts (low fuel, calibration, efficiency)
+    - Diagnostic alerts (DTC, voltage, GPS quality)
+
+    This simplifies frontend integration by providing a single source of truth.
+    """
+    try:
+        from cache_service import get_cache
+
+        cache = await get_cache()
+        cache_key = f"alerts:unified:{include_predictive}:{include_diagnostics}:{include_system}:{days_ahead}"
+
+        cached = await cache.get(cache_key)
+        if cached:
+            return JSONResponse(content=cached)
+
+        result = {
+            "system_alerts": [],
+            "predictive_alerts": [],
+            "diagnostic_alerts": [],
+            "summary": {
+                "total": 0,
+                "critical": 0,
+                "warning": 0,
+                "info": 0,
+            },
+            "generated_at": datetime.now().isoformat(),
+        }
+
+        # Get system alerts
+        if include_system:
+            try:
+                system_alerts = db.get_alerts()
+                result["system_alerts"] = system_alerts
+                for alert in system_alerts:
+                    severity = alert.get("severity", "info")
+                    result["summary"]["total"] += 1
+                    result["summary"][severity] = result["summary"].get(severity, 0) + 1
+            except Exception as e:
+                logger.warning(f"Could not get system alerts: {e}")
+
+        # Get predictive alerts
+        if include_predictive:
+            try:
+                predictive_response = await get_predictive_alerts(
+                    days_ahead=days_ahead, include_recommendations=True
+                )
+                predictive_data = (
+                    predictive_response.body.decode()
+                    if hasattr(predictive_response, "body")
+                    else {}
+                )
+                import json
+
+                if isinstance(predictive_data, str):
+                    predictive_data = json.loads(predictive_data)
+                result["predictive_alerts"] = predictive_data.get("predictions", [])
+                for alert in result["predictive_alerts"]:
+                    severity = alert.get("severity", "info")
+                    result["summary"]["total"] += 1
+                    result["summary"][severity] = result["summary"].get(severity, 0) + 1
+            except Exception as e:
+                logger.warning(f"Could not get predictive alerts: {e}")
+
+        # Get diagnostic alerts
+        if include_diagnostics and DIAGNOSTICS_AVAILABLE:
+            try:
+                diagnostic_response = await get_diagnostic_alerts()
+                diagnostic_data = (
+                    diagnostic_response.body.decode()
+                    if hasattr(diagnostic_response, "body")
+                    else {}
+                )
+                import json
+
+                if isinstance(diagnostic_data, str):
+                    diagnostic_data = json.loads(diagnostic_data)
+                result["diagnostic_alerts"] = diagnostic_data.get("alerts", [])
+                for alert in result["diagnostic_alerts"]:
+                    severity = alert.get("severity", "info")
+                    result["summary"]["total"] += 1
+                    result["summary"][severity] = result["summary"].get(severity, 0) + 1
+            except Exception as e:
+                logger.warning(f"Could not get diagnostic alerts: {e}")
+
+        # Cache for 30 seconds
+        await cache.set(cache_key, result, ttl=30)
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"Error in unified alerts: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error generating unified alerts: {str(e)}"
+        )

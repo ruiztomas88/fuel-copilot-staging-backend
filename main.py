@@ -2824,6 +2824,102 @@ async def get_predictive_alerts(
         )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.8.3: UNIFIED ALERTS ENDPOINT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/fuelAnalytics/api/alerts/unified", tags=["Alerts"])
+async def get_unified_alerts(
+    include_predictive: bool = Query(True, description="Include predictive alerts"),
+    include_diagnostics: bool = Query(True, description="Include diagnostic alerts"),
+    include_system: bool = Query(True, description="Include system alerts"),
+    days_ahead: int = Query(7, ge=1, le=30, description="Days ahead for predictions"),
+):
+    """
+    🆕 v5.8.3: Unified alerts endpoint combining all alert types.
+
+    Returns a single response with:
+    - System alerts (drift, offline, anomalies)
+    - Predictive alerts (low fuel, calibration, efficiency)
+    - Diagnostic alerts (DTC, voltage, GPS quality)
+    """
+    try:
+        result = {
+            "system_alerts": [],
+            "predictive_alerts": [],
+            "diagnostic_alerts": [],
+            "summary": {
+                "total": 0,
+                "critical": 0,
+                "warning": 0,
+                "info": 0,
+            },
+            "generated_at": datetime.now().isoformat(),
+        }
+
+        # Get system alerts
+        if include_system:
+            try:
+                from database import db
+
+                system_alerts = db.get_alerts()
+                result["system_alerts"] = system_alerts
+                for alert in system_alerts:
+                    severity = alert.get("severity", "info")
+                    result["summary"]["total"] += 1
+                    result["summary"][severity] = result["summary"].get(severity, 0) + 1
+            except Exception as e:
+                logger.warning(f"Could not get system alerts: {e}")
+
+        # Get predictive alerts
+        if include_predictive:
+            try:
+                predictive_response = await get_predictive_alerts(hours=24)
+                result["predictive_alerts"] = predictive_response.get("alerts", [])
+                for alert in result["predictive_alerts"]:
+                    severity = alert.get("severity", "info")
+                    result["summary"]["total"] += 1
+                    result["summary"][severity] = result["summary"].get(severity, 0) + 1
+            except Exception as e:
+                logger.warning(f"Could not get predictive alerts: {e}")
+
+        # Get diagnostic alerts
+        if include_diagnostics:
+            try:
+                from routers.alerts_router import (
+                    get_diagnostic_alerts,
+                    DIAGNOSTICS_AVAILABLE,
+                )
+
+                if DIAGNOSTICS_AVAILABLE:
+                    diag_response = await get_diagnostic_alerts()
+                    import json
+
+                    diag_data = (
+                        json.loads(diag_response.body.decode())
+                        if hasattr(diag_response, "body")
+                        else {}
+                    )
+                    result["diagnostic_alerts"] = diag_data.get("alerts", [])
+                    for alert in result["diagnostic_alerts"]:
+                        severity = alert.get("severity", "info")
+                        result["summary"]["total"] += 1
+                        result["summary"][severity] = (
+                            result["summary"].get(severity, 0) + 1
+                        )
+            except Exception as e:
+                logger.warning(f"Could not get diagnostic alerts: {e}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in unified alerts: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error generating unified alerts: {str(e)}"
+        )
+
+
 # ============================================================================
 # 🆕 FASE 2: NEXT REFUEL PREDICTION v3.12.21
 # ============================================================================

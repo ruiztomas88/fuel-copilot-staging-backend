@@ -111,7 +111,11 @@ class TestTwilioConfig:
         # Create config with empty values
         with patch.dict(
             "os.environ",
-            {"TWILIO_ACCOUNT_SID": "", "TWILIO_AUTH_TOKEN": "", "TWILIO_FROM_NUMBER": ""},
+            {
+                "TWILIO_ACCOUNT_SID": "",
+                "TWILIO_AUTH_TOKEN": "",
+                "TWILIO_FROM_NUMBER": "",
+            },
         ):
             config = TwilioConfig()
             # Force re-initialization
@@ -196,8 +200,152 @@ class TestAlertFormatting:
         )
 
         # SMS format should be concise
-        sms_message = f"[{alert.priority.value.upper()}] {alert.truck_id}: {alert.message}"
+        sms_message = (
+            f"[{alert.priority.value.upper()}] {alert.truck_id}: {alert.message}"
+        )
 
         assert "LOW" in sms_message
         assert "ABC123" in sms_message
         assert "50 gal" in sms_message
+
+
+class TestFuelEventClassifier:
+    """Test FuelEventClassifier for theft vs sensor issue detection"""
+
+    def test_classifier_initialization(self):
+        """Should initialize with default configuration"""
+        from alert_service import FuelEventClassifier
+
+        classifier = FuelEventClassifier()
+
+        assert classifier.recovery_window_minutes >= 1
+        assert classifier.recovery_tolerance_pct > 0
+        assert classifier.drop_threshold_pct > 0
+        assert classifier.sensor_volatility_threshold > 0
+
+    def test_add_fuel_reading(self):
+        """Should record fuel readings for volatility analysis"""
+        from alert_service import FuelEventClassifier
+
+        classifier = FuelEventClassifier()
+        classifier.add_fuel_reading("TRUCK001", 75.0)
+        classifier.add_fuel_reading("TRUCK001", 74.5)
+        classifier.add_fuel_reading("TRUCK001", 74.0)
+
+        assert "TRUCK001" in classifier._fuel_history
+        assert len(classifier._fuel_history["TRUCK001"]) == 3
+
+    def test_get_sensor_volatility_insufficient_data(self):
+        """Should return 0 if insufficient data for volatility calculation"""
+        from alert_service import FuelEventClassifier
+
+        classifier = FuelEventClassifier()
+        classifier.add_fuel_reading("TRUCK001", 75.0)
+        classifier.add_fuel_reading("TRUCK001", 74.0)
+
+        volatility = classifier.get_sensor_volatility("TRUCK001")
+        assert volatility == 0.0
+
+    def test_get_sensor_volatility_stable(self):
+        """Should calculate low volatility for stable readings"""
+        from alert_service import FuelEventClassifier
+
+        classifier = FuelEventClassifier()
+        # Add stable readings (small variations)
+        for i in range(10):
+            classifier.add_fuel_reading("TRUCK001", 75.0 + (i % 2) * 0.5)
+
+        volatility = classifier.get_sensor_volatility("TRUCK001")
+        assert volatility < 1.0  # Should be very low
+
+    def test_get_sensor_volatility_unstable(self):
+        """Should calculate high volatility for erratic readings"""
+        from alert_service import FuelEventClassifier
+
+        classifier = FuelEventClassifier()
+        # Add erratic readings
+        readings = [75, 50, 80, 45, 90, 30, 85]
+        for r in readings:
+            classifier.add_fuel_reading("TRUCK001", float(r))
+
+        volatility = classifier.get_sensor_volatility("TRUCK001")
+        assert volatility > 10.0  # Should be high
+
+    def test_register_fuel_drop_buffers_drop(self):
+        """Should buffer drop for recovery check"""
+        from alert_service import FuelEventClassifier
+
+        classifier = FuelEventClassifier()
+        # Add some stable history first
+        for i in range(10):
+            classifier.add_fuel_reading("TRUCK001", 75.0 - i * 0.1)
+
+        result = classifier.register_fuel_drop(
+            truck_id="TRUCK001",
+            fuel_before=75.0,
+            fuel_after=55.0,
+            tank_capacity_gal=200.0,
+            truck_status="STOPPED",
+        )
+
+        # Should buffer the drop (return None)
+        assert result is None
+        assert "TRUCK001" in classifier._pending_drops
+
+    def test_history_limit(self):
+        """Should limit history per truck to max_history_per_truck"""
+        from alert_service import FuelEventClassifier
+
+        classifier = FuelEventClassifier()
+        max_history = classifier._max_history_per_truck
+
+        # Add more than max readings
+        for i in range(max_history + 10):
+            classifier.add_fuel_reading("TRUCK001", 75.0 - i * 0.1)
+
+        assert len(classifier._fuel_history["TRUCK001"]) == max_history
+
+
+class TestPendingFuelDrop:
+    """Test PendingFuelDrop data class"""
+
+    def test_pending_fuel_drop_creation(self):
+        """Should create PendingFuelDrop with all fields"""
+        from alert_service import PendingFuelDrop
+        from datetime import datetime, timezone
+
+        drop = PendingFuelDrop(
+            truck_id="TRUCK001",
+            drop_timestamp=datetime.now(timezone.utc),
+            fuel_before=80.0,
+            fuel_after=60.0,
+            drop_pct=20.0,
+            drop_gal=40.0,
+            location="Highway 101",
+            truck_status="STOPPED",
+        )
+
+        assert drop.truck_id == "TRUCK001"
+        assert drop.drop_pct == 20.0
+        assert drop.drop_gal == 40.0
+        assert drop.location == "Highway 101"
+
+    def test_pending_fuel_drop_age_minutes(self):
+        """Should calculate age in minutes correctly"""
+        from alert_service import PendingFuelDrop
+        from datetime import datetime, timezone, timedelta
+
+        # Create drop from 5 minutes ago
+        five_min_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+        drop = PendingFuelDrop(
+            truck_id="TRUCK001",
+            drop_timestamp=five_min_ago,
+            fuel_before=80.0,
+            fuel_after=60.0,
+            drop_pct=20.0,
+            drop_gal=40.0,
+        )
+
+        age = drop.age_minutes()
+        assert 4.5 < age < 5.5  # Should be approximately 5 minutes
