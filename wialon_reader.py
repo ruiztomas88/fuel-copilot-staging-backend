@@ -505,6 +505,41 @@ class WialonReader:
                 for row in results:
                     unit_data[row["unit"]].append(row)
 
+                # 🔧 v5.8.3: DEEP SEARCH for fuel_lvl - some trucks send fuel level very infrequently
+                # The main query uses 1-hour cutoff which may miss fuel_lvl data
+                # This secondary query extends to 4 hours specifically for fuel_lvl
+                fuel_cutoff_epoch = int(time.time()) - 14400  # 4 hours
+                try:
+                    fuel_query = f"""
+                        SELECT unit, 'fuel_lvl' as param_name, value, m as epoch_time
+                        FROM sensors
+                        WHERE unit IN ({unit_placeholders})
+                            AND m >= %s
+                            AND m < %s
+                            AND p = 'fuel_lvl'
+                        ORDER BY m DESC
+                    """
+                    # Get fuel_lvl data between 1h-4h ago (not already in main query)
+                    fuel_query_args = unit_ids + [fuel_cutoff_epoch, cutoff_epoch]
+                    cursor.execute(fuel_query, fuel_query_args)
+                    fuel_results = cursor.fetchall()
+
+                    # Add fuel_lvl data to unit_data if not already present
+                    for row in fuel_results:
+                        unit_id = row["unit"]
+                        # Check if this truck already has fuel_lvl data
+                        has_fuel_lvl = any(
+                            r.get("param_name") == "fuel_lvl"
+                            for r in unit_data.get(unit_id, [])
+                        )
+                        if not has_fuel_lvl:
+                            unit_data[unit_id].append(row)
+                            logger.debug(
+                                f"[{unit_id}] ⛽ Deep fuel_lvl found: {row['value']}% (age={(int(time.time()) - row['epoch_time'])/60:.0f}min)"
+                            )
+                except Exception as fuel_e:
+                    logger.warning(f"Deep fuel_lvl search failed: {fuel_e}")
+
                 # Process each truck's data
                 trucks_with_data = set()
                 for unit_id, rows in unit_data.items():
