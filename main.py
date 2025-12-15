@@ -1422,6 +1422,41 @@ async def get_truck_detail(truck_id: str):
         raise
     except Exception as e:
         logger.error(f"[get_truck_detail] ERROR for {truck_id}: {e}", exc_info=True)
+        
+        # 🔧 FIX v3.12.22: On ANY error, try to return offline status from tanks.yaml
+        # This prevents 500 errors for trucks that exist but have DB/encoding issues
+        try:
+            import yaml
+            tanks_path = Path(__file__).parent / "tanks.yaml"
+            if tanks_path.exists():
+                with open(tanks_path, "r") as f:
+                    tanks_config = yaml.safe_load(f)
+                    trucks = tanks_config.get("trucks", {})
+                    if truck_id in trucks:
+                        truck_config = trucks[truck_id]
+                        logger.warning(f"[get_truck_detail] Returning OFFLINE status for {truck_id} due to error: {e}")
+                        return {
+                            "truck_id": truck_id,
+                            "status": "OFFLINE",
+                            "truck_status": "OFFLINE",
+                            "mpg": None,
+                            "idle_gph": None,
+                            "fuel_L": None,
+                            "estimated_pct": None,
+                            "estimated_gallons": None,
+                            "sensor_pct": None,
+                            "sensor_gallons": None,
+                            "speed_mph": None,
+                            "health_score": 50,
+                            "health_category": "warning",
+                            "capacity_gallons": truck_config.get("capacity_gallons", 200),
+                            "capacity_liters": truck_config.get("capacity_liters", 757),
+                            "message": f"Error loading real-time data: {str(e)[:100]}",
+                            "data_available": False,
+                        }
+        except Exception as fallback_error:
+            logger.error(f"[get_truck_detail] Fallback also failed: {fallback_error}")
+        
         raise HTTPException(
             status_code=500, detail=f"Error fetching truck data: {str(e)}"
         )
@@ -2836,7 +2871,7 @@ async def get_predictive_alerts(
 async def get_diagnostics_alerts():
     """
     🆕 v5.8.3: Get diagnostic alerts (DTC, Voltage, GPS quality).
-    
+
     Returns alerts for:
     - DTC codes (engine trouble codes)
     - Low/high voltage issues
@@ -2844,10 +2879,10 @@ async def get_diagnostics_alerts():
     """
     try:
         from routers.alerts_router import get_diagnostic_alerts, DIAGNOSTICS_AVAILABLE
-        
+
         if not DIAGNOSTICS_AVAILABLE:
             return {"alerts": [], "message": "Diagnostic modules not available"}
-        
+
         return await get_diagnostic_alerts()
     except Exception as e:
         logger.error(f"Error getting diagnostic alerts: {e}")
