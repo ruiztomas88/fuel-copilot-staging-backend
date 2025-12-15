@@ -731,6 +731,9 @@ class FuelEstimator:
 
     def get_estimate(self) -> Dict:
         """Get current estimate with diagnostics"""
+        # 🆕 v5.8.3: Include kalman_confidence in output
+        confidence = self.get_confidence()
+
         estimate = {
             "level_liters": self.level_liters,
             "level_pct": self.level_pct,
@@ -743,6 +746,8 @@ class FuelEstimator:
             # 🆕 v5.4.0: Sensor quality info
             "sensor_quality_factor": self.sensor_quality_factor,
             "current_Q_L": self.Q_L,
+            # 🆕 v5.8.3: Kalman confidence
+            "kalman_confidence": confidence,
         }
 
         # Add GPS quality if available

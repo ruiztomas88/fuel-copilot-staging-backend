@@ -681,18 +681,21 @@ class TestAdaptiveQr:
     def test_parked_low_noise(self):
         """Parked status should have very low process noise"""
         from estimator import calculate_adaptive_Q_r
+
         Q_r = calculate_adaptive_Q_r("PARKED", 0.0)
         assert Q_r == 0.01
 
     def test_stopped_low_noise(self):
         """Stopped status should have low process noise"""
         from estimator import calculate_adaptive_Q_r
+
         Q_r = calculate_adaptive_Q_r("STOPPED", 0.0)
         assert Q_r == 0.05
 
     def test_idle_scales_with_consumption(self):
         """Idle noise should scale with consumption"""
         from estimator import calculate_adaptive_Q_r
+
         Q_r_low = calculate_adaptive_Q_r("IDLE", 0.0)
         Q_r_high = calculate_adaptive_Q_r("IDLE", 10.0)
         assert Q_r_high > Q_r_low
@@ -700,6 +703,7 @@ class TestAdaptiveQr:
     def test_moving_higher_noise(self):
         """Moving status should have higher process noise"""
         from estimator import calculate_adaptive_Q_r
+
         Q_r_moving = calculate_adaptive_Q_r("MOVING", 10.0)
         Q_r_parked = calculate_adaptive_Q_r("PARKED", 0.0)
         assert Q_r_moving > Q_r_parked
@@ -711,6 +715,7 @@ class TestKalmanConfidence:
     def test_high_confidence(self):
         """Low P should give high confidence"""
         from estimator import get_kalman_confidence
+
         result = get_kalman_confidence(0.3)
         assert result["level"] == "HIGH"
         assert result["score"] == 95
@@ -719,6 +724,7 @@ class TestKalmanConfidence:
     def test_medium_confidence(self):
         """Medium P should give medium confidence"""
         from estimator import get_kalman_confidence
+
         result = get_kalman_confidence(1.0)
         assert result["level"] == "MEDIUM"
         assert result["score"] == 75
@@ -727,6 +733,7 @@ class TestKalmanConfidence:
     def test_low_confidence(self):
         """Higher P should give low confidence"""
         from estimator import get_kalman_confidence
+
         result = get_kalman_confidence(3.0)
         assert result["level"] == "LOW"
         assert result["score"] == 50
@@ -735,7 +742,203 @@ class TestKalmanConfidence:
     def test_very_low_confidence(self):
         """Very high P should give very low confidence"""
         from estimator import get_kalman_confidence
+
         result = get_kalman_confidence(10.0)
         assert result["level"] == "VERY_LOW"
         assert result["score"] == 25
         assert result["color"] == "red"
+
+
+# ============================================================================
+# 14. DYNAMIC KALMAN GAIN TESTS v5.8.3
+# ============================================================================
+
+
+class TestDynamicKalmanGain:
+    """Tests for dynamic Kalman gain based on uncertainty"""
+
+    def test_high_uncertainty_allows_larger_correction(self):
+        """High P (low confidence) should allow larger K"""
+        est = make_estimator(50.0)
+
+        # Set high uncertainty
+        est.P = 10.0
+
+        # Update should use larger K clamp (0.50)
+        est.update(60.0)  # Large sensor difference
+
+        # Should have moved significantly toward sensor
+        assert est.level_pct > 52.0  # More than minimal correction
+
+    def test_low_uncertainty_limits_correction(self):
+        """Low P (high confidence) should limit K"""
+        est = make_estimator(50.0)
+
+        # Set low uncertainty (high confidence)
+        est.P = 0.5
+
+        initial_pct = est.level_pct
+
+        # Update with large difference
+        est.update(60.0)
+
+        # Should not have moved too much (K clamped to 0.20)
+        correction = abs(est.level_pct - initial_pct)
+        assert correction < 3.0  # Limited correction
+
+    def test_medium_uncertainty_moderate_correction(self):
+        """Medium P should use moderate K"""
+        est = make_estimator(50.0)
+
+        # Set medium uncertainty
+        est.P = 3.0
+
+        initial_pct = est.level_pct
+
+        # Update
+        est.update(55.0)
+
+        # Should be moderate correction
+        correction = abs(est.level_pct - initial_pct)
+        assert 0.5 < correction < 4.0
+
+
+# ============================================================================
+# 15. KALMAN CONFIDENCE IN OUTPUT v5.8.3
+# ============================================================================
+
+
+class TestKalmanConfidenceInOutput:
+    """Tests for kalman_confidence in get_estimate output"""
+
+    def test_kalman_confidence_in_estimate(self):
+        """get_estimate should include kalman_confidence"""
+        est = make_estimator(50.0)
+
+        estimate = est.get_estimate()
+
+        assert "kalman_confidence" in estimate
+        assert "level" in estimate["kalman_confidence"]
+        assert "score" in estimate["kalman_confidence"]
+
+    def test_confidence_level_high_when_stable(self):
+        """Confidence should be HIGH after stable readings"""
+        est = make_estimator(50.0)
+        est.P = 0.3  # Very low P = high confidence
+
+        estimate = est.get_estimate()
+
+        assert estimate["kalman_confidence"]["level"] == "HIGH"
+        assert estimate["kalman_confidence"]["score"] == 95
+
+    def test_confidence_level_low_after_reset(self):
+        """Confidence should be LOW after emergency reset"""
+        est = make_estimator(50.0)
+        est.P = 8.0  # High P = low confidence
+
+        estimate = est.get_estimate()
+
+        assert estimate["kalman_confidence"]["level"] in ["LOW", "VERY_LOW"]
+
+
+# ============================================================================
+# 16. UPDATE ADAPTIVE Q_r TESTS v5.8.3
+# ============================================================================
+
+
+class TestUpdateAdaptiveQr:
+    """Tests for update_adaptive_Q_r method"""
+
+    def test_parked_status(self):
+        """Parked truck should have low Q_r"""
+        est = make_estimator(50.0)
+
+        est.update_adaptive_Q_r(speed=0, rpm=0)
+
+        assert est.Q_r == 0.01
+
+    def test_idle_status(self):
+        """Idle truck should have low-medium Q_r"""
+        est = make_estimator(50.0)
+
+        est.update_adaptive_Q_r(speed=1, rpm=700)
+
+        assert est.Q_r == 0.05
+
+    def test_stopped_status(self):
+        """Stopped (engine on, not moving) should have medium Q_r"""
+        est = make_estimator(50.0)
+
+        est.update_adaptive_Q_r(speed=2, rpm=1000)
+
+        assert est.Q_r == 0.05
+
+    def test_moving_status(self):
+        """Moving truck should have higher Q_r"""
+        est = make_estimator(50.0)
+
+        est.update_adaptive_Q_r(speed=50, rpm=1500, consumption_lph=20.0)
+
+        assert est.Q_r > 0.1
+
+    def test_moving_scales_with_consumption(self):
+        """Moving Q_r should scale with consumption"""
+        est = make_estimator(50.0)
+
+        est.update_adaptive_Q_r(speed=50, rpm=1500, consumption_lph=10.0)
+        Q_r_low = est.Q_r
+
+        est.update_adaptive_Q_r(speed=50, rpm=1500, consumption_lph=30.0)
+        Q_r_high = est.Q_r
+
+        assert Q_r_high > Q_r_low
+
+
+# ============================================================================
+# 17. SENSOR QUALITY UPDATE TESTS v5.8.3
+# ============================================================================
+
+
+class TestSensorQualityUpdate:
+    """Tests for update_sensor_quality method"""
+
+    def test_sensor_quality_returns_factor(self):
+        """update_sensor_quality should return quality factor"""
+        est = make_estimator(50.0)
+
+        factor = est.update_sensor_quality(satellites=10, voltage=14.0)
+
+        assert factor <= 1.0
+        assert factor > 0.0
+
+    def test_low_satellites_degrades_quality(self):
+        """Few satellites should reduce quality factor"""
+        est = make_estimator(50.0)
+
+        factor_good = est.update_sensor_quality(satellites=12, voltage=14.0)
+        factor_poor = est.update_sensor_quality(satellites=3, voltage=14.0)
+
+        # Poor GPS should have lower or equal factor
+        assert factor_poor <= factor_good
+
+    def test_low_voltage_degrades_quality(self):
+        """Low voltage should reduce quality factor"""
+        est = make_estimator(50.0)
+
+        factor_good = est.update_sensor_quality(satellites=10, voltage=14.0)
+        factor_poor = est.update_sensor_quality(satellites=10, voltage=11.0)
+
+        # Low voltage should have lower or equal factor
+        assert factor_poor <= factor_good
+
+    def test_sensor_diagnostics(self):
+        """get_sensor_diagnostics should return quality info"""
+        est = make_estimator(50.0)
+
+        est.update_sensor_quality(satellites=8, voltage=13.5)
+
+        diagnostics = est.get_sensor_diagnostics()
+
+        assert "combined_quality_factor" in diagnostics
+        assert "current_Q_L" in diagnostics
+        assert "modules_available" in diagnostics
