@@ -1672,6 +1672,9 @@ async def get_refuel_analytics(
 
 
 @app.get("/fuelAnalytics/api/theft-analysis", tags=["Security"])
+@app.get(
+    "/fuelAnalytics/api/theft/analysis", tags=["Security"], include_in_schema=False
+)
 async def get_theft_analysis(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
     algorithm: str = Query(
