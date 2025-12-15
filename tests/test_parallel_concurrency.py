@@ -295,6 +295,358 @@ def test_memory_leak_prevention():
     # This test documents the current behavior
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROCESSOR FACTORY TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from parallel_processor import ProcessorFactory, process_truck_wrapper
+
+
+class TestProcessorFactory:
+    """Test ProcessorFactory class methods"""
+
+    def teardown_method(self):
+        """Cleanup after each test"""
+        ProcessorFactory.shutdown_all(wait=False)
+
+    def test_get_processor_creates_new(self):
+        """Test that get_processor creates a new processor"""
+        processor = ProcessorFactory.get_processor("test1", max_workers=4)
+        
+        assert processor is not None
+        assert isinstance(processor, ParallelTruckProcessor)
+        assert processor.max_workers == 4
+        assert processor.is_running()
+
+    def test_get_processor_returns_existing(self):
+        """Test that get_processor returns same instance for same name"""
+        processor1 = ProcessorFactory.get_processor("test2", max_workers=4)
+        processor2 = ProcessorFactory.get_processor("test2", max_workers=8)
+        
+        assert processor1 is processor2
+        assert processor1.max_workers == 4  # First creation wins
+
+    def test_get_processor_different_names(self):
+        """Test that different names get different processors"""
+        processor1 = ProcessorFactory.get_processor("proc_a", max_workers=4)
+        processor2 = ProcessorFactory.get_processor("proc_b", max_workers=8)
+        
+        assert processor1 is not processor2
+        assert processor1.max_workers == 4
+        assert processor2.max_workers == 8
+
+    def test_get_processor_auto_start_true(self):
+        """Test that auto_start=True starts the processor"""
+        processor = ProcessorFactory.get_processor("test3", auto_start=True)
+        
+        assert processor.is_running()
+
+    def test_get_processor_auto_start_false(self):
+        """Test that auto_start=False does not start the processor"""
+        processor = ProcessorFactory.get_processor("test4", auto_start=False)
+        
+        assert not processor.is_running()
+
+    def test_set_processor(self):
+        """Test that set_processor replaces existing processor"""
+        # Create initial processor
+        processor1 = ProcessorFactory.get_processor("test5", max_workers=4)
+        
+        # Create mock processor
+        mock_processor = ParallelTruckProcessor(max_workers=16)
+        ProcessorFactory.set_processor("test5", mock_processor)
+        
+        # Get should now return mock
+        processor2 = ProcessorFactory.get_processor("test5")
+        
+        assert processor2 is mock_processor
+        assert processor2.max_workers == 16
+
+    def test_shutdown_processor(self):
+        """Test that shutdown_processor shuts down specific processor"""
+        processor = ProcessorFactory.get_processor("test6", max_workers=4)
+        assert processor.is_running()
+        
+        ProcessorFactory.shutdown_processor("test6")
+        
+        # Getting same name should create new
+        processor2 = ProcessorFactory.get_processor("test6")
+        assert processor2 is not processor
+
+    def test_shutdown_all(self):
+        """Test that shutdown_all shuts down all processors"""
+        # Create multiple processors
+        ProcessorFactory.get_processor("all_test_1")
+        ProcessorFactory.get_processor("all_test_2")
+        ProcessorFactory.get_processor("all_test_3")
+        
+        ProcessorFactory.shutdown_all()
+        
+        # All instances should be cleared
+        stats = ProcessorFactory.get_all_stats()
+        assert len(stats) == 0
+
+    def test_get_all_stats(self):
+        """Test that get_all_stats returns stats for all processors"""
+        ProcessorFactory.get_processor("stats_1", max_workers=2)
+        ProcessorFactory.get_processor("stats_2", max_workers=4)
+        
+        stats = ProcessorFactory.get_all_stats()
+        
+        assert "stats_1" in stats
+        assert "stats_2" in stats
+        assert stats["stats_1"]["max_workers"] == 2
+        assert stats["stats_2"]["max_workers"] == 4
+
+    def test_temporary_processor_context_manager(self):
+        """Test that temporary_processor auto-cleans up"""
+        with ProcessorFactory.temporary_processor(max_workers=2) as processor:
+            assert processor.is_running()
+            assert processor.max_workers == 2
+            
+            # Can process trucks
+            def mock_fn(truck_id, truck_config):
+                return {"ok": True}
+            
+            success, failed = processor.process_trucks_parallel(
+                {"TRUCK1": {}}, mock_fn
+            )
+            assert len(success) == 1
+        
+        # After context, processor should be shut down
+        assert not processor.is_running()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROCESS TRUCK WRAPPER TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class MockEstimatorForWrapper:
+    """Mock estimator for process_truck_wrapper tests"""
+    def __init__(self, initialized=True):
+        self.initialized = initialized
+        self.last_fuel_lvl_pct = 75.0
+
+
+class TestProcessTruckWrapper:
+    """Test process_truck_wrapper function"""
+
+    def test_wrapper_with_no_data(self):
+        """Test wrapper returns None when no data available"""
+        result = process_truck_wrapper(
+            truck_id="TRUCK001",
+            truck_config={"unit_id": 123, "capacity_liters": 500},
+            estimator=MockEstimatorForWrapper(),
+            csv_reporter=None,
+            last_odom=None,
+            last_processed_timestamp=None,
+            engine=None,
+            tanks_config=None,
+            normalizer=None,
+            config={"aged_critical_min": 60},
+            consecutive_failures={"TRUCK001": 0},
+            truck_display_data={},
+            truck_lock=None,
+        )
+        
+        # get_latest_reading returns None, so result should be None
+        assert result is None
+
+    def test_wrapper_increments_failure_counter(self):
+        """Test wrapper increments failure counter on no data"""
+        failures = {"TRUCK001": 0}
+        
+        process_truck_wrapper(
+            truck_id="TRUCK001",
+            truck_config={"unit_id": 123, "capacity_liters": 500},
+            estimator=MockEstimatorForWrapper(),
+            csv_reporter=None,
+            last_odom=None,
+            last_processed_timestamp=None,
+            engine=None,
+            tanks_config=None,
+            normalizer=None,
+            config={"aged_critical_min": 60},
+            consecutive_failures=failures,
+            truck_display_data={},
+            truck_lock=None,
+        )
+        
+        assert failures["TRUCK001"] == 1
+
+    def test_wrapper_with_lock(self):
+        """Test wrapper uses lock when provided"""
+        failures = {"TRUCK001": 0}
+        lock = Lock()
+        
+        process_truck_wrapper(
+            truck_id="TRUCK001",
+            truck_config={"unit_id": 123, "capacity_liters": 500},
+            estimator=MockEstimatorForWrapper(),
+            csv_reporter=None,
+            last_odom=None,
+            last_processed_timestamp=None,
+            engine=None,
+            tanks_config=None,
+            normalizer=None,
+            config={"aged_critical_min": 60},
+            consecutive_failures=failures,
+            truck_display_data={},
+            truck_lock=lock,
+        )
+        
+        assert failures["TRUCK001"] == 1
+
+    def test_wrapper_adaptive_fuel_age_frequent(self):
+        """Test adaptive fuel age for frequent sensor"""
+        failures = {"TRUCK001": 0}
+        
+        result = process_truck_wrapper(
+            truck_id="TRUCK001",
+            truck_config={
+                "unit_id": 123, 
+                "capacity_liters": 500,
+                "fuel_sensor_freq": "frequent"
+            },
+            estimator=MockEstimatorForWrapper(),
+            csv_reporter=None,
+            last_odom=None,
+            last_processed_timestamp=None,
+            engine=None,
+            tanks_config=None,
+            normalizer=None,
+            config={"aged_critical_min": 60},
+            consecutive_failures=failures,
+            truck_display_data={},
+            truck_lock=None,
+        )
+        
+        # Still None (no data), but code path exercised
+        assert result is None
+
+    def test_wrapper_adaptive_fuel_age_infrequent(self):
+        """Test adaptive fuel age for infrequent sensor"""
+        failures = {"TRUCK001": 0}
+        
+        result = process_truck_wrapper(
+            truck_id="TRUCK001",
+            truck_config={
+                "unit_id": 123, 
+                "capacity_liters": 500,
+                "fuel_sensor_freq": "infrequent"
+            },
+            estimator=MockEstimatorForWrapper(),
+            csv_reporter=None,
+            last_odom=None,
+            last_processed_timestamp=None,
+            engine=None,
+            tanks_config=None,
+            normalizer=None,
+            config={"aged_critical_min": 60},
+            consecutive_failures=failures,
+            truck_display_data={},
+            truck_lock=None,
+        )
+        
+        assert result is None
+
+    def test_wrapper_uninitialized_estimator(self):
+        """Test wrapper with uninitialized estimator uses different age limit"""
+        failures = {"TRUCK001": 0}
+        
+        result = process_truck_wrapper(
+            truck_id="TRUCK001",
+            truck_config={"unit_id": 123, "capacity_liters": 500},
+            estimator=MockEstimatorForWrapper(initialized=False),
+            csv_reporter=None,
+            last_odom=None,
+            last_processed_timestamp=None,
+            engine=None,
+            tanks_config=None,
+            normalizer=None,
+            config={"aged_critical_min": 60},
+            consecutive_failures=failures,
+            truck_display_data={},
+            truck_lock=None,
+        )
+        
+        assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADDITIONAL PROCESSOR TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestProcessorAdditional:
+    """Additional tests for ParallelTruckProcessor"""
+
+    def test_processor_not_started_raises_error(self):
+        """Test that using processor without start raises error"""
+        processor = ParallelTruckProcessor(max_workers=4)
+        
+        with pytest.raises(RuntimeError) as exc_info:
+            processor.process_trucks_parallel({"TRUCK1": {}}, lambda t, c: {})
+        
+        assert "not started" in str(exc_info.value).lower()
+
+    def test_processor_reset_stats(self):
+        """Test reset_stats clears all statistics"""
+        processor = ParallelTruckProcessor(max_workers=4).start()
+        
+        def mock_fn(truck_id, truck_config):
+            return {"ok": True}
+        
+        processor.process_trucks_parallel({"TRUCK1": {}}, mock_fn)
+        
+        assert processor.total_processed > 0
+        
+        processor.reset_stats()
+        
+        assert processor.total_processed == 0
+        assert processor.total_errors == 0
+        assert len(processor.cycle_times) == 0
+        
+        processor.shutdown()
+
+    def test_processor_shutdown_twice(self):
+        """Test that shutting down twice is safe"""
+        processor = ParallelTruckProcessor(max_workers=4).start()
+        
+        processor.shutdown()
+        assert not processor.is_running()
+        
+        # Second shutdown should be safe
+        processor.shutdown()
+        assert not processor.is_running()
+
+    def test_start_returns_self(self):
+        """Test that start() returns self for chaining"""
+        processor = ParallelTruckProcessor(max_workers=4)
+        
+        result = processor.start()
+        
+        assert result is processor
+        
+        processor.shutdown()
+
+    def test_start_idempotent(self):
+        """Test that calling start() multiple times is safe"""
+        processor = ParallelTruckProcessor(max_workers=4)
+        
+        processor.start()
+        executor1 = processor.executor
+        
+        processor.start()  # Second start
+        executor2 = processor.executor
+        
+        assert executor1 is executor2  # Same executor
+        
+        processor.shutdown()
+
+
 if __name__ == "__main__":
     # Run tests with pytest
     pytest.main([__file__, "-v", "-s"])
+
