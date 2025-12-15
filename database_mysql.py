@@ -1897,8 +1897,19 @@ def get_enhanced_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                 moving_consumption_sum = float(row[16] or 0)
                 avg_mpg = float(row[17] or BASELINE_MPG)
 
-                total_miles = float(row[18] or 0)
+                odom_miles = float(row[18] or 0)
                 total_records = int(row[19] or 1)
+
+                # 🔧 v3.15.3: Calculate total_miles from odometer OR from fuel/MPG
+                # odom_delta_mi is often NULL/0 due to sensor issues
+                moving_gallons = moving_consumption_sum * record_interval
+                if odom_miles < 1 and avg_mpg > 0 and moving_gallons > 0:
+                    total_miles = moving_gallons * avg_mpg
+                    logger.debug(
+                        f"📏 [{truck_id}] Estimated miles: {moving_gallons:.1f} gal × {avg_mpg:.1f} MPG = {total_miles:.1f} mi"
+                    )
+                else:
+                    total_miles = odom_miles
 
                 # Calculate losses in gallons
                 # 1. Idle Loss
