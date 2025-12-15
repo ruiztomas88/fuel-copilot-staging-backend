@@ -895,9 +895,11 @@ def _empty_kpi_response(fuel_price: float) -> Dict[str, Any]:
     }
 
 
+@cached(ttl_seconds=60, key_prefix="get_loss_analysis")
 def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
     """
     🆕 v3.9.0: Loss Analysis by Root Cause
+    🔧 v3.15.0: Added 60-second cache for performance
 
     Classifies fuel consumption losses into 3 categories:
     1. EXCESSIVE IDLE (~50%): Speed < 5 mph with engine running
@@ -1420,9 +1422,11 @@ def get_driver_scorecard(days_back: int = 7) -> Dict[str, Any]:
         }
 
 
+@cached(ttl_seconds=60, key_prefix="get_enhanced_kpis")
 def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
     """
     🆕 v3.10.0: Enhanced KPI Dashboard with Fleet Health Index
+    🔧 v3.15.0: Added 60-second cache for performance
 
     Provides comprehensive financial intelligence:
     - Fleet Health Index (composite score)
@@ -2255,10 +2259,12 @@ def test_connection() -> bool:
 # =============================================================================
 
 
+@cached(ttl_seconds=120, key_prefix="get_advanced_refuel_analytics")
 def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
     """
     🆕 v3.10.3: World-Class Refuel Analytics Dashboard
     🔧 v3.12.25: Now reads from refuel_events table (where wialon_sync saves detected refuels)
+    🔧 v3.15.0: Added 120-second cache for performance
 
     Provides comprehensive refuel intelligence:
     1. Refuel Events Timeline with precise gallons calculation
@@ -2567,9 +2573,11 @@ def _empty_advanced_refuel_analytics(days: int, price: float) -> Dict[str, Any]:
     }
 
 
+@cached(ttl_seconds=120, key_prefix="get_fuel_theft_analysis")
 def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
     """
     🆕 v3.12.27: IMPROVED Fuel Theft & Drain Detection System with SENSOR ISSUE detection
+    🔧 v3.15.0: Added 120-second cache for performance
 
     Now differentiates between:
     - THEFT: Fuel drop that doesn't recover
@@ -3681,9 +3689,11 @@ def get_inefficiency_causes(truck_id: str, days_back: int = 30) -> Dict:
         return {"error": str(e), "causes": []}
 
 
+@cached(ttl_seconds=300, key_prefix="get_cost_attribution_report")
 def get_cost_attribution_report(days_back: int = 30) -> Dict:
     """
     Generate detailed cost attribution report for fleet fuel expenses.
+    🔧 v3.15.0: Added 5-minute cache for performance (heavy report)
 
     Breaks down costs by:
     - Per-truck consumption
