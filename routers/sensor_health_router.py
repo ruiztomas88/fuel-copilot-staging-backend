@@ -571,8 +571,10 @@ async def get_gps_quality_overview():
                                 accuracy = float(
                                     part.replace("acc=", "").replace("m", "")
                                 )
-                            except:
-                                pass
+                            except (ValueError, TypeError) as parse_err:
+                                logger.debug(
+                                    f"Could not parse GPS accuracy '{part}': {parse_err}"
+                                )
                 elif quality_raw:
                     quality = str(quality_raw)
 
