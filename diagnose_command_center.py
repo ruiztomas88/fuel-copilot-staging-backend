@@ -5,18 +5,21 @@ Ejecutar: python diagnose_command_center.py
 """
 
 import sys
-sys.path.insert(0, '.')
+
+sys.path.insert(0, ".")
+
 
 def main():
     print("=" * 70)
     print("🔍 DIAGNÓSTICO COMMAND CENTER")
     print("=" * 70)
-    
+
     # 1. Verificar conexión a DB
     print("\n1️⃣ Verificando conexión a base de datos...")
     try:
         from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
+
         engine = get_sqlalchemy_engine()
         with engine.connect() as conn:
             result = conn.execute(text("SELECT COUNT(*) FROM fuel_metrics"))
@@ -25,33 +28,38 @@ def main():
     except Exception as e:
         print(f"   ❌ Error: {e}")
         return
-    
+
     # 2. Verificar get_sensor_health_summary
     print("\n2️⃣ Verificando get_sensor_health_summary()...")
     try:
         from database_mysql import get_sensor_health_summary
+
         sensor_data = get_sensor_health_summary()
         print(f"   Total trucks: {sensor_data.get('total_trucks', 0)}")
         print(f"   Voltage issues: {sensor_data.get('trucks_with_voltage_issues', 0)}")
         print(f"   DTC active: {sensor_data.get('trucks_with_dtc_active', 0)}")
         print(f"   GPS issues: {sensor_data.get('trucks_with_gps_issues', 0)}")
         print(f"   Idle deviation: {sensor_data.get('trucks_with_idle_deviation', 0)}")
-        if '_debug' in sensor_data:
-            debug = sensor_data['_debug']
-            print(f"   [DEBUG] Trucks with voltage data: {debug.get('trucks_with_voltage_data', 0)}")
+        if "_debug" in sensor_data:
+            debug = sensor_data["_debug"]
+            print(
+                f"   [DEBUG] Trucks with voltage data: {debug.get('trucks_with_voltage_data', 0)}"
+            )
             print(f"   [DEBUG] Min voltage: {debug.get('min_voltage', 'N/A')}")
             print(f"   [DEBUG] Max voltage: {debug.get('max_voltage', 'N/A')}")
-        if 'error' in sensor_data:
+        if "error" in sensor_data:
             print(f"   ⚠️ Error: {sensor_data['error']}")
     except Exception as e:
         print(f"   ❌ Error: {e}")
-    
+
     # 3. Verificar datos de voltaje directamente
     print("\n3️⃣ Verificando datos de voltaje en fuel_metrics...")
     try:
         with engine.connect() as conn:
             # Verificar columna battery_voltage
-            result = conn.execute(text("""
+            result = conn.execute(
+                text(
+                    """
                 SELECT 
                     COUNT(*) as total,
                     COUNT(CASE WHEN battery_voltage > 0 THEN 1 END) as with_voltage,
@@ -60,23 +68,29 @@ def main():
                     COUNT(CASE WHEN battery_voltage > 0 AND battery_voltage < 12.2 THEN 1 END) as low_voltage
                 FROM fuel_metrics 
                 WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
-            """))
+            """
+                )
+            )
             row = result.fetchone()
             print(f"   Total registros (24h): {row[0]:,}")
             print(f"   Con voltage data: {row[1]:,}")
             print(f"   Min voltage: {row[2]}")
             print(f"   Max voltage: {row[3]}")
             print(f"   Registros con LOW voltage (<12.2V): {row[4]}")
-            
+
             # Verificar trucks específicos con bajo voltaje
-            result = conn.execute(text("""
+            result = conn.execute(
+                text(
+                    """
                 SELECT truck_id, battery_voltage, timestamp_utc
                 FROM fuel_metrics 
                 WHERE battery_voltage > 0 AND battery_voltage < 12.2
                 AND timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
                 ORDER BY battery_voltage ASC
                 LIMIT 5
-            """))
+            """
+                )
+            )
             low_v_trucks = result.fetchall()
             if low_v_trucks:
                 print(f"   Trucks con voltaje bajo:")
@@ -86,11 +100,12 @@ def main():
                 print(f"   ⚠️ No hay trucks con voltaje < 12.2V")
     except Exception as e:
         print(f"   ❌ Error: {e}")
-    
+
     # 4. Predictive Maintenance Engine
     print("\n4️⃣ Verificando Predictive Maintenance Engine...")
     try:
         from predictive_maintenance_engine import get_predictive_maintenance_engine
+
         pm_engine = get_predictive_maintenance_engine()
         pm_data = pm_engine.get_fleet_summary()
         critical = pm_data.get("critical_items", [])
@@ -98,63 +113,81 @@ def main():
         print(f"   Critical items: {len(critical)}")
         print(f"   High priority items: {len(high)}")
         if critical:
-            print(f"   First critical: {critical[0].get('truck_id')} - {critical[0].get('component')}")
+            print(
+                f"   First critical: {critical[0].get('truck_id')} - {critical[0].get('component')}"
+            )
     except Exception as e:
         print(f"   ⚠️ No disponible: {e}")
-    
+
     # 5. ML Anomaly Detection
     print("\n5️⃣ Verificando ML Anomaly Detection...")
     try:
         from ml_anomaly_detector import get_anomaly_detector
+
         detector = get_anomaly_detector()
-        anomalies = detector.get_anomaly_summary() if hasattr(detector, 'get_anomaly_summary') else {}
+        anomalies = (
+            detector.get_anomaly_summary()
+            if hasattr(detector, "get_anomaly_summary")
+            else {}
+        )
         trucks = anomalies.get("trucks_with_anomalies", [])
         print(f"   Trucks with anomalies: {len(trucks)}")
     except Exception as e:
         print(f"   ⚠️ No disponible: {e}")
-    
+
     # 6. Engine Health Alerts (from DB)
     print("\n6️⃣ Verificando engine_health_alerts...")
     try:
         with engine.connect() as conn:
-            result = conn.execute(text("""
+            result = conn.execute(
+                text(
+                    """
                 SELECT COUNT(*) 
                 FROM engine_health_alerts 
                 WHERE is_active = 1 OR is_active = TRUE
-            """))
+            """
+                )
+            )
             count = result.scalar()
             print(f"   Active alerts: {count}")
     except Exception as e:
         print(f"   ⚠️ Tabla no existe o error: {e}")
-    
+
     # 7. DTC Events
     print("\n7️⃣ Verificando dtc_events...")
     try:
         with engine.connect() as conn:
-            result = conn.execute(text("""
+            result = conn.execute(
+                text(
+                    """
                 SELECT COUNT(*) 
                 FROM dtc_events 
                 WHERE status = 'ACTIVE' 
                 AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 48 HOUR)
-            """))
+            """
+                )
+            )
             count = result.scalar()
             print(f"   Active DTCs (48h): {count}")
     except Exception as e:
         print(f"   ⚠️ Tabla no existe o error: {e}")
-    
+
     # 8. Probar el Command Center completo
     print("\n8️⃣ Generando Command Center Data...")
     try:
         from fleet_command_center import get_command_center
+
         cc = get_command_center()
         data = cc.generate_command_center_data()
-        
+
         print(f"   Action items: {len(data.action_items)}")
         print(f"   Health score: {data.health_score.score}/100")
         print(f"   Status: {data.health_score.status}")
-        print(f"   Urgency - Critical: {data.urgency.critical}, High: {data.urgency.high}, Medium: {data.urgency.medium}")
+        print(
+            f"   Urgency - Critical: {data.urgency.critical}, High: {data.urgency.high}, Medium: {data.urgency.medium}"
+        )
         print(f"   Sensor Status - Voltage issues: {data.sensor_status.voltage_issues}")
-        
+
         if data.action_items:
             print(f"\n   Top 3 action items:")
             for item in data.action_items[:3]:
@@ -164,11 +197,13 @@ def main():
     except Exception as e:
         print(f"   ❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
-    
+
     print("\n" + "=" * 70)
     print("✅ Diagnóstico completado")
     print("=" * 70)
+
 
 if __name__ == "__main__":
     main()
