@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily Driver Score Snapshot for Fuel Copilot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment="API_BASE_URL=http://localhost:8000"
+ExecStart=/opt/fuel-copilot/scripts/daily_driver_snapshot.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

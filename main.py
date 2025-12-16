@@ -1973,11 +1973,15 @@ async def get_driver_scorecard_endpoint(
         Driver rankings with overall score, grade (A+/A/B/C/D), breakdown, tips, and history
     """
     try:
-        from database_mysql import get_driver_scorecard, get_driver_score_history, get_driver_score_trend
+        from database_mysql import (
+            get_driver_scorecard,
+            get_driver_score_history,
+            get_driver_score_trend,
+        )
         from driver_behavior_engine import generate_coaching_tips
 
         result = get_driver_scorecard(days_back=days)
-        
+
         # Enhance each driver with tips and history
         if result.get("drivers"):
             for driver in result["drivers"]:
@@ -1988,13 +1992,17 @@ async def get_driver_scorecard_endpoint(
                         language=language,
                         max_tips=5,
                     )
-                
+
                 # Add score history and trend
                 if include_history:
                     truck_id = driver.get("truck_id")
-                    driver["score_history"] = get_driver_score_history(truck_id, days_back=30)
-                    driver["trend_analysis"] = get_driver_score_trend(truck_id, days_back=30)
-        
+                    driver["score_history"] = get_driver_score_history(
+                        truck_id, days_back=30
+                    )
+                    driver["trend_analysis"] = get_driver_score_trend(
+                        truck_id, days_back=30
+                    )
+
         return result
 
     except Exception as e:
@@ -2011,16 +2019,16 @@ async def get_driver_history_endpoint(
 ):
     """
     🆕 v3.11.0: Get historical score data for a specific driver/truck
-    
+
     Returns:
         List of historical scores and trend analysis
     """
     try:
         from database_mysql import get_driver_score_history, get_driver_score_trend
-        
+
         history = get_driver_score_history(truck_id, days_back=days)
         trend = get_driver_score_trend(truck_id, days_back=days)
-        
+
         return {
             "truck_id": truck_id,
             "period_days": days,
@@ -2036,22 +2044,22 @@ async def get_driver_history_endpoint(
 async def save_driver_scores_snapshot():
     """
     🆕 v3.11.0: Save current driver scores to history table
-    
+
     Should be called daily (via cron) to build trend data.
-    
+
     Returns:
         Number of records saved
     """
     try:
         from database_mysql import get_driver_scorecard, save_driver_score_history
-        
+
         # Get current scores
         result = get_driver_scorecard(days_back=1)
         drivers = result.get("drivers", [])
-        
+
         # Save to history
         saved = save_driver_score_history(drivers)
-        
+
         return {
             "success": True,
             "records_saved": saved,
@@ -2059,6 +2067,176 @@ async def save_driver_scores_snapshot():
         }
     except Exception as e:
         logger.error(f"Error saving driver scores snapshot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/analytics/mpg-contextualized")
+async def get_contextualized_mpg_endpoint(
+    days: int = Query(default=1, ge=1, le=30, description="Days to analyze"),
+    include_fleet_terrain: bool = Query(
+        default=True, description="Include fleet terrain summary"
+    ),
+):
+    """
+    🆕 v3.11.0: Contextualized MPG Analysis with Terrain Factors
+
+    This endpoint answers: "Is my truck performing well GIVEN THE CONDITIONS?"
+
+    MPG can look low but actually be excellent if:
+    - Truck is climbing mountains (terrain_factor > 1.0)
+    - Weather is harsh (headwinds, cold)
+    - Fully loaded cargo
+
+    Returns for each truck:
+    - raw_mpg: Actual measured MPG
+    - adjusted_mpg: What MPG would be in ideal conditions
+    - expected_mpg: What we expect given current conditions
+    - performance_vs_expected_pct: How truck performs vs expectation
+    - rating: EXCELLENT/GOOD/NEEDS_ATTENTION/CRITICAL
+
+    Example response:
+        {
+            "truck_id": "T101",
+            "raw_mpg": 5.0,
+            "adjusted_mpg": 5.78,
+            "expected_mpg": 5.19,
+            "performance_vs_expected_pct": -3.7,
+            "rating": "GOOD",
+            "message": "Performing as expected",
+            "factors": {"terrain": 1.10, "weather": 1.0, "load": 1.05}
+        }
+    """
+    try:
+        from database_mysql import get_kpi_summary
+        from terrain_factor import (
+            get_truck_contextualized_mpg,
+            get_fleet_summary as get_terrain_fleet_summary,
+            get_terrain_manager,
+        )
+
+        # Get current MPG data for all trucks
+        kpi_data = get_kpi_summary(days_back=days)
+
+        results = {
+            "period_days": days,
+            "trucks": [],
+            "fleet_summary": {},
+            "terrain_summary": {},
+        }
+
+        # Get terrain manager for fleet-wide data
+        terrain_manager = get_terrain_manager()
+
+        # Process each truck
+        trucks_data = kpi_data.get("trucks", [])
+        for truck in trucks_data:
+            truck_id = truck.get("truck_id")
+            raw_mpg = truck.get("avg_mpg", 0)
+            baseline_mpg = truck.get("baseline_mpg", 5.7)
+
+            # Get tracker data if available
+            tracker = terrain_manager.trackers.get(truck_id)
+            altitude = None
+            latitude = None
+            longitude = None
+            speed = None
+
+            if tracker and tracker.current_altitude is not None:
+                altitude = tracker.current_altitude
+                latitude = getattr(tracker, "latitude", None)
+                longitude = getattr(tracker, "longitude", None)
+                speed = getattr(tracker, "current_speed", None)
+
+            # Calculate contextualized MPG
+            if raw_mpg > 0:
+                mpg_analysis = get_truck_contextualized_mpg(
+                    truck_id=truck_id,
+                    raw_mpg=raw_mpg,
+                    altitude=altitude,
+                    latitude=latitude,
+                    longitude=longitude,
+                    speed=speed,
+                    baseline_mpg=baseline_mpg,
+                )
+                mpg_analysis["truck_id"] = truck_id
+                mpg_analysis["truck_name"] = truck.get("truck_name", truck_id)
+                results["trucks"].append(mpg_analysis)
+
+        # Fleet summary statistics
+        if results["trucks"]:
+            ratings = [t["rating"] for t in results["trucks"]]
+            performances = [t["performance_vs_expected_pct"] for t in results["trucks"]]
+
+            results["fleet_summary"] = {
+                "total_trucks": len(results["trucks"]),
+                "excellent_count": ratings.count("EXCELLENT"),
+                "good_count": ratings.count("GOOD"),
+                "needs_attention_count": ratings.count("NEEDS_ATTENTION"),
+                "critical_count": ratings.count("CRITICAL"),
+                "avg_performance_vs_expected": round(
+                    sum(performances) / len(performances), 1
+                ),
+                "best_performer": max(
+                    results["trucks"], key=lambda x: x["performance_vs_expected_pct"]
+                )["truck_id"],
+                "worst_performer": min(
+                    results["trucks"], key=lambda x: x["performance_vs_expected_pct"]
+                )["truck_id"],
+            }
+
+        # Terrain summary if requested
+        if include_fleet_terrain:
+            try:
+                results["terrain_summary"] = get_terrain_fleet_summary()
+            except Exception as e:
+                logger.warning(f"Could not get terrain summary: {e}")
+                results["terrain_summary"] = {"error": str(e)}
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Error in contextualized MPG: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error in contextualized MPG: {str(e)}"
+        )
+
+
+@app.get("/fuelAnalytics/api/analytics/truck/{truck_id}/mpg-context")
+async def get_truck_mpg_context(
+    truck_id: str,
+    raw_mpg: float = Query(..., description="Current raw MPG reading"),
+    altitude: Optional[float] = Query(None, description="Current altitude (ft)"),
+    latitude: Optional[float] = Query(None, description="GPS latitude"),
+    longitude: Optional[float] = Query(None, description="GPS longitude"),
+    speed: Optional[float] = Query(None, description="Current speed (mph)"),
+    baseline_mpg: float = Query(5.7, description="Truck's baseline MPG"),
+):
+    """
+    🆕 v3.11.0: Get contextualized MPG for a specific truck with live data
+
+    Use this for real-time MPG evaluation when you have live GPS/altitude data.
+
+    Returns:
+        Contextualized analysis showing if truck is performing well for conditions
+    """
+    try:
+        from terrain_factor import get_truck_contextualized_mpg
+
+        result = get_truck_contextualized_mpg(
+            truck_id=truck_id,
+            raw_mpg=raw_mpg,
+            altitude=altitude,
+            latitude=latitude,
+            longitude=longitude,
+            speed=speed,
+            baseline_mpg=baseline_mpg,
+        )
+        result["truck_id"] = truck_id
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in truck MPG context: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

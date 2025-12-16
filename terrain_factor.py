@@ -488,6 +488,140 @@ def get_terrain_fuel_factor(
     )
 
 
+def calculate_contextualized_mpg(
+    raw_mpg: float,
+    terrain_factor: float = 1.0,
+    weather_factor: float = 1.0,
+    load_factor: float = 1.0,
+    baseline_mpg: float = 5.7,
+) -> dict:
+    """
+    Calculate contextualized MPG accounting for external factors.
+    
+    This helps answer: "Is this truck performing well given the conditions?"
+    
+    Args:
+        raw_mpg: Actual measured MPG
+        terrain_factor: From terrain tracker (>1 = uphill, <1 = downhill)
+        weather_factor: Weather impact (1.0 = normal, 1.1 = headwind/cold, etc.)
+        load_factor: Cargo impact (1.0 = empty, 1.15 = full load)
+        baseline_mpg: Expected baseline for this truck
+        
+    Returns:
+        Dict with raw_mpg, adjusted_mpg, expected_mpg, and performance rating
+        
+    Example:
+        >>> calculate_contextualized_mpg(
+        ...     raw_mpg=5.0,
+        ...     terrain_factor=1.10,  # 10% uphill penalty
+        ...     load_factor=1.05,     # 5% load penalty
+        ...     baseline_mpg=6.0
+        ... )
+        {
+            "raw_mpg": 5.0,
+            "adjusted_mpg": 5.78,  # What they would get in ideal conditions
+            "expected_mpg": 5.19,  # What we expect given conditions
+            "performance_vs_expected": -3.7,  # -3.7% below expected
+            "rating": "GOOD"  # Despite low raw MPG, performing well for conditions
+        }
+    """
+    # Combined environmental factor
+    combined_factor = terrain_factor * weather_factor * load_factor
+    
+    # What the MPG would be in ideal conditions (adjusted up if conditions are hard)
+    adjusted_mpg = raw_mpg * combined_factor
+    
+    # What we expect given the conditions (baseline adjusted down for conditions)
+    expected_mpg = baseline_mpg / combined_factor
+    
+    # Performance vs expectation
+    if expected_mpg > 0:
+        performance_pct = ((raw_mpg - expected_mpg) / expected_mpg) * 100
+    else:
+        performance_pct = 0.0
+    
+    # Rating based on performance vs expected
+    if performance_pct >= 5:
+        rating = "EXCELLENT"
+        message = "Beating expectations by {:.1f}%".format(performance_pct)
+    elif performance_pct >= -5:
+        rating = "GOOD"
+        message = "Performing as expected"
+    elif performance_pct >= -15:
+        rating = "NEEDS_ATTENTION"
+        message = "Below expected by {:.1f}%".format(abs(performance_pct))
+    else:
+        rating = "CRITICAL"
+        message = "Significantly below expected - investigate"
+    
+    return {
+        "raw_mpg": round(raw_mpg, 2),
+        "adjusted_mpg": round(adjusted_mpg, 2),
+        "expected_mpg": round(expected_mpg, 2),
+        "performance_vs_expected_pct": round(performance_pct, 1),
+        "rating": rating,
+        "message": message,
+        "factors": {
+            "terrain": round(terrain_factor, 3),
+            "weather": round(weather_factor, 3),
+            "load": round(load_factor, 3),
+            "combined": round(combined_factor, 3),
+        },
+        "baseline_mpg": baseline_mpg,
+    }
+
+
+def get_truck_contextualized_mpg(
+    truck_id: str,
+    raw_mpg: float,
+    altitude: Optional[float] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    speed: Optional[float] = None,
+    baseline_mpg: float = 5.7,
+) -> dict:
+    """
+    Get contextualized MPG for a specific truck using its current terrain.
+    
+    Args:
+        truck_id: Truck identifier
+        raw_mpg: Current raw MPG reading
+        altitude: Current altitude (ft or m)
+        latitude: GPS latitude
+        longitude: GPS longitude  
+        speed: Current speed (mph)
+        baseline_mpg: Truck's baseline MPG
+        
+    Returns:
+        Contextualized MPG analysis dict
+    """
+    # Get terrain factor
+    if altitude is not None:
+        terrain_factor = get_terrain_fuel_factor(
+            truck_id=truck_id,
+            altitude=altitude,
+            latitude=latitude,
+            longitude=longitude,
+            speed=speed,
+        )
+    else:
+        terrain_factor = 1.0
+    
+    # TODO: Weather factor from external API (OpenWeather, etc.)
+    weather_factor = 1.0
+    
+    # TODO: Load factor from weight sensors if available
+    load_factor = 1.0
+    
+    return calculate_contextualized_mpg(
+        raw_mpg=raw_mpg,
+        terrain_factor=terrain_factor,
+        weather_factor=weather_factor,
+        load_factor=load_factor,
+        baseline_mpg=baseline_mpg,
+    )
+
+
 if __name__ == "__main__":
     # Test the terrain tracker
     logging.basicConfig(level=logging.DEBUG)

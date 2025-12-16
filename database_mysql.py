@@ -1461,25 +1461,27 @@ def ensure_driver_score_history_table() -> bool:
         return False
 
 
-def save_driver_score_history(drivers: List[Dict[str, Any]], record_date: Optional[str] = None) -> int:
+def save_driver_score_history(
+    drivers: List[Dict[str, Any]], record_date: Optional[str] = None
+) -> int:
     """
     Save daily driver scores to history table for trend analysis.
-    
+
     Args:
         drivers: List of driver dicts from get_driver_scorecard
         record_date: Date string YYYY-MM-DD, defaults to today
-        
+
     Returns:
         Number of records saved
     """
     if not drivers:
         return 0
-        
+
     ensure_driver_score_history_table()
-    
+
     if record_date is None:
         record_date = datetime.now().strftime("%Y-%m-%d")
-    
+
     insert_sql = """
     INSERT INTO driver_score_history 
         (truck_id, record_date, overall_score, grade, speed_score, rpm_score, 
@@ -1498,7 +1500,7 @@ def save_driver_score_history(drivers: List[Dict[str, Any]], record_date: Option
         avg_mpg = VALUES(avg_mpg),
         total_miles = VALUES(total_miles)
     """
-    
+
     try:
         engine = get_sqlalchemy_engine()
         saved = 0
@@ -1506,19 +1508,22 @@ def save_driver_score_history(drivers: List[Dict[str, Any]], record_date: Option
             for driver in drivers:
                 scores = driver.get("scores", {})
                 metrics = driver.get("metrics", {})
-                conn.execute(text(insert_sql), {
-                    "truck_id": driver.get("truck_id"),
-                    "record_date": record_date,
-                    "overall_score": driver.get("overall_score", 0),
-                    "grade": driver.get("grade", "N/A"),
-                    "speed_score": scores.get("speed_optimization", 0),
-                    "rpm_score": scores.get("rpm_discipline", 0),
-                    "idle_score": scores.get("idle_management", 0),
-                    "consistency_score": scores.get("fuel_consistency", 0),
-                    "mpg_score": scores.get("mpg_performance", 0),
-                    "avg_mpg": metrics.get("avg_mpg", 0),
-                    "total_miles": metrics.get("total_miles", 0),
-                })
+                conn.execute(
+                    text(insert_sql),
+                    {
+                        "truck_id": driver.get("truck_id"),
+                        "record_date": record_date,
+                        "overall_score": driver.get("overall_score", 0),
+                        "grade": driver.get("grade", "N/A"),
+                        "speed_score": scores.get("speed_optimization", 0),
+                        "rpm_score": scores.get("rpm_discipline", 0),
+                        "idle_score": scores.get("idle_management", 0),
+                        "consistency_score": scores.get("fuel_consistency", 0),
+                        "mpg_score": scores.get("mpg_performance", 0),
+                        "avg_mpg": metrics.get("avg_mpg", 0),
+                        "total_miles": metrics.get("total_miles", 0),
+                    },
+                )
                 saved += 1
             conn.commit()
         logger.info(f"✅ Saved {saved} driver score history records for {record_date}")
@@ -1528,18 +1533,21 @@ def save_driver_score_history(drivers: List[Dict[str, Any]], record_date: Option
         return 0
 
 
-def get_driver_score_history(truck_id: str, days_back: int = 30) -> List[Dict[str, Any]]:
+def get_driver_score_history(
+    truck_id: str, days_back: int = 30
+) -> List[Dict[str, Any]]:
     """
     Get historical scores for a specific driver/truck.
-    
+
     Args:
         truck_id: Truck identifier
         days_back: Number of days of history to retrieve
-        
+
     Returns:
         List of historical score records, newest first
     """
-    query = text("""
+    query = text(
+        """
         SELECT 
             truck_id,
             record_date,
@@ -1556,33 +1564,39 @@ def get_driver_score_history(truck_id: str, days_back: int = 30) -> List[Dict[st
         WHERE truck_id = :truck_id
           AND record_date >= DATE_SUB(CURDATE(), INTERVAL :days_back DAY)
         ORDER BY record_date DESC
-    """)
-    
+    """
+    )
+
     try:
         engine = get_sqlalchemy_engine()
         with engine.connect() as conn:
-            results = conn.execute(query, {
-                "truck_id": truck_id,
-                "days_back": days_back,
-            }).fetchall()
-            
+            results = conn.execute(
+                query,
+                {
+                    "truck_id": truck_id,
+                    "days_back": days_back,
+                },
+            ).fetchall()
+
             history = []
             for row in results:
-                history.append({
-                    "truck_id": row[0],
-                    "date": row[1].strftime("%Y-%m-%d") if row[1] else None,
-                    "overall_score": float(row[2]) if row[2] else 0,
-                    "grade": row[3],
-                    "scores": {
-                        "speed_optimization": float(row[4]) if row[4] else 0,
-                        "rpm_discipline": float(row[5]) if row[5] else 0,
-                        "idle_management": float(row[6]) if row[6] else 0,
-                        "fuel_consistency": float(row[7]) if row[7] else 0,
-                        "mpg_performance": float(row[8]) if row[8] else 0,
-                    },
-                    "avg_mpg": float(row[9]) if row[9] else 0,
-                    "total_miles": float(row[10]) if row[10] else 0,
-                })
+                history.append(
+                    {
+                        "truck_id": row[0],
+                        "date": row[1].strftime("%Y-%m-%d") if row[1] else None,
+                        "overall_score": float(row[2]) if row[2] else 0,
+                        "grade": row[3],
+                        "scores": {
+                            "speed_optimization": float(row[4]) if row[4] else 0,
+                            "rpm_discipline": float(row[5]) if row[5] else 0,
+                            "idle_management": float(row[6]) if row[6] else 0,
+                            "fuel_consistency": float(row[7]) if row[7] else 0,
+                            "mpg_performance": float(row[8]) if row[8] else 0,
+                        },
+                        "avg_mpg": float(row[9]) if row[9] else 0,
+                        "total_miles": float(row[10]) if row[10] else 0,
+                    }
+                )
             return history
     except Exception as e:
         logger.error(f"Error getting driver score history: {e}")
@@ -1592,12 +1606,12 @@ def get_driver_score_history(truck_id: str, days_back: int = 30) -> List[Dict[st
 def get_driver_score_trend(truck_id: str, days_back: int = 30) -> Dict[str, Any]:
     """
     Analyze score trend for a driver - is performance improving or declining?
-    
+
     Returns:
         Dict with trend analysis including direction, rate of change, and insight
     """
     history = get_driver_score_history(truck_id, days_back)
-    
+
     if len(history) < 2:
         return {
             "truck_id": truck_id,
@@ -1605,20 +1619,20 @@ def get_driver_score_trend(truck_id: str, days_back: int = 30) -> Dict[str, Any]
             "data_points": len(history),
             "message": "Need at least 2 days of history for trend analysis",
         }
-    
+
     # Calculate trend (simple linear regression)
     scores = [h["overall_score"] for h in reversed(history)]  # Oldest first
     n = len(scores)
-    
+
     # Calculate slope using least squares
     x_mean = (n - 1) / 2
     y_mean = sum(scores) / n
-    
+
     numerator = sum((i - x_mean) * (scores[i] - y_mean) for i in range(n))
     denominator = sum((i - x_mean) ** 2 for i in range(n))
-    
+
     slope = numerator / denominator if denominator != 0 else 0
-    
+
     # Determine trend direction and strength
     if slope > 1.0:
         trend = "improving_fast"
@@ -1640,12 +1654,16 @@ def get_driver_score_trend(truck_id: str, days_back: int = 30) -> Dict[str, Any]
         trend = "stable"
         direction = "→"
         color = "yellow"
-    
+
     # Calculate improvement percentage
     first_week_avg = sum(scores[:7]) / min(7, len(scores))
     last_week_avg = sum(scores[-7:]) / min(7, len(scores))
-    improvement_pct = ((last_week_avg - first_week_avg) / first_week_avg * 100) if first_week_avg > 0 else 0
-    
+    improvement_pct = (
+        ((last_week_avg - first_week_avg) / first_week_avg * 100)
+        if first_week_avg > 0
+        else 0
+    )
+
     # Generate insight
     current_score = scores[-1]
     if trend in ["improving", "improving_fast"]:
@@ -1654,7 +1672,7 @@ def get_driver_score_trend(truck_id: str, days_back: int = 30) -> Dict[str, Any]
         insight = f"Attention needed. Score dropped {abs(improvement_pct):.1f}% over {days_back} days."
     else:
         insight = f"Consistent performance at {current_score:.0f} points."
-    
+
     return {
         "truck_id": truck_id,
         "trend": trend,

@@ -1114,12 +1114,12 @@ def generate_coaching_tips(
 ) -> List[Dict[str, Any]]:
     """
     Generate personalized coaching tips based on driver performance data.
-    
+
     Args:
         driver_data: Dict with scores, metrics, etc from driver scorecard
         language: "en" or "es"
         max_tips: Maximum number of tips to return
-        
+
     Returns:
         List of tip dicts with priority, category, message, and potential_savings
     """
@@ -1128,11 +1128,11 @@ def generate_coaching_tips(
     metrics = driver_data.get("metrics", {})
     overall_score = driver_data.get("overall_score", 50)
     grade = driver_data.get("grade", "C")
-    
+
     # Fuel price for savings calculations
     FUEL_PRICE = 3.50  # $/gal
     BASELINE_MPG = 6.5
-    
+
     # Determine severity level based on score
     def get_severity(score: float) -> str:
         if score >= 80:
@@ -1140,10 +1140,10 @@ def generate_coaching_tips(
         elif score >= 60:
             return "moderate"
         return "severe"
-    
+
     # 1. Analyze each behavior category
     behavior_priorities = []
-    
+
     # Speed optimization
     speed_score = scores.get("speed_optimization", 70)
     if speed_score < 85:
@@ -1156,79 +1156,85 @@ def generate_coaching_tips(
         weekly_fuel_without = weekly_miles / max(BASELINE_MPG - mpg_loss, 3)
         weekly_fuel_with = weekly_miles / BASELINE_MPG
         weekly_savings = (weekly_fuel_without - weekly_fuel_with) * FUEL_PRICE
-        
+
         tip_template = COACHING_TIPS_LIBRARY["overspeeding"].get(severity, {})
         message = tip_template.get(language, tip_template.get("en", ""))
         message = message.format(avg_speed=avg_speed, weekly_savings=weekly_savings)
-        
-        behavior_priorities.append({
-            "priority": 100 - speed_score,
-            "category": "overspeeding",
-            "message": message,
-            "potential_savings_weekly": round(weekly_savings, 2),
-            "score": speed_score,
-            "severity": severity,
-        })
-    
+
+        behavior_priorities.append(
+            {
+                "priority": 100 - speed_score,
+                "category": "overspeeding",
+                "message": message,
+                "potential_savings_weekly": round(weekly_savings, 2),
+                "score": speed_score,
+                "severity": severity,
+            }
+        )
+
     # RPM discipline
     rpm_score = scores.get("rpm_discipline", 70)
     if rpm_score < 85:
         severity = get_severity(rpm_score)
         avg_rpm = metrics.get("avg_rpm", 1500)
         rpm_pct = max(0, (avg_rpm - 1600) / 1600 * 100) if avg_rpm > 1600 else 0
-        
+
         tip_template = COACHING_TIPS_LIBRARY["high_rpm"].get(severity, {})
         message = tip_template.get(language, tip_template.get("en", ""))
         message = message.format(rpm_pct=rpm_pct)
-        
+
         # Estimate weekly waste: ~0.02 gal/min at high RPM
         estimated_high_rpm_mins = (100 - rpm_score) / 100 * 60 * 8  # per day estimate
         weekly_waste = estimated_high_rpm_mins * 7 * 0.02
-        
-        behavior_priorities.append({
-            "priority": 100 - rpm_score,
-            "category": "high_rpm",
-            "message": message,
-            "potential_savings_weekly": round(weekly_waste * FUEL_PRICE, 2),
-            "score": rpm_score,
-            "severity": severity,
-        })
-    
+
+        behavior_priorities.append(
+            {
+                "priority": 100 - rpm_score,
+                "category": "high_rpm",
+                "message": message,
+                "potential_savings_weekly": round(weekly_waste * FUEL_PRICE, 2),
+                "score": rpm_score,
+                "severity": severity,
+            }
+        )
+
     # Idle management
     idle_score = scores.get("idle_management", 70)
     if idle_score < 85:
         severity = get_severity(idle_score)
         idle_pct = metrics.get("idle_pct", 15)
         fleet_idle = 10.0  # Assume fleet average
-        
+
         # Estimate savings: 1 gal/hour idle, ~8 hours driving/day
         daily_idle_hours = (idle_pct / 100) * 8
         monthly_idle_gal = daily_idle_hours * 22  # 22 working days
         potential_save = monthly_idle_gal * 0.5 * FUEL_PRICE  # Assume can cut 50%
-        
+
         tip_template = COACHING_TIPS_LIBRARY["idle"].get(severity, {})
         message = tip_template.get(language, tip_template.get("en", ""))
         message = message.format(
-            idle_pct=idle_pct, 
+            idle_pct=idle_pct,
             fleet_idle=fleet_idle,
             potential_save=potential_save,
             idle_gal=daily_idle_hours,
         )
-        
-        behavior_priorities.append({
-            "priority": 100 - idle_score,
-            "category": "idle_management",
-            "message": message,
-            "potential_savings_weekly": round(potential_save / 4, 2),
-            "score": idle_score,
-            "severity": severity,
-        })
-    
+
+        behavior_priorities.append(
+            {
+                "priority": 100 - idle_score,
+                "category": "idle_management",
+                "message": message,
+                "potential_savings_weekly": round(potential_save / 4, 2),
+                "score": idle_score,
+                "severity": severity,
+            }
+        )
+
     # MPG Performance
     mpg_score = scores.get("mpg_performance", 70)
     avg_mpg = metrics.get("avg_mpg", BASELINE_MPG)
     mpg_diff_pct = ((avg_mpg - BASELINE_MPG) / BASELINE_MPG) * 100
-    
+
     if mpg_diff_pct < -5:
         category = "below_baseline"
         pct = abs(mpg_diff_pct)
@@ -1238,38 +1244,42 @@ def generate_coaching_tips(
     else:
         category = "at_baseline"
         pct = 0
-    
+
     tip_template = COACHING_TIPS_LIBRARY["mpg_performance"].get(category, {})
     message = tip_template.get(language, tip_template.get("en", ""))
     message = message.format(mpg=avg_mpg, pct=pct, baseline=BASELINE_MPG)
-    
-    behavior_priorities.append({
-        "priority": 50 if category == "below_baseline" else 10,
-        "category": "mpg_performance",
-        "message": message,
-        "potential_savings_weekly": 0,
-        "score": mpg_score,
-        "severity": "info",
-    })
-    
+
+    behavior_priorities.append(
+        {
+            "priority": 50 if category == "below_baseline" else 10,
+            "category": "mpg_performance",
+            "message": message,
+            "potential_savings_weekly": 0,
+            "score": mpg_score,
+            "severity": "info",
+        }
+    )
+
     # Overall grade tip
     grade_key = grade[0] if grade else "C"  # Handle "A+", "A-", etc.
     tip_template = COACHING_TIPS_LIBRARY["overall_grade"].get(grade_key, {})
     message = tip_template.get(language, tip_template.get("en", ""))
-    
-    behavior_priorities.append({
-        "priority": 5,  # Always show but low priority
-        "category": "overall_grade",
-        "message": message,
-        "potential_savings_weekly": 0,
-        "score": overall_score,
-        "severity": "info",
-    })
-    
+
+    behavior_priorities.append(
+        {
+            "priority": 5,  # Always show but low priority
+            "category": "overall_grade",
+            "message": message,
+            "potential_savings_weekly": 0,
+            "score": overall_score,
+            "severity": "info",
+        }
+    )
+
     # Sort by priority (highest first) and take top N
     behavior_priorities.sort(key=lambda x: x["priority"], reverse=True)
     tips = behavior_priorities[:max_tips]
-    
+
     return tips
 
 
