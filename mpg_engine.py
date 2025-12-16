@@ -5,8 +5,13 @@ This module provides pure functions for MPG tracking with proper validation,
 windowing, and EMA smoothing. Designed for easy testing and reusability.
 
 Author: Fuel Copilot Team
-Version: v3.9.6
-Date: November 26, 2025
+Version: v3.14.0
+Date: December 15, 2025
+
+Changelog:
+- v3.14.0: Improved filter_outliers_iqr (empty list on total corruption)
+- v3.14.0: Added auto-save/load for TruckBaselineManager
+- v3.14.0: Added shutdown_baseline_manager() for clean service shutdown
 """
 
 from dataclasses import dataclass, field
@@ -100,7 +105,18 @@ def filter_outliers_iqr(readings: list, multiplier: float = 1.5) -> list:
             f"IQR filter removed {removed} outliers. Bounds: [{lower_bound:.2f}, {upper_bound:.2f}]"
         )
 
-    return filtered if filtered else readings  # Return original if all filtered
+    # 🔧 v3.14.0 FIX: Handle total corruption case
+    # If less than 2 readings remain after filtering, the sample is unreliable.
+    # Return empty list to signal caller should use fallback, not corrupted data.
+    if len(filtered) < 2:
+        if len(readings) >= 2:  # Had enough data but all was bad
+            logger.warning(
+                f"IQR filter: {len(readings)} readings all rejected as outliers. "
+                f"Bounds: [{lower_bound:.2f}, {upper_bound:.2f}]. Returning empty list."
+            )
+        return []
+
+    return filtered
 
 
 @dataclass
@@ -594,6 +610,7 @@ class TruckMPGBaseline:
 class TruckBaselineManager:
     """
     Manages per-truck MPG baselines for the fleet.
+    🔧 v3.14.0: Added auto-save/load with configurable persistence
 
     Usage:
         manager = TruckBaselineManager()
@@ -607,8 +624,18 @@ class TruckBaselineManager:
             send_alert(...)
     """
 
-    def __init__(self):
+    DEFAULT_BASELINE_FILE = "data/mpg_baselines.json"
+    SAVE_INTERVAL = 100  # Save every N updates
+
+    def __init__(self, baseline_file: str = None, auto_load: bool = True):
         self._baselines: dict[str, TruckMPGBaseline] = {}
+        self._baseline_file = baseline_file or self.DEFAULT_BASELINE_FILE
+        self._update_count = 0
+        self._dirty = False  # Track if we need to save
+
+        # 🔧 v3.14.0: Auto-load on initialization
+        if auto_load:
+            self.load_from_file(self._baseline_file)
 
     def get_or_create(self, truck_id: str) -> TruckMPGBaseline:
         """Get existing baseline or create new one"""
@@ -626,6 +653,12 @@ class TruckBaselineManager:
         """Update baseline for a truck"""
         baseline = self.get_or_create(truck_id)
         baseline.update(mpg_value, timestamp, config)
+
+        # 🔧 v3.14.0: Auto-save periodically
+        self._dirty = True
+        self._update_count += 1
+        if self._update_count >= self.SAVE_INTERVAL:
+            self._auto_save()
 
     def get_deviation(self, truck_id: str, current_mpg: float) -> dict:
         """Get deviation from baseline for a truck"""
@@ -690,6 +723,22 @@ class TruckBaselineManager:
 
         logger.info(f"Loaded {len(self._baselines)} truck baselines from {filepath}")
 
+    def _auto_save(self):
+        """🔧 v3.14.0: Periodic auto-save to prevent data loss"""
+        if self._dirty:
+            try:
+                self.save_to_file(self._baseline_file)
+                self._update_count = 0
+                self._dirty = False
+            except Exception as e:
+                logger.error(f"Auto-save failed: {e}")
+
+    def shutdown(self):
+        """🔧 v3.14.0: Call on service shutdown to save pending changes"""
+        if self._dirty:
+            logger.info("Saving baselines on shutdown...")
+            self._auto_save()
+
 
 # Global baseline manager instance
 _baseline_manager: Optional[TruckBaselineManager] = None
@@ -701,6 +750,14 @@ def get_baseline_manager() -> TruckBaselineManager:
     if _baseline_manager is None:
         _baseline_manager = TruckBaselineManager()
     return _baseline_manager
+
+
+def shutdown_baseline_manager():
+    """🔧 v3.14.0: Call on service shutdown to persist baselines"""
+    global _baseline_manager
+    if _baseline_manager is not None:
+        _baseline_manager.shutdown()
+        logger.info("Baseline manager shutdown complete")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

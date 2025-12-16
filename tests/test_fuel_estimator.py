@@ -103,10 +103,16 @@ def test_kalman_gain_bounded():
 
 
 # ============================================================================
-# 2. ADAPTIVE NOISE
+# 2. ADAPTIVE NOISE (LEGACY - Removed in v5.9.0)
 # ============================================================================
+# NOTE: calculate_adaptive_noise was removed in v5.9.0 as dead code.
+# Q_L is now unified in update_sensor_quality() which combines GPS + voltage.
+# These tests are kept for documentation but skipped.
 
 
+@pytest.mark.skip(
+    reason="calculate_adaptive_noise removed in v5.9.0 - Q_L now unified in update_sensor_quality()"
+)
 def test_static_has_low_noise():
     """Static truck has low measurement noise"""
     est = make_estimator(50.0)
@@ -120,6 +126,9 @@ def test_static_has_low_noise():
     assert Q_L == 1.0  # Base noise for static
 
 
+@pytest.mark.skip(
+    reason="calculate_adaptive_noise removed in v5.9.0 - Q_L now unified in update_sensor_quality()"
+)
 def test_moving_has_higher_noise():
     """Moving truck has higher measurement noise"""
     est = make_estimator(50.0)
@@ -133,6 +142,9 @@ def test_moving_has_higher_noise():
     assert Q_L >= 2.0  # Moving noise
 
 
+@pytest.mark.skip(
+    reason="calculate_adaptive_noise removed in v5.9.0 - Q_L now unified in update_sensor_quality()"
+)
 def test_acceleration_increases_noise():
     """Acceleration increases noise (slosh)"""
     est = make_estimator(50.0)
@@ -150,6 +162,9 @@ def test_acceleration_increases_noise():
     assert Q_L >= 3.0  # Higher noise due to acceleration
 
 
+@pytest.mark.skip(
+    reason="calculate_adaptive_noise removed in v5.9.0 - Q_L now unified in update_sensor_quality()"
+)
 def test_engine_load_affects_noise():
     """High engine load increases noise"""
     est = make_estimator(50.0)

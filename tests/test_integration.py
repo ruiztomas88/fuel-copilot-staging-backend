@@ -99,12 +99,10 @@ class TestFullPipeline:
         self, estimator, mock_truck_data, mock_tanks_config
     ):
         """Test: Wialon data → FuelEstimator → Estimate"""
-        # Process the data
-        estimator.Q_L = estimator.calculate_adaptive_noise(
-            speed=mock_truck_data.speed,
-            altitude=mock_truck_data.altitude,
-            timestamp=mock_truck_data.timestamp,
-            engine_load=mock_truck_data.engine_load,
+        # Process the data - v5.9.0: Use update_sensor_quality instead of removed calculate_adaptive_noise
+        estimator.update_sensor_quality(
+            satellites=10,  # Good GPS
+            voltage=28.0,  # Normal voltage
         )
 
         # Calculate consumption
@@ -373,11 +371,10 @@ class TestEndToEnd:
         fuel_rate = 28.0  # L/h (about 7.4 GPH = ~8.8 MPG)
 
         for minute in range(60):
-            # Update adaptive noise
-            est.Q_L = est.calculate_adaptive_noise(
-                speed=speed + (minute % 5 - 2),  # Small speed variation
-                altitude=500 + minute * 0.5,  # Gradual climb
-                timestamp=datetime.now(timezone.utc),
+            # v5.9.0: Use update_sensor_quality instead of removed calculate_adaptive_noise
+            est.update_sensor_quality(
+                satellites=10,  # Good GPS
+                voltage=28.0,  # Normal voltage
             )
 
             # Predict consumption (1 minute)

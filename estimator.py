@@ -13,6 +13,8 @@ Kalman Filter for Fuel Level Estimation with:
 - 🔧 v5.8.4: Negative consumption treated as sensor error
 - 🔧 v5.8.5: More conservative Q_r for PARKED/IDLE states
 - 🔧 v5.8.5: Auto-resync cooldown (30 min) to prevent oscillation
+- 🔧 v5.9.0: Fix P growth during large time gaps (audit fix)
+- 🔧 v5.9.0: Removed legacy calculate_adaptive_noise (dead code)
 - 🔧 v5.8.5: Innovation-based K adjustment for faster correction
 - 🔧 v5.8.6: Unified Q_L calculation (GPS + Voltage combined)
 
@@ -516,8 +518,18 @@ class FuelEstimator:
         if consumption_lph is None and rate_lph is not None:
             consumption_lph = rate_lph
 
-        # Skip large time gaps
+        # 🔧 v5.9.0 FIX: Large time gaps - update P BEFORE returning
+        # Without this, P doesn't grow during offline periods, causing
+        # the filter to be "overconfident" when data returns
         if dt_hours > 1.0:
+            # Increase P aggressively to reflect uncertainty during gap
+            # Factor of 5 accounts for unknown events (refuels, theft, etc.)
+            p_increase = self.Q_r * dt_hours * 5.0
+            self.P += p_increase
+            logger.info(
+                f"[{self.truck_id}] Large gap ({dt_hours:.1f}h) - "
+                f"skipping prediction, P increased by {p_increase:.2f} to {self.P:.2f}"
+            )
             return
 
         # 🔧 v5.8.4: Handle negative consumption as sensor error
@@ -628,101 +640,9 @@ class FuelEstimator:
             logger.info(f"[{self.truck_id}] ✅ ECU recovered")
             self.ecu_degraded = False
 
-    def calculate_adaptive_noise(
-        self,
-        speed: Optional[float],
-        altitude: Optional[float],
-        timestamp: datetime,
-        engine_load: Optional[float] = None,
-    ) -> float:
-        """
-        Intelligent adaptive noise based on physical conditions:
-        - Grade/incline
-        - Acceleration
-        - Slosh from stop-and-go
-        - Engine load
-        """
-        Q_L_BASE = 1.0
-        Q_L_MOVING = 2.0
-        Q_L_GRADE = 3.0
-        Q_L_ACCEL = 4.0
-        Q_L_SLOSH = 5.0
-        Q_L_MAX = 6.0
-
-        noise_factors = []
-
-        if speed is None or speed < 1.0:
-            self.is_moving = False
-            return Q_L_BASE
-
-        self.is_moving = True
-        noise_factors.append(("moving", Q_L_MOVING))
-
-        # Grade detection
-        if altitude is not None and self.last_altitude is not None and speed > 5:
-            time_delta_h = 15 / 3600
-            distance_mi = speed * time_delta_h
-            distance_ft = distance_mi * 5280
-
-            if distance_ft > 10:
-                altitude_delta = altitude - self.last_altitude
-                grade_pct = (altitude_delta / distance_ft) * 100
-
-                if abs(grade_pct) > 10:
-                    noise_factors.append(("steep_grade", Q_L_MAX))
-                elif abs(grade_pct) > 6:
-                    noise_factors.append(("medium_grade", Q_L_GRADE + 1.5))
-                elif abs(grade_pct) > 3:
-                    noise_factors.append(("mild_grade", Q_L_GRADE))
-
-        # Acceleration detection
-        if speed is not None and self.last_speed is not None:
-            accel = abs(speed - self.last_speed) / 15
-            if accel > 3:
-                noise_factors.append(("hard_accel", Q_L_SLOSH + 1.0))
-            elif accel > 2:
-                noise_factors.append(("moderate_accel", Q_L_ACCEL))
-            elif accel > 1:
-                noise_factors.append(("mild_accel", Q_L_ACCEL - 1.0))
-
-        # Speed variance (slosh)
-        self.speed_history.append(speed)
-        if len(self.speed_history) > 10:
-            self.speed_history.pop(0)
-
-        if len(self.speed_history) >= 5:
-            speed_std = np.std(self.speed_history)
-            speed_mean = np.mean(self.speed_history)
-
-            if speed_mean > 5:
-                cv = speed_std / speed_mean
-                if cv > 0.5:
-                    noise_factors.append(("stop_and_go", Q_L_SLOSH))
-                elif cv > 0.3:
-                    noise_factors.append(("variable_speed", Q_L_GRADE))
-
-        # High speed
-        if speed > 70:
-            noise_factors.append(("high_speed", Q_L_MOVING + 0.5))
-
-        # Engine load
-        if engine_load is not None:
-            if engine_load > 80:
-                noise_factors.append(("high_engine_load", Q_L_SLOSH))
-            elif engine_load > 60:
-                noise_factors.append(("medium_engine_load", Q_L_ACCEL))
-            elif engine_load > 40:
-                noise_factors.append(("mild_engine_load", Q_L_GRADE))
-
-        self.last_speed = speed
-        self.last_altitude = altitude
-        self.last_timestamp = timestamp
-
-        if noise_factors:
-            final_Q_L = max(f[1] for f in noise_factors)
-            return min(final_Q_L, Q_L_MAX)
-
-        return Q_L_MOVING
+    # 🔧 v5.9.0: REMOVED calculate_adaptive_noise (dead code)
+    # This function was never called - Q_L is now unified in update_sensor_quality()
+    # See v5.8.6 for the current adaptive Q_L implementation
 
     def set_movement_state(self, is_moving: bool):
         """Set movement state for basic adaptive noise"""
