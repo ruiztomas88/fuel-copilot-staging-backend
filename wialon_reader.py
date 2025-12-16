@@ -91,6 +91,33 @@ class WialonConfig:
         "fuel_economy": "fuel_economy",  # ECU fuel economy (MPG) - for cross-validation
         "gear": "gear",  # Current gear position (1-18) - for heavy foot detection
         "barometer": "barometer",  # Barometric pressure - engine load correlation
+        # 🆕 v5.10.1: Full Pacific Track sensor suite
+        # Temperatures (Page 2)
+        "fuel_temp": "fuel_temp",  # Fuel temperature (°F) - density correction
+        "intercooler_temp": "intercooler_temp",  # Intercooler temperature (°F)
+        "turbo_temp": "turbo_temp",  # Turbo temperature (°F) - turbo health
+        "trans_temp": "trans_temp",  # Transmission oil temperature (°F)
+        # Pressures (Page 2)
+        "intake_press": "intake_press",  # Intake manifold pressure (boost) - kPa
+        "boost": "boost",  # Alternative name for intake pressure/boost
+        # Counters (Page 4)
+        "pto_hours": "pto_hours",  # PTO Hours counter
+        # Brake Info (Page 4) - 🔥 Critical for predictive maintenance
+        "brake_app_press": "brake_app_press",  # Brake application pressure (psi)
+        "brake_primary_press": "brake_primary_press",  # Primary brake pressure (psi)
+        "brake_secondary_press": "brake_secondary_press",  # Secondary brake pressure (psi)
+        "brake_switch": "brake_switch",  # Brake pedal switch (0/1)
+        "parking_brake": "parking_brake",  # Parking brake status (0/1)
+        "abs_status": "abs_status",  # ABS system status
+        # RPM High Resolution (Page 3)
+        "rpm_hi_res": "rpm_hi_res",  # High resolution RPM
+        # Misc (Page 1)
+        "seatbelt": "seatbelt",  # Seatbelt status (0/1)
+        "vin": "vin",  # Vehicle VIN
+        # 🆕 v5.10.1: Device-generated driving events (from accelerometer)
+        "harsh_accel": "harsh_accel",  # Harsh acceleration event (threshold: 280mg)
+        "harsh_brake": "harsh_brake",  # Harsh braking event (threshold: 320mg)
+        "harsh_corner": "harsh_corner",  # Harsh cornering event (threshold: 280mg)
     }
 
 
@@ -144,6 +171,33 @@ class TruckSensorData:
     fuel_economy: Optional[float] = None  # ECU fuel economy (MPG) - cross-validation
     gear: Optional[int] = None  # Current gear position (1-18)
     barometer: Optional[float] = None  # Barometric pressure (kPa)
+    # 🆕 v5.10.1: Full Pacific Track sensor suite
+    # Temperatures
+    fuel_temp: Optional[float] = None  # Fuel temperature (°F)
+    intercooler_temp: Optional[float] = None  # Intercooler temperature (°F)
+    turbo_temp: Optional[float] = None  # Turbo temperature (°F)
+    trans_temp: Optional[float] = None  # Transmission oil temperature (°F)
+    # Pressures
+    intake_press: Optional[float] = None  # Intake manifold pressure (kPa)
+    boost: Optional[float] = None  # Boost pressure (alias for intake_press)
+    # Counters
+    pto_hours: Optional[float] = None  # PTO Hours counter
+    # Brake Info - 🔥 Critical for brake wear prediction
+    brake_app_press: Optional[float] = None  # Brake application pressure (psi)
+    brake_primary_press: Optional[float] = None  # Primary brake pressure (psi)
+    brake_secondary_press: Optional[float] = None  # Secondary brake pressure (psi)
+    brake_switch: Optional[int] = None  # Brake pedal switch (0/1)
+    parking_brake: Optional[int] = None  # Parking brake status (0/1)
+    abs_status: Optional[int] = None  # ABS system status
+    # High Resolution
+    rpm_hi_res: Optional[float] = None  # High resolution RPM
+    # Misc
+    seatbelt: Optional[int] = None  # Seatbelt status (0/1)
+    vin: Optional[str] = None  # Vehicle VIN
+    # Device-generated driving events
+    harsh_accel: Optional[int] = None  # Harsh acceleration event count
+    harsh_brake: Optional[int] = None  # Harsh braking event count
+    harsh_corner: Optional[int] = None  # Harsh cornering event count
 
     def __post_init__(self):
         """Ensure timestamp is timezone-aware"""

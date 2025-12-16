@@ -349,6 +349,12 @@ class DriverBehaviorEngine:
         fuel_rate: Optional[float] = None,
         fuel_economy: Optional[float] = None,  # ECU MPG
         kalman_mpg: Optional[float] = None,  # Our calculated MPG
+        # 🆕 v5.10.1: Brake sensor inputs
+        brake_switch: Optional[int] = None,  # Brake pedal (0/1)
+        brake_pressure: Optional[float] = None,  # Brake application pressure (psi)
+        # 🆕 v5.10.1: Device-detected harsh events (from accelerometer)
+        device_harsh_accel: Optional[int] = None,  # Device harsh accel count
+        device_harsh_brake: Optional[int] = None,  # Device harsh brake count
     ) -> List[BehaviorEvent]:
         """
         Process a sensor reading and detect behavior events.
@@ -362,6 +368,10 @@ class DriverBehaviorEngine:
             fuel_rate: Instantaneous fuel consumption (GPH)
             fuel_economy: ECU-reported MPG (for cross-validation)
             kalman_mpg: Our Kalman-filtered MPG
+            brake_switch: Brake pedal status (0/1)
+            brake_pressure: Brake application pressure (psi)
+            device_harsh_accel: Device-detected harsh acceleration event count
+            device_harsh_brake: Device-detected harsh braking event count
 
         Returns:
             List of detected behavior events
@@ -385,64 +395,116 @@ class DriverBehaviorEngine:
                 return events
 
         # ═══════════════════════════════════════════════════════════════════
-        # 1. ACCELERATION/BRAKING DETECTION
+        # 0. DEVICE-DETECTED HARSH EVENTS (most reliable - from accelerometer)
+        # ═══════════════════════════════════════════════════════════════════
+        # These come from the device's 280mg/320mg thresholds
+        if device_harsh_accel is not None and device_harsh_accel > 0:
+            events.append(
+                BehaviorEvent(
+                    truck_id=truck_id,
+                    timestamp=timestamp,
+                    behavior_type=BehaviorType.HARD_ACCELERATION,
+                    severity=SeverityLevel.MODERATE,  # Device threshold = 280mg ≈ moderate
+                    value=280.0,  # mg threshold
+                    threshold=280.0,
+                    fuel_waste_gal=self.config.fuel_waste_hard_accel_gal
+                    * device_harsh_accel,
+                    context={
+                        "source": "device_accelerometer",
+                        "count": device_harsh_accel,
+                    },
+                )
+            )
+            state.hard_accel_count += device_harsh_accel
+            state.fuel_waste_accel += (
+                self.config.fuel_waste_hard_accel_gal * device_harsh_accel
+            )
+
+        if device_harsh_brake is not None and device_harsh_brake > 0:
+            events.append(
+                BehaviorEvent(
+                    truck_id=truck_id,
+                    timestamp=timestamp,
+                    behavior_type=BehaviorType.HARD_BRAKING,
+                    severity=SeverityLevel.MODERATE,  # Device threshold = 320mg ≈ moderate
+                    value=320.0,  # mg threshold
+                    threshold=320.0,
+                    fuel_waste_gal=self.config.fuel_waste_hard_brake_gal
+                    * device_harsh_brake,
+                    context={
+                        "source": "device_accelerometer",
+                        "count": device_harsh_brake,
+                    },
+                )
+            )
+            state.hard_brake_count += device_harsh_brake
+            state.fuel_waste_brake += (
+                self.config.fuel_waste_hard_brake_gal * device_harsh_brake
+            )
+
+        # ═══════════════════════════════════════════════════════════════════
+        # 1. ACCELERATION/BRAKING DETECTION (calculated from speed delta)
         # ═══════════════════════════════════════════════════════════════════
         if speed is not None and state.last_speed is not None and dt_seconds > 0:
             accel_mpss = (speed - state.last_speed) / dt_seconds  # mph/s
 
-            # Hard acceleration
-            if accel_mpss >= self.config.accel_severe_threshold:
-                events.append(
-                    self._create_accel_event(
-                        truck_id, timestamp, accel_mpss, SeverityLevel.SEVERE
+            # Hard acceleration (only if device didn't already detect)
+            if device_harsh_accel is None or device_harsh_accel == 0:
+                if accel_mpss >= self.config.accel_severe_threshold:
+                    events.append(
+                        self._create_accel_event(
+                            truck_id, timestamp, accel_mpss, SeverityLevel.SEVERE
+                        )
                     )
-                )
-                state.hard_accel_count += 1
-                state.fuel_waste_accel += self.config.fuel_waste_hard_accel_gal * 2
+                    state.hard_accel_count += 1
+                    state.fuel_waste_accel += self.config.fuel_waste_hard_accel_gal * 2
 
-            elif accel_mpss >= self.config.accel_moderate_threshold:
-                events.append(
-                    self._create_accel_event(
-                        truck_id, timestamp, accel_mpss, SeverityLevel.MODERATE
+                elif accel_mpss >= self.config.accel_moderate_threshold:
+                    events.append(
+                        self._create_accel_event(
+                            truck_id, timestamp, accel_mpss, SeverityLevel.MODERATE
+                        )
                     )
-                )
-                state.hard_accel_count += 1
-                state.fuel_waste_accel += self.config.fuel_waste_hard_accel_gal
+                    state.hard_accel_count += 1
+                    state.fuel_waste_accel += self.config.fuel_waste_hard_accel_gal
 
-            elif accel_mpss >= self.config.accel_minor_threshold:
-                events.append(
-                    self._create_accel_event(
-                        truck_id, timestamp, accel_mpss, SeverityLevel.MINOR
+                elif accel_mpss >= self.config.accel_minor_threshold:
+                    events.append(
+                        self._create_accel_event(
+                            truck_id, timestamp, accel_mpss, SeverityLevel.MINOR
+                        )
                     )
-                )
-                state.hard_accel_count += 1
-                state.fuel_waste_accel += self.config.fuel_waste_hard_accel_gal * 0.5
+                    state.hard_accel_count += 1
+                    state.fuel_waste_accel += (
+                        self.config.fuel_waste_hard_accel_gal * 0.5
+                    )
 
-            # Hard braking
-            if accel_mpss <= self.config.brake_severe_threshold:
-                events.append(
-                    self._create_brake_event(
-                        truck_id, timestamp, accel_mpss, SeverityLevel.SEVERE
+            # Hard braking (only if device didn't already detect)
+            if device_harsh_brake is None or device_harsh_brake == 0:
+                if accel_mpss <= self.config.brake_severe_threshold:
+                    events.append(
+                        self._create_brake_event(
+                            truck_id, timestamp, accel_mpss, SeverityLevel.SEVERE
+                        )
                     )
-                )
-                state.hard_brake_count += 1
-                state.fuel_waste_brake += self.config.fuel_waste_hard_brake_gal * 2
+                    state.hard_brake_count += 1
+                    state.fuel_waste_brake += self.config.fuel_waste_hard_brake_gal * 2
 
-            elif accel_mpss <= self.config.brake_moderate_threshold:
-                events.append(
-                    self._create_brake_event(
-                        truck_id, timestamp, accel_mpss, SeverityLevel.MODERATE
+                elif accel_mpss <= self.config.brake_moderate_threshold:
+                    events.append(
+                        self._create_brake_event(
+                            truck_id, timestamp, accel_mpss, SeverityLevel.MODERATE
+                        )
                     )
-                )
-                state.hard_brake_count += 1
-                state.fuel_waste_brake += self.config.fuel_waste_hard_brake_gal
+                    state.hard_brake_count += 1
+                    state.fuel_waste_brake += self.config.fuel_waste_hard_brake_gal
 
-            elif accel_mpss <= self.config.brake_minor_threshold:
-                events.append(
-                    self._create_brake_event(
-                        truck_id, timestamp, accel_mpss, SeverityLevel.MINOR
+                elif accel_mpss <= self.config.brake_minor_threshold:
+                    events.append(
+                        self._create_brake_event(
+                            truck_id, timestamp, accel_mpss, SeverityLevel.MINOR
+                        )
                     )
-                )
                 state.hard_brake_count += 1
                 state.fuel_waste_brake += self.config.fuel_waste_hard_brake_gal * 0.5
 

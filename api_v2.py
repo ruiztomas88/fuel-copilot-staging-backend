@@ -703,3 +703,166 @@ async def get_behavior_events(
         "total_events": len(state.events),
         "events": [e.to_dict() for e in events],
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.11.0: PREDICTIVE MAINTENANCE / COMPONENT WEAR ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get(
+    "/maintenance/wear/{truck_id}",
+    summary="Component Wear Status",
+    tags=["Predictive Maintenance"],
+)
+async def get_component_wear(truck_id: str):
+    """
+    Get current wear status for all monitored components.
+
+    Components tracked:
+    - BRAKE_PADS: Based on brake usage, pressure, harsh events
+    - TRANSMISSION: Based on trans temp, gear shifts, abuse
+    - TURBO: Based on turbo/intercooler temps, boost pressure
+    - ENGINE: Based on oil/coolant temps, oil pressure
+
+    Returns wear percentage (0-100%) and health score.
+    """
+    from component_wear_engine import get_wear_engine
+
+    engine = get_wear_engine()
+    wear_status = engine.get_truck_wear_status(truck_id)
+
+    if wear_status is None:
+        raise HTTPException(
+            status_code=404, detail=f"No wear data for truck {truck_id}"
+        )
+
+    return wear_status
+
+
+@router.get(
+    "/maintenance/predictions/{truck_id}",
+    summary="Maintenance Predictions",
+    tags=["Predictive Maintenance"],
+)
+async def get_maintenance_predictions(truck_id: str):
+    """
+    Get predictive maintenance estimates for a truck.
+
+    Returns:
+    - Days until maintenance needed per component
+    - Miles remaining for brake pads
+    - Confidence levels
+    - Recommended actions
+
+    Example response:
+    {
+        "brake_pads": {
+            "wear_pct": 65.3,
+            "miles_remaining": 24000,
+            "days_to_service": 45,
+            "confidence": 0.82,
+            "action": "Schedule brake inspection within 6 weeks"
+        }
+    }
+    """
+    from component_wear_engine import get_wear_engine
+
+    engine = get_wear_engine()
+    predictions = engine.get_maintenance_predictions(truck_id)
+
+    if predictions is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Not enough data for predictions on truck {truck_id}",
+        )
+
+    return predictions
+
+
+@router.get(
+    "/maintenance/alerts/{truck_id}",
+    summary="Maintenance Alerts",
+    tags=["Predictive Maintenance"],
+)
+async def get_maintenance_alerts(truck_id: str):
+    """
+    Get active maintenance alerts for a truck.
+
+    Alerts are generated when:
+    - Component wear exceeds 70% (warning)
+    - Component wear exceeds 85% (urgent)
+    - Abnormal readings detected (e.g., high trans temp)
+    - Accelerated wear pattern detected
+    """
+    from component_wear_engine import get_wear_engine
+
+    engine = get_wear_engine()
+    alerts = engine.get_maintenance_alerts(truck_id)
+
+    return {
+        "truck_id": truck_id,
+        "alerts": alerts,
+        "total_alerts": len(alerts),
+    }
+
+
+@router.get(
+    "/maintenance/fleet",
+    summary="Fleet Maintenance Overview",
+    tags=["Predictive Maintenance"],
+)
+async def get_fleet_maintenance():
+    """
+    Get fleet-wide maintenance overview.
+
+    Returns:
+    - Trucks requiring urgent attention
+    - Upcoming maintenance schedule
+    - Component wear distribution across fleet
+    - Cost-saving opportunities (proactive vs reactive)
+    """
+    from component_wear_engine import get_wear_engine
+
+    engine = get_wear_engine()
+    fleet_status = engine.get_fleet_maintenance_summary()
+
+    return fleet_status
+
+
+@router.get(
+    "/maintenance/history/{truck_id}",
+    summary="Wear History",
+    tags=["Predictive Maintenance"],
+)
+async def get_wear_history(
+    truck_id: str,
+    component: Optional[str] = Query(
+        None, description="Component type: BRAKE_PADS, TRANSMISSION, TURBO, ENGINE"
+    ),
+    days: int = Query(30, ge=1, le=365),
+):
+    """
+    Get historical wear progression for a truck.
+
+    Useful for:
+    - Visualizing wear trends
+    - Identifying accelerated wear periods
+    - Correlating with driver behavior
+    """
+    from component_wear_engine import get_wear_engine
+
+    engine = get_wear_engine()
+    history = engine.get_wear_history(truck_id, component=component, days=days)
+
+    if not history:
+        raise HTTPException(
+            status_code=404, detail=f"No wear history for truck {truck_id}"
+        )
+
+    return {
+        "truck_id": truck_id,
+        "period_days": days,
+        "component_filter": component,
+        "history": history,
+    }

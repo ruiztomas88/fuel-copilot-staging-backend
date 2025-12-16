@@ -91,6 +91,9 @@ from database_mysql import (
 # 🆕 v5.10.0: Import driver behavior engine for heavy foot detection
 from driver_behavior_engine import get_behavior_engine, BehaviorEvent
 
+# 🆕 v5.11.0: Import component wear engine for predictive maintenance
+from component_wear_engine import get_wear_engine, ComponentType
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -2069,6 +2072,30 @@ def sync_cycle(
                 "barometer": getattr(
                     truck_data, "barometer", None
                 ),  # Barometric pressure
+                # 🆕 v5.10.1: Full Pacific Track sensor suite
+                # Temperatures
+                "fuel_temp": getattr(truck_data, "fuel_temp", None),
+                "intercooler_temp": getattr(truck_data, "intercooler_temp", None),
+                "turbo_temp": getattr(truck_data, "turbo_temp", None),
+                "trans_temp": getattr(truck_data, "trans_temp", None),
+                # Pressures
+                "intake_press": getattr(truck_data, "intake_press", None),
+                "boost": getattr(truck_data, "boost", None),
+                # Counters
+                "pto_hours": getattr(truck_data, "pto_hours", None),
+                # Brake Info
+                "brake_app_press": getattr(truck_data, "brake_app_press", None),
+                "brake_primary_press": getattr(truck_data, "brake_primary_press", None),
+                "brake_secondary_press": getattr(
+                    truck_data, "brake_secondary_press", None
+                ),
+                "brake_switch": getattr(truck_data, "brake_switch", None),
+                "parking_brake": getattr(truck_data, "parking_brake", None),
+                "abs_status": getattr(truck_data, "abs_status", None),
+                # Driving events (from accelerometer)
+                "harsh_accel": getattr(truck_data, "harsh_accel", None),
+                "harsh_brake": getattr(truck_data, "harsh_brake", None),
+                "harsh_corner": getattr(truck_data, "harsh_corner", None),
             }
 
             # 🆕 v5.10.0: Process driver behavior detection
@@ -2082,6 +2109,12 @@ def sync_cycle(
                     gear=getattr(truck_data, "gear", None),
                     fuel_rate=truck_data.fuel_rate,
                     fuel_economy=getattr(truck_data, "fuel_economy", None),
+                    # 🆕 v5.10.1: Pass brake info for brake event detection
+                    brake_switch=getattr(truck_data, "brake_switch", None),
+                    brake_pressure=getattr(truck_data, "brake_app_press", None),
+                    # 🆕 v5.10.1: Pass device-detected harsh events
+                    device_harsh_accel=getattr(truck_data, "harsh_accel", None),
+                    device_harsh_brake=getattr(truck_data, "harsh_brake", None),
                 )
                 # Log severe behavior events
                 for event in behavior_events:
@@ -2094,6 +2127,43 @@ def sync_cycle(
                 logger.debug(
                     f"Behavior detection error for {truck_id}: {behavior_error}"
                 )
+
+            # 🆕 v5.11.0: Process component wear / predictive maintenance
+            try:
+                wear_engine = get_wear_engine()
+                wear_engine.process_reading(
+                    truck_id=truck_id,
+                    timestamp=truck_data.timestamp,
+                    odometer=truck_data.odometer,
+                    engine_hours=truck_data.engine_hours,
+                    # Brake sensors
+                    brake_app_press=getattr(truck_data, "brake_app_press", None),
+                    brake_switch=getattr(truck_data, "brake_switch", None),
+                    speed=truck_data.speed,
+                    # Transmission sensors
+                    trans_temp=getattr(truck_data, "trans_temp", None),
+                    gear=getattr(truck_data, "gear", None),
+                    rpm=truck_data.rpm,
+                    # Turbo sensors
+                    turbo_temp=getattr(truck_data, "turbo_temp", None),
+                    boost_pressure=getattr(truck_data, "boost_pressure", None),
+                    intercooler_temp=getattr(truck_data, "intercooler_temp", None),
+                    # Engine sensors
+                    coolant_temp=truck_data.coolant_temp,
+                    oil_temp=truck_data.oil_temp,
+                    oil_pressure=truck_data.oil_pressure,
+                    # Events from behavior engine
+                    harsh_brake_event=(
+                        any(
+                            e.behavior_type.value == "hard_braking"
+                            for e in behavior_events
+                        )
+                        if behavior_events
+                        else False
+                    ),
+                )
+            except Exception as wear_error:
+                logger.debug(f"Wear engine error for {truck_id}: {wear_error}")
 
             # 🆕 v3.12.28 / v5.7.5: Process DTC codes and generate alerts
             # Prefer dtc_code (actual codes like "100.4,157.3") over dtc (which may be just 0/1 flag)
