@@ -50,14 +50,22 @@ async def get_fleet_cost_per_mile(
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
 
-        # 🔧 v6.2.6: Use REAL data from refuel_events table for accurate fuel costs
-        # This gives us actual gallons purchased, not estimates
+        # 🔧 v6.2.9: Simplified query using data that actually exists
+        # Calculate from consumption_gph, mpg_current, and activity time
         query = """
             SELECT 
                 fm.truck_id,
-                SUM(CASE WHEN fm.odom_delta_mi > 0 AND fm.odom_delta_mi < 100 THEN fm.odom_delta_mi ELSE 0 END) as odom_miles,
+                COUNT(*) as readings,
                 COUNT(DISTINCT DATE(fm.timestamp_utc)) as active_days,
-                AVG(CASE WHEN fm.mpg_current > 3 AND fm.mpg_current < 12 THEN fm.mpg_current END) as avg_mpg,
+                -- Total fuel consumed (sum of consumption over time intervals)
+                SUM(CASE WHEN fm.consumption_gph > 0 THEN fm.consumption_gph * 0.25 / 60 ELSE 0 END) as estimated_gallons,
+                -- Average MPG when driving
+                AVG(CASE WHEN fm.speed_mph > 10 AND fm.mpg_current > 3 AND fm.mpg_current < 12 THEN fm.mpg_current END) as avg_mpg,
+                -- Time spent driving (15-second intervals = 0.25 minutes each)
+                SUM(CASE WHEN fm.speed_mph > 5 THEN 0.25 ELSE 0 END) as driving_minutes,
+                -- Average speed when driving
+                AVG(CASE WHEN fm.speed_mph > 10 THEN fm.speed_mph END) as avg_speed,
+                -- Sum from refuel events if available
                 COALESCE(ref.total_gallons, 0) as refuel_gallons
             FROM fuel_metrics fm
             LEFT JOIN (
@@ -68,7 +76,7 @@ async def get_fleet_cost_per_mile(
             ) ref ON fm.truck_id = ref.truck_id
             WHERE fm.timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)
             GROUP BY fm.truck_id
-            HAVING COUNT(*) > 10
+            HAVING active_days >= 1
         """
 
         trucks_data = []
@@ -78,45 +86,45 @@ async def get_fleet_cost_per_mile(
                 rows = result.fetchall()
                 logger.info(f"Query returned {len(rows)} trucks")
 
-            # 🔧 v6.2.6: Use refuel data when available, estimate conservatively otherwise
             total_fleet_miles = 0
             total_fleet_gallons = 0
             for row in rows:
                 try:
-                    odom_miles = float(row[1] or 0)
+                    readings = int(row[1] or 0)
                     active_days = int(row[2] or 0)
-                    avg_mpg = float(row[3] if row[3] is not None else 5.5)
-                    refuel_gallons = float(row[4] or 0)
+                    estimated_gallons = float(row[3] or 0)
+                    avg_mpg = float(row[4]) if row[4] else 6.0
+                    driving_minutes = float(row[5] or 0)
+                    avg_speed = float(row[6]) if row[6] else 40.0
+                    refuel_gallons = float(row[7] or 0)
 
                     if avg_mpg < 3 or avg_mpg > 12:
-                        avg_mpg = 5.5
+                        avg_mpg = 6.0
 
-                    # Use odometer miles if available, otherwise estimate conservatively
-                    if odom_miles > 10:
-                        miles = odom_miles
-                    elif refuel_gallons > 0 and avg_mpg > 0:
-                        # Estimate from fuel: miles = gallons × MPG
-                        miles = refuel_gallons * avg_mpg
-                    else:
-                        # Very conservative estimate: 100 miles/day for active trucks
-                        miles = active_days * 100 if active_days > 0 else 0
+                    # Calculate miles from driving time and average speed
+                    # driving_minutes / 60 * avg_speed = miles
+                    miles_from_driving = (driving_minutes / 60) * avg_speed
 
-                    # Use actual refuel gallons if available, otherwise estimate from miles
+                    # Use refuel gallons if available, otherwise estimated consumption
                     if refuel_gallons > 0:
                         gallons = refuel_gallons
-                    elif miles > 0 and avg_mpg > 0:
-                        gallons = miles / avg_mpg
+                    elif estimated_gallons > 0:
+                        gallons = estimated_gallons
                     else:
-                        gallons = 0
+                        # Estimate from miles and MPG
+                        gallons = miles_from_driving / avg_mpg if avg_mpg > 0 else 0
 
-                    if miles < 1 and gallons < 1:
-                        continue  # Skip trucks with no activity
+                    # Use calculated miles
+                    miles = miles_from_driving if miles_from_driving > 10 else (gallons * avg_mpg)
+
+                    if miles < 10 and gallons < 5:
+                        continue  # Skip trucks with minimal activity
 
                     total_fleet_miles += miles
                     total_fleet_gallons += gallons
 
-                    # Conservative engine hours: 1 hour per 50 miles driven
-                    engine_hours = miles / 50 if miles > 0 else active_days * 2
+                    # Engine hours: estimate 1 hour per 45 miles
+                    engine_hours = max(miles / 45, active_days * 2)
 
                     trucks_data.append(
                         {

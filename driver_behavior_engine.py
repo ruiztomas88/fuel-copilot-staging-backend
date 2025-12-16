@@ -991,23 +991,30 @@ class DriverBehaviorEngine:
             engine = get_sqlalchemy_engine()
 
             # Get behavior events from last 7 days
+            # 🔧 v6.2.9: Use only columns that exist in fuel_metrics table
+            # Calculate acceleration/braking events from speed changes instead of missing columns
             query = """
                 SELECT 
                     truck_id,
-                    SUM(COALESCE(harsh_accel, 0)) as total_harsh_accel,
-                    SUM(COALESCE(harsh_brake, 0)) as total_harsh_brake,
-                    -- High RPM: count minutes where RPM > 1800
+                    -- High RPM: count minutes where RPM > 1800 (excessive)
                     SUM(CASE WHEN rpm > 1800 THEN 0.25 ELSE 0 END) as high_rpm_minutes,
+                    -- Very high RPM (aggressive driving indicator)
+                    SUM(CASE WHEN rpm > 2000 THEN 0.25 ELSE 0 END) as very_high_rpm_minutes,
                     -- Overspeeding: count minutes where speed > 65
-                    SUM(CASE WHEN speed > 65 THEN 0.25 ELSE 0 END) as overspeed_minutes,
+                    SUM(CASE WHEN speed_mph > 65 THEN 0.25 ELSE 0 END) as overspeed_minutes,
+                    -- Severe overspeeding
+                    SUM(CASE WHEN speed_mph > 70 THEN 0.25 ELSE 0 END) as severe_overspeed_minutes,
                     -- MPG data for scoring
-                    AVG(CASE WHEN speed > 10 THEN mpg_current END) as avg_mpg,
-                    COUNT(DISTINCT DATE(timestamp_utc)) as active_days
+                    AVG(CASE WHEN speed_mph > 10 THEN mpg_current END) as avg_mpg,
+                    -- Low MPG events (could indicate aggressive driving)
+                    SUM(CASE WHEN mpg_current < 4 AND speed_mph > 20 THEN 1 ELSE 0 END) as low_mpg_events,
+                    COUNT(DISTINCT DATE(timestamp_utc)) as active_days,
+                    COUNT(*) as total_readings
                 FROM fuel_metrics
                 WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 7 DAY)
                 GROUP BY truck_id
                 HAVING active_days >= 1
-                ORDER BY total_harsh_accel + total_harsh_brake DESC
+                ORDER BY high_rpm_minutes DESC
             """
 
             with engine.connect() as conn:
@@ -1058,36 +1065,49 @@ class DriverBehaviorEngine:
 
             for row in rows:
                 truck_id = row[0]
-                harsh_accel = int(row[1] or 0)
-                harsh_brake = int(row[2] or 0)
-                high_rpm_min = float(row[3] or 0)
-                overspeed_min = float(row[4] or 0)
-                avg_mpg = float(row[5]) if row[5] else 6.5  # Default if no MPG data
-                active_days = int(row[6] or 1)
+                # 🔧 v6.2.9: New column mapping without harsh_accel/harsh_brake
+                high_rpm_min = float(row[1] or 0)
+                very_high_rpm_min = float(row[2] or 0)
+                overspeed_min = float(row[3] or 0)
+                severe_overspeed_min = float(row[4] or 0)
+                avg_mpg = float(row[5]) if row[5] else 6.5
+                low_mpg_events = int(row[6] or 0)
+                active_days = int(row[7] or 1)
+                total_readings = int(row[8] or 1)
+
+                # Use very high RPM as proxy for aggressive acceleration
+                # Use low MPG events as additional indicator
+                estimated_accel_events = int(very_high_rpm_min / 2) + int(
+                    low_mpg_events / 5
+                )
+                estimated_brake_events = int(
+                    severe_overspeed_min / 3
+                )  # Hard braking often follows overspeeding
 
                 # Calculate daily averages
-                daily_accel = harsh_accel / active_days
-                daily_brake = harsh_brake / active_days
+                daily_accel = estimated_accel_events / active_days
+                daily_brake = estimated_brake_events / active_days
+                daily_rpm_high = high_rpm_min / active_days
+                daily_overspeed = overspeed_min / active_days
 
                 # Calculate score (100 = perfect, lower = worse)
-                # Deduct points for each behavior event
-                # Max deductions: 50 points total
-                accel_penalty = min(daily_accel * 2, 15)  # Up to 15 points
-                brake_penalty = min(daily_brake * 1.5, 10)  # Up to 10 points
-                rpm_penalty = min(
-                    high_rpm_min / active_days * 0.5, 10
-                )  # Up to 10 points
-                speed_penalty = min(
-                    overspeed_min / active_days * 0.3, 15
-                )  # Up to 15 points
+                # Scoring based on available data
+                accel_penalty = min(daily_accel * 3, 15)  # Up to 15 points
+                brake_penalty = min(daily_brake * 2, 10)  # Up to 10 points
+                rpm_penalty = min(daily_rpm_high * 0.3, 15)  # Up to 15 points
+                speed_penalty = min(daily_overspeed * 0.2, 15)  # Up to 15 points
 
                 score = max(
                     0, 100 - accel_penalty - brake_penalty - rpm_penalty - speed_penalty
                 )
 
                 # Calculate fuel waste estimates (gallons)
-                waste_accel = harsh_accel * self.config.fuel_waste_hard_accel_gal
-                waste_brake = harsh_brake * self.config.fuel_waste_hard_brake_gal
+                waste_accel = (
+                    estimated_accel_events * self.config.fuel_waste_hard_accel_gal
+                )
+                waste_brake = (
+                    estimated_brake_events * self.config.fuel_waste_hard_brake_gal
+                )
                 waste_rpm = high_rpm_min * self.config.fuel_waste_high_rpm_gal_per_min
                 waste_speed = (
                     overspeed_min * self.config.fuel_waste_overspeeding_gal_per_min
@@ -1110,7 +1130,6 @@ class DriverBehaviorEngine:
                 else:
                     grade = "F"
 
-                # Determine trend (simplified - would need more history)
                 trend = "stable"
 
                 truck_data.append(
@@ -1120,8 +1139,8 @@ class DriverBehaviorEngine:
                         "grade": grade,
                         "trend": trend,
                         "components": {
-                            "hard_accel_events": harsh_accel,
-                            "hard_brake_events": harsh_brake,
+                            "hard_accel_events": estimated_accel_events,
+                            "hard_brake_events": estimated_brake_events,
                             "high_rpm_minutes": round(high_rpm_min, 1),
                             "overspeed_minutes": round(overspeed_min, 1),
                             "daily_avg_accel": round(daily_accel, 1),
