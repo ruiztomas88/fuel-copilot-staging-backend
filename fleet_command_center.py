@@ -343,7 +343,6 @@ class FleetCommandCenter:
         self,
         days_to_critical: Optional[float],
         anomaly_score: Optional[float] = None,
-        sensor_severity: Optional[str] = None,
         cost_estimate: Optional[str] = None,
     ) -> Tuple[Priority, float]:
         """
@@ -351,8 +350,15 @@ class FleetCommandCenter:
 
         Score formula:
         - Base from days_to_critical: 100 - (days * 5), capped at 100
-        - Anomaly bonus: anomaly_score * 0.3
-        - Cost multiplier: +10 for high cost estimates
+        - Anomaly bonus: anomaly_score * 0.2 (up to +20 points)
+        - Cost multiplier: +5 for high cost estimates
+
+        Thresholds:
+        - 85+: CRITICAL
+        - 65-84: HIGH
+        - 40-64: MEDIUM
+        - 20-39: LOW
+        - <20: NONE
 
         Returns (Priority enum, numeric score 0-100)
         """
@@ -469,17 +475,18 @@ class FleetCommandCenter:
         # Base score starts at 100
         score = 100.0
 
-        # Deduct points for issues
-        score -= urgency.critical * 15  # Critical issues are severe
-        score -= urgency.high * 8
-        score -= urgency.medium * 3
-        score -= urgency.low * 1
+        # Calculate weighted severity per truck (normalized by fleet size)
+        # This ensures fair comparison regardless of fleet size
+        severity_per_truck = (
+            urgency.critical * 15  # Critical issues are severe
+            + urgency.high * 8
+            + urgency.medium * 3
+            + urgency.low * 1
+        ) / total_trucks
 
-        # Normalize by fleet size (larger fleets can have more issues)
-        if total_trucks > 10:
-            # Adjustment for larger fleets
-            adjustment = (total_trucks - 10) * 0.5
-            score = min(100, score + adjustment)
+        # Deduct points based on severity per truck
+        # Scale factor of 3 means: 1 critical issue per truck = -45 points
+        score -= severity_per_truck * 3
 
         # Clamp to 0-100
         score = max(0, min(100, score))
@@ -923,8 +930,8 @@ class FleetCommandCenter:
                         "transmission": IssueCategory.TRANSMISSION,
                         "electrical": IssueCategory.ELECTRICAL,
                         "fuel": IssueCategory.FUEL,
-                        "brake": IssueCategory.BRAKE,
-                        "tire": IssueCategory.TIRE,
+                        "brake": IssueCategory.BRAKES,
+                        "brakes": IssueCategory.BRAKES,
                         "sensor": IssueCategory.SENSOR,
                     }
                     issue_cat = category_map.get(
@@ -949,7 +956,7 @@ class FleetCommandCenter:
                             threshold=str(threshold_val) if threshold_val else None,
                             confidence="HIGH",
                             action_type=(
-                                ActionType.IMMEDIATE
+                                ActionType.STOP_IMMEDIATELY
                                 if priority == Priority.CRITICAL
                                 else ActionType.INSPECT
                             ),
@@ -981,7 +988,8 @@ class FleetCommandCenter:
             with engine.connect() as conn:
                 # Get active DTCs from last 48 hours
                 result = conn.execute(
-                    text("""
+                    text(
+                        """
                         SELECT DISTINCT
                             truck_id, dtc_code, severity, system, 
                             description, recommended_action, timestamp_utc
@@ -992,7 +1000,8 @@ class FleetCommandCenter:
                             FIELD(severity, 'CRITICAL', 'WARNING', 'INFO'),
                             timestamp_utc DESC
                         LIMIT 30
-                    """)
+                    """
+                    )
                 )
                 dtc_rows = result.fetchall()
 
@@ -1038,8 +1047,7 @@ class FleetCommandCenter:
                             category=issue_cat,
                             component=f"DTC {dtc_code}",
                             title=f"[DTC] {dtc_code} - {system or 'Unknown System'}",
-                            description=description
-                            or f"DTC code {dtc_code} detected",
+                            description=description or f"DTC code {dtc_code} detected",
                             days_to_critical=None,
                             cost_if_ignored=None,
                             current_value=None,
@@ -1047,23 +1055,27 @@ class FleetCommandCenter:
                             threshold=None,
                             confidence="HIGH",
                             action_type=(
-                                ActionType.IMMEDIATE
+                                ActionType.STOP_IMMEDIATELY
                                 if priority == Priority.CRITICAL
                                 else ActionType.INSPECT
                             ),
-                            action_steps=[recommended_action]
-                            if recommended_action
-                            else [
-                                f"🔧 Read DTC codes on {truck_id}",
-                                "📋 Diagnose root cause",
-                                "✅ Repair and clear code",
-                            ],
+                            action_steps=(
+                                [recommended_action]
+                                if recommended_action
+                                else [
+                                    f"🔧 Read DTC codes on {truck_id}",
+                                    "📋 Diagnose root cause",
+                                    "✅ Repair and clear code",
+                                ]
+                            ),
                             icon="🚨" if priority == Priority.CRITICAL else "⚠️",
                             sources=["DTC Events (Real-time)"],
                         )
                     )
 
-                logger.info(f"📊 Loaded {len(dtc_rows)} active DTCs from dtc_events table")
+                logger.info(
+                    f"📊 Loaded {len(dtc_rows)} active DTCs from dtc_events table"
+                )
 
         except Exception as e:
             logger.debug(f"Could not get DTC events from DB: {e}")
@@ -1198,7 +1210,7 @@ async def get_command_center_dashboard():
         data = cc.generate_command_center_data()
         return {
             "success": True,
-            "data": data,
+            "data": data.to_dict(),
         }
     except Exception as e:
         logger.error(f"Error getting command center data: {e}")
@@ -1225,7 +1237,9 @@ async def get_prioritized_actions(
         cc = get_command_center()
         data = cc.generate_command_center_data()
 
-        actions = data.get("action_items", [])
+        # Convert to dict and get action items
+        data_dict = data.to_dict()
+        actions = data_dict.get("action_items", [])
 
         # Apply filters
         if priority:
@@ -1256,8 +1270,9 @@ async def get_truck_summary(truck_id: str):
         cc = get_command_center()
         data = cc.generate_command_center_data()
 
-        # Filter actions for this truck
-        all_actions = data.get("action_items", [])
+        # Convert to dict and filter actions for this truck
+        data_dict = data.to_dict()
+        all_actions = data_dict.get("action_items", [])
         truck_actions = [a for a in all_actions if a.get("truck_id") == truck_id]
 
         # Determine truck priority
@@ -1294,12 +1309,13 @@ async def get_fleet_insights():
     try:
         cc = get_command_center()
         data = cc.generate_command_center_data()
+        data_dict = data.to_dict()
 
         return {
             "success": True,
-            "insights": data.get("insights", []),
-            "fleet_health": data.get("fleet_health"),
-            "data_quality": data.get("data_quality"),
+            "insights": data_dict.get("insights", []),
+            "fleet_health": data_dict.get("fleet_health"),
+            "data_quality": data_dict.get("data_quality"),
         }
     except Exception as e:
         logger.error(f"Error getting insights: {e}")
@@ -1311,10 +1327,13 @@ async def command_center_health_check():
     """Health check endpoint for the command center service."""
     try:
         cc = get_command_center()
+        # Generate data to verify all systems are working
+        data = cc.generate_command_center_data()
         return {
             "status": "healthy",
             "version": "1.0.0",
-            "pm_engine_connected": cc.pm_engine is not None,
+            "data_sources": data.data_quality,
+            "trucks_analyzed": data.trucks_analyzed,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
