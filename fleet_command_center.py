@@ -876,24 +876,34 @@ class FleetCommandCenter:
         # Sort by priority score (highest first)
         action_items.sort(key=lambda x: x.priority_score, reverse=True)
 
-        # Calculate urgency summary
+        # Get total trucks from various sources (BEFORE urgency summary)
+        total_trucks = sensor_status.total_trucks
+        if total_trucks == 0:
+            try:
+                from config import get_allowed_trucks
+                total_trucks = len(get_allowed_trucks())
+            except:
+                total_trucks = 45  # Fallback to known fleet size
+
+        # Update sensor_status.total_trucks if it was 0
+        if sensor_status.total_trucks == 0:
+            sensor_status = SensorStatus(
+                gps_issues=sensor_status.gps_issues,
+                voltage_issues=sensor_status.voltage_issues,
+                dtc_active=sensor_status.dtc_active,
+                idle_deviation=sensor_status.idle_deviation,
+                total_trucks=total_trucks,
+            )
+
+        # Calculate urgency summary (now with correct total_trucks)
+        trucks_with_issues = len(set(i.truck_id for i in action_items if i.truck_id != "FLEET"))
         urgency = UrgencySummary(
             critical=sum(1 for i in action_items if i.priority == Priority.CRITICAL),
             high=sum(1 for i in action_items if i.priority == Priority.HIGH),
             medium=sum(1 for i in action_items if i.priority == Priority.MEDIUM),
             low=sum(1 for i in action_items if i.priority == Priority.LOW),
-            ok=max(0, sensor_status.total_trucks - len(action_items)),
+            ok=max(0, total_trucks - trucks_with_issues),
         )
-
-        # Get total trucks from various sources
-        total_trucks = sensor_status.total_trucks
-        if total_trucks == 0:
-            try:
-                from config import get_allowed_trucks
-
-                total_trucks = len(get_allowed_trucks())
-            except:
-                total_trucks = 20  # Fallback
 
         # Calculate fleet health score
         fleet_health = self._calculate_fleet_health_score(urgency, total_trucks)
