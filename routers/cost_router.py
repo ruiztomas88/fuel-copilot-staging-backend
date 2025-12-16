@@ -183,13 +183,8 @@ async def get_fleet_cost_per_mile(
 
         report = cpm_engine.generate_cost_report(trucks_data, period_days=days)
         # 🔧 v6.2.3: Sanitize response to remove inf/nan values
-        # 🔧 v6.2.7: Wrap in { status, data } structure expected by frontend
-        report_dict = sanitize_json(report)
-        return {
-            "status": "success",
-            "generated_at": report_dict.get("period", {}).get("end", ""),
-            "data": report_dict,
-        }
+        # 🔧 v6.2.8: The engine already returns {status, data} structure, just sanitize and return
+        return sanitize_json(report)
 
     except Exception as e:
         logger.error(f"Cost per mile analysis error: {e}")

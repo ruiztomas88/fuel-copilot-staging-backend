@@ -926,11 +926,11 @@ class DriverBehaviorEngine:
             total_waste["wrong_gear"] += state.fuel_waste_gear
             total_waste["overspeeding"] += state.fuel_waste_speed
 
-            # Count events from score components
-            total_accel_events += score.components.get("hard_accel_events", 0)
-            total_brake_events += score.components.get("hard_brake_events", 0)
-            total_rpm_events += score.components.get("high_rpm_events", 0)
-            total_speed_events += score.components.get("overspeed_events", 0)
+            # Count events from score attributes (not dict)
+            total_accel_events += score.hard_accel_count
+            total_brake_events += score.hard_brake_count
+            total_rpm_events += score.high_rpm_minutes
+            total_speed_events += score.overspeeding_minutes
 
         # Sort by score (ascending = worst first)
         scores.sort(key=lambda x: x.score)
@@ -1015,8 +1015,35 @@ class DriverBehaviorEngine:
                 rows = result.fetchall()
 
             if not rows:
+                # Return empty but valid response instead of error
+                logger.warning(
+                    "No truck data in database for last 7 days, returning empty data"
+                )
                 return {
-                    "error": "No truck data available in database for the last 7 days"
+                    "fleet_size": 0,
+                    "average_score": 0,
+                    "best_performers": [],
+                    "worst_performers": [],
+                    "total_fuel_waste_gal": 0,
+                    "waste_breakdown": {
+                        "hard_acceleration": 0,
+                        "hard_braking": 0,
+                        "high_rpm": 0,
+                        "wrong_gear": 0,
+                        "overspeeding": 0,
+                    },
+                    "behavior_scores": {
+                        "acceleration": 100,
+                        "braking": 100,
+                        "rpm_mgmt": 100,
+                        "gear_usage": 100,
+                        "speed_control": 100,
+                    },
+                    "needs_work_count": 0,
+                    "biggest_issue": {"category": "none", "gallons": 0},
+                    "recommendations": ["No data available for the last 7 days"],
+                    "data_source": "database",
+                    "period_days": 7,
                 }
 
             # Calculate scores and waste for each truck
@@ -1206,7 +1233,34 @@ class DriverBehaviorEngine:
             logger.error(
                 f"Error loading behavior summary from database: {e}", exc_info=True
             )
-            return {"error": f"Failed to load behavior data: {str(e)}"}
+            # Return empty but valid response instead of error to avoid 404
+            return {
+                "fleet_size": 0,
+                "average_score": 0,
+                "best_performers": [],
+                "worst_performers": [],
+                "total_fuel_waste_gal": 0,
+                "waste_breakdown": {
+                    "hard_acceleration": 0,
+                    "hard_braking": 0,
+                    "high_rpm": 0,
+                    "wrong_gear": 0,
+                    "overspeeding": 0,
+                },
+                "behavior_scores": {
+                    "acceleration": 100,
+                    "braking": 100,
+                    "rpm_mgmt": 100,
+                    "gear_usage": 100,
+                    "speed_control": 100,
+                },
+                "needs_work_count": 0,
+                "biggest_issue": {"category": "error", "gallons": 0},
+                "recommendations": [f"Error loading data: {str(e)}"],
+                "data_source": "database",
+                "period_days": 7,
+                "error_detail": str(e),
+            }
 
     def _generate_fleet_recommendations_from_data(
         self, truck_data: List[Dict], waste: Dict[str, float], avg_score: float

@@ -625,9 +625,7 @@ async def get_fleet_behavior_summary():
     engine = get_behavior_engine()
     summary = engine.get_fleet_behavior_summary()
 
-    if "error" in summary:
-        raise HTTPException(status_code=404, detail=summary["error"])
-
+    # 🔧 v6.2.8: Always return valid response, no more 404
     return summary
 
 
