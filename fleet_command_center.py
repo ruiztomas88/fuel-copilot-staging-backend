@@ -869,6 +869,205 @@ class FleetCommandCenter:
         except Exception as e:
             logger.debug(f"Could not get sensor health data: {e}")
 
+        # 4. Engine Health Alerts (database-stored alerts from real-time monitoring)
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+            with engine.connect() as conn:
+                # Get active alerts from last 7 days
+                result = conn.execute(
+                    text(
+                        """
+                        SELECT 
+                            id, truck_id, category, severity, sensor_name,
+                            current_value, threshold_value, message, action_required
+                        FROM engine_health_alerts
+                        WHERE is_active = 1 
+                        AND created_at > DATE_SUB(NOW(), INTERVAL 7 DAY)
+                        ORDER BY 
+                            FIELD(severity, 'critical', 'warning', 'watch', 'info'),
+                            created_at DESC
+                        LIMIT 50
+                    """
+                    )
+                )
+                alerts = result.fetchall()
+
+                for alert in alerts:
+                    alert_id, truck_id, category, severity, sensor_name = alert[:5]
+                    current_val, threshold_val, message, action_required = alert[5:9]
+
+                    # Map severity to priority
+                    priority_map = {
+                        "critical": Priority.CRITICAL,
+                        "warning": Priority.HIGH,
+                        "watch": Priority.MEDIUM,
+                        "info": Priority.LOW,
+                    }
+                    priority = priority_map.get(severity, Priority.MEDIUM)
+
+                    # Calculate priority score
+                    score_map = {
+                        Priority.CRITICAL: 90,
+                        Priority.HIGH: 70,
+                        Priority.MEDIUM: 50,
+                        Priority.LOW: 30,
+                    }
+                    score = score_map.get(priority, 50)
+
+                    # Map category to IssueCategory
+                    category_map = {
+                        "engine": IssueCategory.ENGINE,
+                        "transmission": IssueCategory.TRANSMISSION,
+                        "electrical": IssueCategory.ELECTRICAL,
+                        "fuel": IssueCategory.FUEL,
+                        "brake": IssueCategory.BRAKE,
+                        "tire": IssueCategory.TIRE,
+                        "sensor": IssueCategory.SENSOR,
+                    }
+                    issue_cat = category_map.get(
+                        (category or "").lower(), IssueCategory.ENGINE
+                    )
+
+                    action_items.append(
+                        ActionItem(
+                            id=self._generate_action_id(),
+                            truck_id=truck_id or "???",
+                            priority=priority,
+                            priority_score=score,
+                            category=issue_cat,
+                            component=sensor_name or category or "Unknown",
+                            title=f"[{severity.upper()}] {sensor_name or category}",
+                            description=message
+                            or "Alert from engine health monitoring",
+                            days_to_critical=None,
+                            cost_if_ignored=None,
+                            current_value=str(current_val) if current_val else None,
+                            trend=None,
+                            threshold=str(threshold_val) if threshold_val else None,
+                            confidence="HIGH",
+                            action_type=(
+                                ActionType.IMMEDIATE
+                                if priority == Priority.CRITICAL
+                                else ActionType.INSPECT
+                            ),
+                            action_steps=(
+                                [action_required]
+                                if action_required
+                                else ["Investigate and resolve issue"]
+                            ),
+                            icon=self.COMPONENT_ICONS.get(
+                                sensor_name or category or "", "🔧"
+                            ),
+                            sources=["Engine Health Monitor (DB)"],
+                        )
+                    )
+
+                logger.info(
+                    f"📊 Loaded {len(alerts)} alerts from engine_health_alerts table"
+                )
+
+        except Exception as e:
+            logger.debug(f"Could not get engine health alerts from DB: {e}")
+
+        # 5. DTC Events (real-time DTC codes from wialon_sync)
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+            with engine.connect() as conn:
+                # Get active DTCs from last 48 hours
+                result = conn.execute(
+                    text("""
+                        SELECT DISTINCT
+                            truck_id, dtc_code, severity, system, 
+                            description, recommended_action, timestamp_utc
+                        FROM dtc_events
+                        WHERE status = 'ACTIVE' 
+                        AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 48 HOUR)
+                        ORDER BY 
+                            FIELD(severity, 'CRITICAL', 'WARNING', 'INFO'),
+                            timestamp_utc DESC
+                        LIMIT 30
+                    """)
+                )
+                dtc_rows = result.fetchall()
+
+                for dtc in dtc_rows:
+                    truck_id, dtc_code, severity, system = dtc[:4]
+                    description, recommended_action, timestamp = dtc[4:7]
+
+                    # Map severity to priority
+                    priority_map = {
+                        "CRITICAL": Priority.CRITICAL,
+                        "WARNING": Priority.HIGH,
+                        "INFO": Priority.MEDIUM,
+                    }
+                    priority = priority_map.get(severity, Priority.MEDIUM)
+
+                    # Calculate priority score
+                    score_map = {
+                        Priority.CRITICAL: 95,
+                        Priority.HIGH: 75,
+                        Priority.MEDIUM: 55,
+                    }
+                    score = score_map.get(priority, 55)
+
+                    # Map system to category
+                    system_category_map = {
+                        "ENGINE": IssueCategory.ENGINE,
+                        "TRANSMISSION": IssueCategory.TRANSMISSION,
+                        "AFTERTREATMENT": IssueCategory.ENGINE,
+                        "ELECTRICAL": IssueCategory.ELECTRICAL,
+                        "FUEL": IssueCategory.FUEL,
+                        "BRAKE": IssueCategory.BRAKE,
+                    }
+                    issue_cat = system_category_map.get(
+                        (system or "").upper(), IssueCategory.ENGINE
+                    )
+
+                    action_items.append(
+                        ActionItem(
+                            id=self._generate_action_id(),
+                            truck_id=truck_id or "???",
+                            priority=priority,
+                            priority_score=score,
+                            category=issue_cat,
+                            component=f"DTC {dtc_code}",
+                            title=f"[DTC] {dtc_code} - {system or 'Unknown System'}",
+                            description=description
+                            or f"DTC code {dtc_code} detected",
+                            days_to_critical=None,
+                            cost_if_ignored=None,
+                            current_value=None,
+                            trend=None,
+                            threshold=None,
+                            confidence="HIGH",
+                            action_type=(
+                                ActionType.IMMEDIATE
+                                if priority == Priority.CRITICAL
+                                else ActionType.INSPECT
+                            ),
+                            action_steps=[recommended_action]
+                            if recommended_action
+                            else [
+                                f"🔧 Read DTC codes on {truck_id}",
+                                "📋 Diagnose root cause",
+                                "✅ Repair and clear code",
+                            ],
+                            icon="🚨" if priority == Priority.CRITICAL else "⚠️",
+                            sources=["DTC Events (Real-time)"],
+                        )
+                    )
+
+                logger.info(f"📊 Loaded {len(dtc_rows)} active DTCs from dtc_events table")
+
+        except Exception as e:
+            logger.debug(f"Could not get DTC events from DB: {e}")
+
         # ═══════════════════════════════════════════════════════════════════
         # SORT AND ORGANIZE
         # ═══════════════════════════════════════════════════════════════════
@@ -881,6 +1080,7 @@ class FleetCommandCenter:
         if total_trucks == 0:
             try:
                 from config import get_allowed_trucks
+
                 total_trucks = len(get_allowed_trucks())
             except:
                 total_trucks = 45  # Fallback to known fleet size
@@ -896,7 +1096,9 @@ class FleetCommandCenter:
             )
 
         # Calculate urgency summary (now with correct total_trucks)
-        trucks_with_issues = len(set(i.truck_id for i in action_items if i.truck_id != "FLEET"))
+        trucks_with_issues = len(
+            set(i.truck_id for i in action_items if i.truck_id != "FLEET")
+        )
         urgency = UrgencySummary(
             critical=sum(1 for i in action_items if i.priority == Priority.CRITICAL),
             high=sum(1 for i in action_items if i.priority == Priority.HIGH),
