@@ -1422,11 +1422,12 @@ async def get_truck_detail(truck_id: str):
         raise
     except Exception as e:
         logger.error(f"[get_truck_detail] ERROR for {truck_id}: {e}", exc_info=True)
-        
+
         # 🔧 FIX v3.12.22: On ANY error, try to return offline status from tanks.yaml
         # This prevents 500 errors for trucks that exist but have DB/encoding issues
         try:
             import yaml
+
             tanks_path = Path(__file__).parent / "tanks.yaml"
             if tanks_path.exists():
                 with open(tanks_path, "r") as f:
@@ -1434,7 +1435,9 @@ async def get_truck_detail(truck_id: str):
                     trucks = tanks_config.get("trucks", {})
                     if truck_id in trucks:
                         truck_config = trucks[truck_id]
-                        logger.warning(f"[get_truck_detail] Returning OFFLINE status for {truck_id} due to error: {e}")
+                        logger.warning(
+                            f"[get_truck_detail] Returning OFFLINE status for {truck_id} due to error: {e}"
+                        )
                         return {
                             "truck_id": truck_id,
                             "status": "OFFLINE",
@@ -1449,14 +1452,16 @@ async def get_truck_detail(truck_id: str):
                             "speed_mph": None,
                             "health_score": 50,
                             "health_category": "warning",
-                            "capacity_gallons": truck_config.get("capacity_gallons", 200),
+                            "capacity_gallons": truck_config.get(
+                                "capacity_gallons", 200
+                            ),
                             "capacity_liters": truck_config.get("capacity_liters", 757),
                             "message": f"Error loading real-time data: {str(e)[:100]}",
                             "data_available": False,
                         }
         except Exception as fallback_error:
             logger.error(f"[get_truck_detail] Fallback also failed: {fallback_error}")
-        
+
         raise HTTPException(
             status_code=500, detail=f"Error fetching truck data: {str(e)}"
         )

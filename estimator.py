@@ -468,8 +468,16 @@ class FuelEstimator:
         if dt_hours > 1.0:
             return
 
+        # 🔧 v5.8.4: Handle negative consumption as sensor error
+        if consumption_lph is not None and consumption_lph < 0:
+            logger.warning(
+                f"[{self.truck_id}] Negative consumption {consumption_lph:.2f} LPH detected - "
+                f"treating as sensor error, using fallback"
+            )
+            consumption_lph = None  # Force fallback
+
         # Idle fallback if no consumption provided
-        if consumption_lph is None or consumption_lph < 0:
+        if consumption_lph is None:
             if speed_mph is not None and speed_mph < 5:
                 consumption_lph = 2.0  # Idle fallback
             else:

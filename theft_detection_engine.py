@@ -186,6 +186,149 @@ class TheftAnalysisResult:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v4.2.0: THEFT PATTERN ANALYZER - Historical pattern detection
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TheftPatternAnalyzer:
+    """
+    🆕 v4.2.0: Analyzes theft patterns based on historical data.
+
+    Tracks confirmed/suspected theft events per truck and calculates
+    pattern_factor based on:
+    - Repeated theft events on same truck
+    - Same day of week patterns
+    - Same time of day patterns
+    - Recency of previous events
+    """
+
+    def __init__(self, history_days: int = 90):
+        self._theft_history: Dict[str, List[Dict]] = {}
+        self.history_days = history_days
+
+    def add_confirmed_theft(
+        self,
+        truck_id: str,
+        timestamp: datetime,
+        drop_gal: float,
+        confidence: float,
+    ):
+        """Record a confirmed or suspected theft event for pattern analysis."""
+        if truck_id not in self._theft_history:
+            self._theft_history[truck_id] = []
+
+        self._theft_history[truck_id].append(
+            {
+                "timestamp": timestamp,
+                "drop_gal": drop_gal,
+                "confidence": confidence,
+                "day_of_week": timestamp.weekday(),
+                "hour": timestamp.hour,
+            }
+        )
+
+        # Prune old events beyond history_days
+        cutoff = datetime.now() - timedelta(days=self.history_days)
+        self._theft_history[truck_id] = [
+            e for e in self._theft_history[truck_id] if e["timestamp"] > cutoff
+        ]
+
+    def calculate_pattern_factor(
+        self,
+        truck_id: str,
+        current_timestamp: datetime,
+    ) -> Tuple[float, str]:
+        """
+        Calculate pattern_factor (0 to +20) based on historical patterns.
+
+        Returns:
+            Tuple of (factor, reason_description)
+        """
+        history = self._theft_history.get(truck_id, [])
+
+        if not history:
+            return 0.0, ""
+
+        factor = 0.0
+        reasons = []
+
+        # Factor 1: Truck has previous theft events (+10 for 1, +15 for 2+)
+        if len(history) >= 2:
+            factor += 15
+            reasons.append(f"{len(history)} robos previos")
+        elif len(history) == 1:
+            factor += 10
+            reasons.append("1 robo previo")
+
+        # Factor 2: Same day of week pattern (+5)
+        current_dow = current_timestamp.weekday()
+        dow_matches = sum(1 for h in history if h["day_of_week"] == current_dow)
+        if dow_matches >= 2:
+            factor += 5
+            day_name = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"][current_dow]
+            reasons.append(f"patrón {day_name}")
+
+        # Factor 3: Same time window pattern (±2 hours) (+5)
+        current_hour = current_timestamp.hour
+        hour_matches = sum(
+            1
+            for h in history
+            if abs(h["hour"] - current_hour) <= 2 or abs(h["hour"] - current_hour) >= 22
+        )
+        if hour_matches >= 2:
+            factor += 5
+            reasons.append(f"patrón ~{current_hour}:00h")
+
+        # Factor 4: Recent event (within 7 days) makes current more suspicious (+5)
+        recent_cutoff = current_timestamp - timedelta(days=7)
+        recent_events = [h for h in history if h["timestamp"] > recent_cutoff]
+        if recent_events:
+            factor += 5
+            reasons.append("evento reciente")
+
+        # Cap at 20
+        factor = min(factor, 20.0)
+
+        reason_str = ", ".join(reasons) if reasons else ""
+        return factor, reason_str
+
+    def get_truck_risk_profile(self, truck_id: str) -> Dict:
+        """Get risk profile summary for a truck."""
+        history = self._theft_history.get(truck_id, [])
+
+        if not history:
+            return {
+                "truck_id": truck_id,
+                "theft_count": 0,
+                "risk_level": "LOW",
+                "total_loss_gal": 0,
+            }
+
+        total_loss = sum(h["drop_gal"] for h in history)
+        avg_confidence = sum(h["confidence"] for h in history) / len(history)
+
+        if len(history) >= 3 or total_loss > 100:
+            risk = "HIGH"
+        elif len(history) >= 2 or total_loss > 50:
+            risk = "MEDIUM"
+        else:
+            risk = "LOW"
+
+        return {
+            "truck_id": truck_id,
+            "theft_count": len(history),
+            "risk_level": risk,
+            "total_loss_gal": round(total_loss, 1),
+            "avg_confidence": round(avg_confidence, 1),
+            "last_event": history[-1]["timestamp"].isoformat() if history else None,
+        }
+
+
+# Global pattern analyzer instance
+PATTERN_ANALYZER = TheftPatternAnalyzer()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -382,11 +525,21 @@ def get_trip_context_from_cache(trips: List[Dict], event_time: datetime) -> Trip
 def get_sensor_health_fast(
     fuel_before_pct: float,
     fuel_after_pct: float,
+    drop_pct: float = None,
+    time_gap_minutes: float = None,
 ) -> SensorHealth:
     """
-    Fast sensor health check without DB query.
-    Simplified version that checks for obvious sensor issues.
+    🆕 v4.2.0: Enhanced fast sensor health check with heuristic volatility.
+
+    Estimates sensor reliability without DB query using:
+    - Drop to near-zero = disconnect
+    - Very large sudden drop = likely sensor spike
+    - Drop size vs time gap ratio = volatility indicator
     """
+    # Calculate drop if not provided
+    if drop_pct is None:
+        drop_pct = fuel_before_pct - fuel_after_pct
+
     # Check for sensor disconnect (drop to near-zero)
     if fuel_after_pct <= 5 and fuel_before_pct > 20:
         return SensorHealth(
@@ -397,13 +550,37 @@ def get_sensor_health_fast(
             volatility_score=100.0,
         )
 
-    # Default - assume sensor is OK, recovery check done separately if needed
+    # 🆕 v4.2.0: Estimate volatility based on drop characteristics
+    volatility_score = 5.0  # Default: assume reliable
+
+    # Heuristic 1: Very sudden large drops suggest sensor spike
+    if time_gap_minutes and time_gap_minutes < 5 and drop_pct > 20:
+        # >20% drop in <5 min is physically unlikely = sensor issue
+        volatility_score = 60.0
+    elif time_gap_minutes and time_gap_minutes < 15 and drop_pct > 40:
+        # >40% drop in <15 min is also suspicious
+        volatility_score = 45.0
+
+    # Heuristic 2: Check for implausible consumption rate
+    # Max realistic consumption: ~50 GPH = ~190 LPH
+    # For a 200 gal tank, that's ~25% per hour max
+    if time_gap_minutes and time_gap_minutes > 0:
+        hours = time_gap_minutes / 60
+        max_reasonable_drop_pct = 25 * hours  # 25% per hour max
+        if drop_pct > max_reasonable_drop_pct * 2:
+            # Drop is 2x faster than physically possible = sensor noise
+            volatility_score = max(volatility_score, 35.0)
+
+    # Heuristic 3: Drop exactly to round numbers often indicates sensor reset
+    if fuel_after_pct in [0, 10, 20, 25, 50, 75, 100]:
+        volatility_score = max(volatility_score, 20.0)
+
     return SensorHealth(
         is_connected=True,
-        readings_last_hour=10,  # Assume OK
+        readings_last_hour=10,  # Assume OK (no DB access)
         variance_last_hour=2.0,
         has_recovery_pattern=False,
-        volatility_score=5.0,  # Low volatility assumed
+        volatility_score=volatility_score,
     )
 
 
@@ -762,18 +939,23 @@ def calculate_confidence(
             )  # Slower recovery but still suspicious of sensor
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PATTERN FACTOR (0 to +20) - TODO: Add ML-based pattern detection
+    # PATTERN FACTOR (0 to +20) - 🆕 v4.2.0: Uses TheftPatternAnalyzer
     # ═══════════════════════════════════════════════════════════════════════════
-    # For now, simple heuristics
-    # - Drop during long idle period = suspicious
-    # - Multiple drops from same truck = suspicious pattern
+    # Historical pattern analysis from PATTERN_ANALYZER
+    pattern_factor, pattern_reason = PATTERN_ANALYZER.calculate_pattern_factor(
+        fuel_drop.truck_id,
+        fuel_drop.timestamp,
+    )
+    factors.pattern_factor = pattern_factor
 
+    # Additional heuristic: Classic theft pattern (long idle + big drop)
     if (
         fuel_drop.time_gap_minutes > 60
         and fuel_drop.miles_driven < 1
         and fuel_drop.drop_gal > 20
+        and factors.pattern_factor < 15  # Don't double-count
     ):
-        factors.pattern_factor = 15  # Classic theft pattern
+        factors.pattern_factor = max(factors.pattern_factor, 15)
 
     return factors
 
@@ -1154,9 +1336,12 @@ def analyze_fuel_drops_advanced(days_back: int = 7) -> Dict[str, Any]:
             trip_context = get_trip_context_from_cache(trips_for_unit, drop.timestamp)
 
             # Get sensor health (fast version - no DB query)
+            # 🆕 v4.2.0: Pass additional context for better volatility estimation
             sensor_health = get_sensor_health_fast(
                 drop.fuel_before_pct,
                 drop.fuel_after_pct,
+                drop_pct=drop.drop_pct,
+                time_gap_minutes=drop.time_gap_minutes,
             )
 
             # Get time context
@@ -1225,6 +1410,14 @@ def analyze_fuel_drops_advanced(days_back: int = 7) -> Dict[str, Any]:
                     > trucks_summary[drop.truck_id]["highest_risk"].value
                 ):
                     trucks_summary[drop.truck_id]["highest_risk"] = risk_level
+
+                # 🆕 v4.2.0: Register in pattern analyzer for future pattern detection
+                PATTERN_ANALYZER.add_confirmed_theft(
+                    truck_id=drop.truck_id,
+                    timestamp=drop.timestamp,
+                    drop_gal=drop.drop_gal,
+                    confidence=confidence.total,
+                )
             elif classification in [
                 EventClassification.SENSOR_ISSUE,
                 EventClassification.SENSOR_DISCONNECT,

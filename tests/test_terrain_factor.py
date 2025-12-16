@@ -703,6 +703,7 @@ class TestGlobalFunctions:
         """get_terrain_fuel_factor convenience function works"""
         # Reset global manager to ensure clean state
         import terrain_factor
+
         terrain_factor._terrain_manager = None
 
         factor = get_terrain_fuel_factor(
@@ -776,7 +777,9 @@ class TestEdgeCases:
         for i in range(100):
             altitude = 1000.0 + (i * 10)  # Gradually climbing
             lat = 34.0 + (i * 0.001)
-            factor = tracker.update(altitude_ft=altitude, latitude=lat, longitude=-118.0)
+            factor = tracker.update(
+                altitude_ft=altitude, latitude=lat, longitude=-118.0
+            )
             assert 0.5 <= factor <= 2.0
 
         summary = tracker.get_terrain_summary()
@@ -812,7 +815,9 @@ class TestIntegrationScenarios:
         tracker = TerrainTracker("TRUCK001")
 
         # Starting at base
-        tracker.update(altitude_ft=500.0, latitude=34.0, longitude=-118.0, speed_mph=45.0)
+        tracker.update(
+            altitude_ft=500.0, latitude=34.0, longitude=-118.0, speed_mph=45.0
+        )
 
         # Climbing the pass
         altitudes = [700, 1000, 1500, 2000, 2500, 3000]  # Going up

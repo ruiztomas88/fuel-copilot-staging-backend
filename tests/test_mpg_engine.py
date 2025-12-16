@@ -317,12 +317,26 @@ class TestIQROutlierFilter:
         assert len(filtered) < len(readings)
 
     def test_filter_not_enough_data(self):
-        """Should return original if < 4 readings"""
+        """
+        🔧 v3.13.0: With < 4 readings, now uses MAD filter instead of returning original.
+        MAD filter should still catch obvious outliers like 15.0 among [5.0, 5.5]
+        """
         from mpg_engine import filter_outliers_iqr
 
         readings = [5.0, 15.0, 5.5]
         filtered = filter_outliers_iqr(readings)
-        assert filtered == readings
+        # MAD should filter out 15.0 as an outlier (it's far from median 5.5)
+        assert 15.0 not in filtered
+        assert 5.0 in filtered
+        assert 5.5 in filtered
+
+    def test_filter_very_small_data_no_outliers(self):
+        """With < 4 similar readings, MAD should keep them all"""
+        from mpg_engine import filter_outliers_iqr
+
+        readings = [5.0, 5.2, 5.5]
+        filtered = filter_outliers_iqr(readings)
+        assert filtered == readings  # All similar, no outliers
 
     def test_filter_no_outliers(self):
         """Should return all data if no outliers"""

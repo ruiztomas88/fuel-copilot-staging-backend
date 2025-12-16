@@ -17,12 +17,52 @@ logger = logging.getLogger(__name__)
 
 
 # 🔧 FIX v3.9.6: Moved before MPGState class so it can be used in get_variance()
+def filter_outliers_mad(readings: list, threshold: float = 3.0) -> list:
+    """
+    🆕 v3.13.0: MAD-based outlier rejection for small samples (n < 4).
+
+    Uses Median Absolute Deviation which is more robust than IQR
+    for small sample sizes.
+
+    Args:
+        readings: List of MPG readings
+        threshold: Number of MADs from median to consider outlier (default 3.0)
+
+    Returns:
+        Filtered list without outliers
+    """
+    if len(readings) < 2:
+        return readings
+
+    sorted_data = sorted(readings)
+    median = sorted_data[len(sorted_data) // 2]
+
+    # Calculate MAD (Median Absolute Deviation)
+    absolute_deviations = [abs(x - median) for x in readings]
+    mad = sorted(absolute_deviations)[len(absolute_deviations) // 2]
+
+    if mad < 0.01:  # All values very similar
+        return readings
+
+    # Filter outliers beyond threshold * MAD
+    filtered = [r for r in readings if abs(r - median) <= threshold * mad]
+
+    if len(filtered) < len(readings):
+        removed = len(readings) - len(filtered)
+        logger.debug(
+            f"MAD filter removed {removed} outliers (median={median:.2f}, MAD={mad:.2f})"
+        )
+
+    return filtered if filtered else readings
+
+
 def filter_outliers_iqr(readings: list, multiplier: float = 1.5) -> list:
     """
     IQR-based outlier rejection for MPG readings.
 
     Removes extreme values that are likely sensor errors or edge cases.
     Uses Interquartile Range (IQR) method which is robust to outliers.
+    🆕 v3.13.0: Falls back to MAD for n < 4.
 
     Args:
         readings: List of MPG readings
@@ -36,7 +76,8 @@ def filter_outliers_iqr(readings: list, multiplier: float = 1.5) -> list:
         [5.0, 5.5, 6.0, 5.2]
     """
     if len(readings) < 4:
-        return readings  # Not enough data for IQR
+        # 🆕 v3.13.0: Use MAD for small samples instead of no filtering
+        return filter_outliers_mad(readings)
 
     sorted_data = sorted(readings)
     n = len(sorted_data)
