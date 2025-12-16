@@ -71,6 +71,15 @@ except ImportError:
     API_V2_AVAILABLE = False
     api_v2_router = None
 
+# 🆕 v6.2.0: Fleet Command Center (unified dashboard)
+try:
+    from fleet_command_center import router as command_center_router
+
+    COMMAND_CENTER_AVAILABLE = True
+except ImportError:
+    COMMAND_CENTER_AVAILABLE = False
+    command_center_router = None
+
 __all__ = [
     "ml_intelligence_router",
     "auth_router",
@@ -156,6 +165,19 @@ def include_all_routers(app, auth_dependency=None):
 
         logging.getLogger(__name__).info(
             "✅ Registered api_v2 router at /fuelAnalytics/api/v2"
+        )
+
+    # 🆕 v6.2.0: Fleet Command Center router
+    if COMMAND_CENTER_AVAILABLE and command_center_router:
+        app.include_router(
+            command_center_router,
+            prefix="/fuelAnalytics/api",
+            tags=["Fleet Command Center"],
+        )
+        import logging
+
+        logging.getLogger(__name__).info(
+            "✅ Registered command_center router at /fuelAnalytics/api/command-center"
         )
 
     # NOTE: alerts_router NOT included here because /alerts and /alerts/predictive
