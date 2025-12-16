@@ -4971,3 +4971,90 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
             "trucks": [],
             "error": str(e),
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v6.2.4: SENSOR HEALTH SUMMARY FOR COMMAND CENTER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def get_sensor_health_summary() -> Dict[str, Any]:
+    """
+    🆕 v6.2.4: Get fleet-wide sensor health summary for Command Center.
+
+    Returns counts of trucks with various sensor issues:
+    - GPS quality problems
+    - Voltage issues (battery/alternator)
+    - Active DTCs
+    - Idle calculation deviations
+
+    This function is used by fleet_command_center.py to detect issues
+    that should affect the fleet health score.
+    """
+    try:
+        engine = get_sqlalchemy_engine()
+
+        # Query to get sensor health status from latest records
+        query = """
+            WITH latest_records AS (
+                SELECT 
+                    truck_id,
+                    pwr_ext,
+                    dtc,
+                    gps_fix_quality,
+                    idle_gph,
+                    ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY timestamp_utc DESC) as rn
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
+            )
+            SELECT 
+                COUNT(DISTINCT truck_id) as total_trucks,
+                SUM(CASE 
+                    WHEN pwr_ext IS NOT NULL AND pwr_ext < 12.4 THEN 1 
+                    WHEN pwr_ext IS NOT NULL AND pwr_ext > 15.0 THEN 1
+                    ELSE 0 
+                END) as voltage_issues,
+                SUM(CASE WHEN dtc > 0 THEN 1 ELSE 0 END) as dtc_active,
+                SUM(CASE 
+                    WHEN gps_fix_quality IS NOT NULL AND gps_fix_quality < 2 THEN 1 
+                    ELSE 0 
+                END) as gps_issues,
+                SUM(CASE 
+                    WHEN idle_gph IS NOT NULL AND (idle_gph < 0.3 OR idle_gph > 2.5) THEN 1 
+                    ELSE 0 
+                END) as idle_deviation
+            FROM latest_records
+            WHERE rn = 1
+        """
+
+        with engine.connect() as conn:
+            result = conn.execute(text(query))
+            row = result.fetchone()
+
+        if row:
+            return {
+                "total_trucks": int(row[0] or 0),
+                "trucks_with_voltage_issues": int(row[1] or 0),
+                "trucks_with_dtc_active": int(row[2] or 0),
+                "trucks_with_gps_issues": int(row[3] or 0),
+                "trucks_with_idle_deviation": int(row[4] or 0),
+            }
+        else:
+            return {
+                "total_trucks": 0,
+                "trucks_with_voltage_issues": 0,
+                "trucks_with_dtc_active": 0,
+                "trucks_with_gps_issues": 0,
+                "trucks_with_idle_deviation": 0,
+            }
+
+    except Exception as e:
+        logger.error(f"Error in get_sensor_health_summary: {e}")
+        return {
+            "total_trucks": 0,
+            "trucks_with_voltage_issues": 0,
+            "trucks_with_dtc_active": 0,
+            "trucks_with_gps_issues": 0,
+            "trucks_with_idle_deviation": 0,
+            "error": str(e),
+        }
