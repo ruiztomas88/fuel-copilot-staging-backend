@@ -50,18 +50,21 @@ async def get_fleet_cost_per_mile(
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
 
-        # 🔧 v6.2.2: Simplified query - calculate gallons from miles/mpg in Python
-        # to avoid SQL division issues
+        # 🔧 v6.2.5: Improved query with fuel consumption fallback
+        # If odom_delta_mi is NULL/0 (common sensor issue), estimate miles from fuel × MPG
         query = """
             SELECT 
                 truck_id,
-                SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 100 THEN odom_delta_mi ELSE 0 END) as miles,
+                SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 100 THEN odom_delta_mi ELSE 0 END) as odom_miles,
                 COUNT(DISTINCT DATE(timestamp_utc)) * 8 as engine_hours,
-                AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg
+                AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
+                SUM(CASE WHEN truck_status = 'MOVING' AND consumption_gph > 0 AND consumption_gph < 20 
+                    THEN consumption_gph * 0.25 ELSE 0 END) as moving_gallons,
+                COUNT(*) as record_count
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)
             GROUP BY truck_id
-            HAVING SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 100 THEN odom_delta_mi ELSE 0 END) > 10
+            HAVING COUNT(*) > 10
         """
 
         trucks_data = []
@@ -71,24 +74,38 @@ async def get_fleet_cost_per_mile(
                 rows = result.fetchall()
                 logger.info(f"Query returned {len(rows)} trucks")
 
-            # 🔧 v6.2.2: Simplified - 4 columns now (removed gallons from SQL)
-            # row[0]=truck_id, row[1]=miles, row[2]=engine_hours, row[3]=avg_mpg
+            # 🔧 v6.2.5: Process with intelligent fallback for miles
+            # row[0]=truck_id, row[1]=odom_miles, row[2]=engine_hours, row[3]=avg_mpg, row[4]=moving_gallons, row[5]=record_count
             total_fleet_miles = 0
             trucks_with_mpg = 0
+            trucks_with_odom = 0
             for row in rows:
                 try:
-                    miles = float(row[1] or 0)
+                    odom_miles = float(row[1] or 0)
                     engine_hours = float(row[2] or 0)
                     avg_mpg = float(row[3] if row[3] is not None else 5.5)
+                    moving_gallons = float(row[4] or 0)
+                    
                     if avg_mpg < 3 or avg_mpg > 12:
                         avg_mpg = 5.5
                     else:
                         trucks_with_mpg += 1
 
-                    total_fleet_miles += miles
+                    # 🔧 v6.2.5: Estimate miles if odometer data missing
+                    if odom_miles > 10:
+                        miles = odom_miles
+                        trucks_with_odom += 1
+                        gallons = miles / avg_mpg if avg_mpg > 0 else 0
+                    elif moving_gallons > 0 and avg_mpg > 0:
+                        # Estimate miles from fuel consumption: miles = gallons × MPG
+                        miles = moving_gallons * avg_mpg
+                        gallons = moving_gallons
+                        logger.debug(f"Estimated miles for {row[0]}: {moving_gallons:.1f} gal × {avg_mpg:.1f} MPG = {miles:.1f} mi")
+                    else:
+                        # Skip trucks with no usable data
+                        continue
 
-                    # Calculate gallons from miles/mpg
-                    gallons = miles / avg_mpg if avg_mpg > 0 else 0
+                    total_fleet_miles += miles
 
                     trucks_data.append(
                         {
@@ -104,7 +121,8 @@ async def get_fleet_cost_per_mile(
                     continue
 
             logger.info(
-                f"Processed {len(trucks_data)} trucks, total_miles={total_fleet_miles:.0f}, trucks_with_valid_mpg={trucks_with_mpg}"
+                f"Processed {len(trucks_data)} trucks, total_miles={total_fleet_miles:.0f}, "
+                f"trucks_with_odom={trucks_with_odom}, trucks_with_valid_mpg={trucks_with_mpg}"
             )
         except Exception as db_err:
             logger.warning(f"DB query failed, using fallback: {db_err}")
