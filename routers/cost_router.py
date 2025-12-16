@@ -44,7 +44,7 @@ async def get_fleet_cost_per_mile(
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)
             GROUP BY truck_id
-            HAVING miles > 10
+            HAVING SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 100 THEN odom_delta_mi ELSE 0 END) > 10
         """
 
         trucks_data = []
@@ -64,8 +64,10 @@ async def get_fleet_cost_per_mile(
                     avg_mpg = 5.5
 
                 # Use calculated gallons if available, otherwise derive from miles/mpg
-                final_gallons = gallons if gallons > 0 else (miles / avg_mpg if avg_mpg > 0 else 0)
-                
+                final_gallons = (
+                    gallons if gallons > 0 else (miles / avg_mpg if avg_mpg > 0 else 0)
+                )
+
                 trucks_data.append(
                     {
                         "truck_id": row[0],
