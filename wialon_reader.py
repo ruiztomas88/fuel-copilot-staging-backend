@@ -118,6 +118,16 @@ class WialonConfig:
         "harsh_accel": "harsh_accel",  # Harsh acceleration event (threshold: 280mg)
         "harsh_brake": "harsh_brake",  # Harsh braking event (threshold: 320mg)
         "harsh_corner": "harsh_corner",  # Harsh cornering event (threshold: 280mg)
+        # 🆕 v5.11.0: Additional sensors found in Wialon (Dec 2025)
+        "rssi": "rssi",  # Signal strength indicator (dBm) - GPS tracker health
+        "coolant_level": "cool_lvl",  # Coolant level (%) - engine health
+        "oil_level": "oil_level",  # Oil level (%) - predictive maintenance
+        "gps_locked": "gps_locked",  # GPS lock status (0/1)
+        "battery": "battery",  # Device battery level
+        "roaming": "roaming",  # Cellular roaming status
+        "event_id": "event_id",  # Pacific Track event identifier
+        "bus": "bus",  # CAN bus status/identifier
+        "mode": "mode",  # Device operation mode
     }
 
 
@@ -198,6 +208,16 @@ class TruckSensorData:
     harsh_accel: Optional[int] = None  # Harsh acceleration event count
     harsh_brake: Optional[int] = None  # Harsh braking event count
     harsh_corner: Optional[int] = None  # Harsh cornering event count
+    # 🆕 v5.11.0: Additional sensors (Dec 2025)
+    rssi: Optional[int] = None  # Signal strength indicator (dBm)
+    coolant_level: Optional[float] = None  # Coolant level (%)
+    oil_level: Optional[float] = None  # Oil level (%)
+    gps_locked: Optional[int] = None  # GPS lock status (0/1)
+    battery: Optional[float] = None  # Device battery level
+    roaming: Optional[int] = None  # Cellular roaming status (0/1)
+    event_id: Optional[str] = None  # Pacific Track event identifier
+    bus: Optional[int] = None  # CAN bus status/identifier
+    mode: Optional[int] = None  # Device operation mode
 
     def __post_init__(self):
         """Ensure timestamp is timezone-aware"""

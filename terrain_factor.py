@@ -497,19 +497,19 @@ def calculate_contextualized_mpg(
 ) -> dict:
     """
     Calculate contextualized MPG accounting for external factors.
-    
+
     This helps answer: "Is this truck performing well given the conditions?"
-    
+
     Args:
         raw_mpg: Actual measured MPG
         terrain_factor: From terrain tracker (>1 = uphill, <1 = downhill)
         weather_factor: Weather impact (1.0 = normal, 1.1 = headwind/cold, etc.)
         load_factor: Cargo impact (1.0 = empty, 1.15 = full load)
         baseline_mpg: Expected baseline for this truck
-        
+
     Returns:
         Dict with raw_mpg, adjusted_mpg, expected_mpg, and performance rating
-        
+
     Example:
         >>> calculate_contextualized_mpg(
         ...     raw_mpg=5.0,
@@ -527,19 +527,19 @@ def calculate_contextualized_mpg(
     """
     # Combined environmental factor
     combined_factor = terrain_factor * weather_factor * load_factor
-    
+
     # What the MPG would be in ideal conditions (adjusted up if conditions are hard)
     adjusted_mpg = raw_mpg * combined_factor
-    
+
     # What we expect given the conditions (baseline adjusted down for conditions)
     expected_mpg = baseline_mpg / combined_factor
-    
+
     # Performance vs expectation
     if expected_mpg > 0:
         performance_pct = ((raw_mpg - expected_mpg) / expected_mpg) * 100
     else:
         performance_pct = 0.0
-    
+
     # Rating based on performance vs expected
     if performance_pct >= 5:
         rating = "EXCELLENT"
@@ -553,7 +553,7 @@ def calculate_contextualized_mpg(
     else:
         rating = "CRITICAL"
         message = "Significantly below expected - investigate"
-    
+
     return {
         "raw_mpg": round(raw_mpg, 2),
         "adjusted_mpg": round(adjusted_mpg, 2),
@@ -582,16 +582,16 @@ def get_truck_contextualized_mpg(
 ) -> dict:
     """
     Get contextualized MPG for a specific truck using its current terrain.
-    
+
     Args:
         truck_id: Truck identifier
         raw_mpg: Current raw MPG reading
         altitude: Current altitude (ft or m)
         latitude: GPS latitude
-        longitude: GPS longitude  
+        longitude: GPS longitude
         speed: Current speed (mph)
         baseline_mpg: Truck's baseline MPG
-        
+
     Returns:
         Contextualized MPG analysis dict
     """
@@ -606,13 +606,13 @@ def get_truck_contextualized_mpg(
         )
     else:
         terrain_factor = 1.0
-    
+
     # TODO: Weather factor from external API (OpenWeather, etc.)
     weather_factor = 1.0
-    
+
     # TODO: Load factor from weight sensors if available
     load_factor = 1.0
-    
+
     return calculate_contextualized_mpg(
         raw_mpg=raw_mpg,
         terrain_factor=terrain_factor,

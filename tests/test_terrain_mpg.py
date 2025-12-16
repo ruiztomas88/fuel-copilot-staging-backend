@@ -97,7 +97,9 @@ class TestTerrainContextualizedMPG:
 
         # Combined factor: 1.10 * 1.05 * 1.10 = 1.2705
         expected_combined = 1.10 * 1.05 * 1.10
-        assert result["factors"]["combined"] == pytest.approx(expected_combined, rel=0.01)
+        assert result["factors"]["combined"] == pytest.approx(
+            expected_combined, rel=0.01
+        )
 
         # Expected MPG: 6.0 / 1.2705 = 4.72
         assert result["expected_mpg"] == pytest.approx(4.72, rel=0.05)
@@ -141,7 +143,10 @@ class TestTerrainContextualizedMPG:
 
         # Test critical message
         result = calculate_contextualized_mpg(raw_mpg=3.0, baseline_mpg=6.0)
-        assert "investigate" in result["message"].lower() or "below" in result["message"].lower()
+        assert (
+            "investigate" in result["message"].lower()
+            or "below" in result["message"].lower()
+        )
 
 
 class TestGetTruckContextualizedMPG:
