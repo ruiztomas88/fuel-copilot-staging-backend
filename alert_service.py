@@ -765,16 +765,19 @@ class AlertManager:
 
         # Rate limiting: prevent spam
         self._last_alert_by_truck: Dict[str, datetime] = {}
-        self._min_alert_interval_seconds = 300  # 5 minutes between alerts per truck
+        self._min_alert_interval_seconds = (
+            3600  # 1 hour between alerts per truck (general)
+        )
 
-        # 🔧 v5.7.4: Rate limiting per alert TYPE + truck (prevents DTC/Voltage spam)
+        # 🔧 v5.11.0: Rate limiting to 1 per 24 hours per alert TYPE + truck
+        # EXCEPTION: Refuels are NOT rate limited (detected in real-time)
         self._last_alert_by_type: Dict[str, datetime] = (
             {}
         )  # key = "truck_id:alert_type"
-        self._critical_alert_interval_seconds = (
-            1800  # 30 min for CRITICAL (was unlimited!)
+        self._critical_alert_interval_seconds = 86400  # 24 hours for CRITICAL alerts
+        self._type_alert_interval_seconds = (
+            86400  # 24 hours for same type on same truck
         )
-        self._type_alert_interval_seconds = 3600  # 1 hour for same type on same truck
 
     def _format_alert_message(self, alert: Alert) -> str:
         """Format alert for SMS/WhatsApp"""
@@ -819,24 +822,30 @@ class AlertManager:
 
     def _should_send_alert(self, alert: Alert) -> bool:
         """Check rate limiting and filters"""
-        # 🔧 v5.7.4: Rate limit by alert TYPE + truck_id to prevent spam
+        # 🆕 v5.11.0: REFUEL alerts are NEVER rate limited (real-time detection)
+        if alert.alert_type == AlertType.REFUEL:
+            return True
+
+        # 🔧 v5.11.0: Rate limit all other alerts to 1 per 24 hours per TYPE + truck_id
         type_key = f"{alert.truck_id}:{alert.alert_type.value}"
         last_type_alert = self._last_alert_by_type.get(type_key)
 
         if last_type_alert:
             elapsed = (utc_now() - last_type_alert).total_seconds()
 
-            # Critical alerts: rate limit to 30 min (was unlimited!)
+            # Critical alerts: rate limit to 24 hours
             if alert.priority == AlertPriority.CRITICAL:
                 if elapsed < self._critical_alert_interval_seconds:
                     logger.debug(
-                        f"Rate limited CRITICAL: {type_key} (last {elapsed:.0f}s ago, need {self._critical_alert_interval_seconds}s)"
+                        f"Rate limited CRITICAL: {type_key} (last {elapsed:.0f}s ago, need {self._critical_alert_interval_seconds}s = 24h)"
                     )
                     return False
             else:
-                # Non-critical: 1 hour per type per truck
+                # Non-critical: 24 hours per type per truck
                 if elapsed < self._type_alert_interval_seconds:
-                    logger.debug(f"Rate limited: {type_key} (last {elapsed:.0f}s ago)")
+                    logger.debug(
+                        f"Rate limited: {type_key} (last {elapsed:.0f}s ago, need 24h)"
+                    )
                     return False
 
         # Also check general per-truck limit (any alert type)

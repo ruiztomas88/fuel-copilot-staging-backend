@@ -48,6 +48,7 @@ _sqlalchemy_engine = None
 try:
     from database_mysql import get_sqlalchemy_engine
     from sqlalchemy import text
+
     _mysql_available = True
     logger.info("✅ MySQL available for Predictive Maintenance persistence")
 except ImportError:
@@ -61,15 +62,17 @@ except ImportError:
 
 class MaintenanceUrgency(str, Enum):
     """Niveles de urgencia para mantenimiento"""
-    CRITICAL = "CRÍTICO"      # < 3 días - Detener operación
-    HIGH = "ALTO"             # 3-7 días - Programar esta semana  
-    MEDIUM = "MEDIO"          # 7-30 días - Programar este mes
-    LOW = "BAJO"              # 30-90 días - Próximo servicio programado
-    NONE = "NINGUNO"          # Sin acción requerida
+
+    CRITICAL = "CRÍTICO"  # < 3 días - Detener operación
+    HIGH = "ALTO"  # 3-7 días - Programar esta semana
+    MEDIUM = "MEDIO"  # 7-30 días - Programar este mes
+    LOW = "BAJO"  # 30-90 días - Próximo servicio programado
+    NONE = "NINGUNO"  # Sin acción requerida
 
 
 class TrendDirection(str, Enum):
     """Dirección de tendencia del sensor"""
+
     DEGRADING = "DEGRADANDO"
     STABLE = "ESTABLE"
     IMPROVING = "MEJORANDO"
@@ -84,12 +87,15 @@ class TrendDirection(str, Enum):
 @dataclass
 class SensorThresholds:
     """Umbrales para cada sensor"""
-    warning: float          # Nivel de advertencia
-    critical: float         # Nivel crítico
-    is_higher_bad: bool     # True = valor alto es malo (temp), False = valor bajo es malo (pressure)
-    unit: str               # Unidad de medida
-    component: str          # Componente que monitorea
-    maintenance_action: str # Acción recomendada
+
+    warning: float  # Nivel de advertencia
+    critical: float  # Nivel crítico
+    is_higher_bad: (
+        bool  # True = valor alto es malo (temp), False = valor bajo es malo (pressure)
+    )
+    unit: str  # Unidad de medida
+    component: str  # Componente que monitorea
+    maintenance_action: str  # Acción recomendada
     failure_cost: Optional[str] = None  # Costo estimado si falla
 
 
@@ -104,7 +110,7 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="psi",
         component="Bomba de aceite / Filtro",
         maintenance_action="Cambio de aceite y filtro, revisar bomba de aceite",
-        failure_cost="$2,000 - $5,000"
+        failure_cost="$2,000 - $5,000",
     ),
     "coolant_temp": SensorThresholds(
         warning=210.0,
@@ -113,7 +119,7 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="°F",
         component="Sistema de enfriamiento",
         maintenance_action="Revisar nivel coolant, termostato, radiador, bomba de agua",
-        failure_cost="$1,500 - $3,000"
+        failure_cost="$1,500 - $3,000",
     ),
     "oil_temp": SensorThresholds(
         warning=250.0,
@@ -122,9 +128,8 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="°F",
         component="Sistema de lubricación",
         maintenance_action="Revisar oil cooler, nivel de aceite, viscosidad",
-        failure_cost="$1,000 - $2,500"
+        failure_cost="$1,000 - $2,500",
     ),
-    
     # ─────────────────────────────────────────────────────────────────────
     # TURBO
     # ─────────────────────────────────────────────────────────────────────
@@ -135,16 +140,16 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="°F",
         component="Turbocompresor",
         maintenance_action="Inspección de turbo, revisar bearings y sellos",
-        failure_cost="$3,000 - $5,000"
+        failure_cost="$3,000 - $5,000",
     ),
     "boost_pressure": SensorThresholds(
-        warning=15.0,   # Muy bajo = problema
+        warning=15.0,  # Muy bajo = problema
         critical=10.0,
         is_higher_bad=False,  # Bajo es malo (pérdida de boost)
         unit="psi",
         component="Turbo / Intercooler",
         maintenance_action="Revisar fugas de boost, wastegate, intercooler",
-        failure_cost="$1,500 - $3,000"
+        failure_cost="$1,500 - $3,000",
     ),
     "intercooler_temp": SensorThresholds(
         warning=180.0,
@@ -153,9 +158,8 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="°F",
         component="Intercooler",
         maintenance_action="Limpiar intercooler, revisar flujo de aire",
-        failure_cost="$800 - $1,500"
+        failure_cost="$800 - $1,500",
     ),
-    
     # ─────────────────────────────────────────────────────────────────────
     # TRANSMISIÓN
     # ─────────────────────────────────────────────────────────────────────
@@ -166,9 +170,8 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="°F",
         component="Transmisión",
         maintenance_action="Revisar nivel fluido trans, cooler de transmisión",
-        failure_cost="$8,000 - $15,000"
+        failure_cost="$8,000 - $15,000",
     ),
-    
     # ─────────────────────────────────────────────────────────────────────
     # COMBUSTIBLE
     # ─────────────────────────────────────────────────────────────────────
@@ -179,9 +182,8 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="°F",
         component="Sistema de combustible",
         maintenance_action="Revisar fuel cooler, líneas de retorno",
-        failure_cost="$1,000 - $2,000"
+        failure_cost="$1,000 - $2,000",
     ),
-    
     # ─────────────────────────────────────────────────────────────────────
     # ELÉCTRICO
     # ─────────────────────────────────────────────────────────────────────
@@ -192,9 +194,8 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="V",
         component="Sistema eléctrico",
         maintenance_action="Revisar alternador, batería, conexiones",
-        failure_cost="$500 - $1,500"
+        failure_cost="$500 - $1,500",
     ),
-    
     # ─────────────────────────────────────────────────────────────────────
     # DEF / AFTERTREATMENT
     # ─────────────────────────────────────────────────────────────────────
@@ -205,9 +206,8 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="%",
         component="Sistema DEF",
         maintenance_action="Llenar tanque DEF. Derate inminente si llega a 0%",
-        failure_cost="$2,000 - $4,000 (derate + reparación)"
+        failure_cost="$2,000 - $4,000 (derate + reparación)",
     ),
-    
     # ─────────────────────────────────────────────────────────────────────
     # FRENOS
     # ─────────────────────────────────────────────────────────────────────
@@ -218,20 +218,19 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
         unit="psi",
         component="Sistema de frenos de aire",
         maintenance_action="Revisar compresor, válvulas, fugas de aire",
-        failure_cost="$1,500 - $3,000"
+        failure_cost="$1,500 - $3,000",
     ),
-    
     # ─────────────────────────────────────────────────────────────────────
     # EFICIENCIA
     # ─────────────────────────────────────────────────────────────────────
     "mpg": SensorThresholds(
-        warning=5.5,    # MPG muy bajo
+        warning=5.5,  # MPG muy bajo
         critical=4.5,
         is_higher_bad=False,
         unit="MPG",
         component="Eficiencia general",
         maintenance_action="Tune-up, revisar inyectores, filtro de aire, alineación",
-        failure_cost="$500 - $2,000"
+        failure_cost="$500 - $2,000",
     ),
 }
 
@@ -244,6 +243,7 @@ SENSOR_THRESHOLDS: Dict[str, SensorThresholds] = {
 @dataclass
 class SensorReading:
     """Single sensor reading"""
+
     timestamp: datetime
     value: float
 
@@ -251,43 +251,44 @@ class SensorReading:
 @dataclass
 class SensorHistory:
     """Historial de lecturas de un sensor para análisis de tendencia"""
+
     sensor_name: str
     truck_id: str
     readings: List[SensorReading] = field(default_factory=list)
     max_history_days: int = 30
-    
+
     def add_reading(self, timestamp: datetime, value: float):
         """Agregar lectura y limpiar datos antiguos"""
         # Ensure timezone-aware
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
-            
+
         self.readings.append(SensorReading(timestamp=timestamp, value=value))
-        
+
         # Limpiar datos más viejos que max_history_days
         cutoff = datetime.now(timezone.utc) - timedelta(days=self.max_history_days)
         self.readings = [r for r in self.readings if r.timestamp > cutoff]
-    
+
     def get_daily_averages(self) -> List[Tuple[datetime, float]]:
         """Agrupar por día y promediar"""
         if not self.readings:
             return []
-        
+
         daily: Dict[str, List[float]] = {}
         for reading in self.readings:
             day_key = reading.timestamp.strftime("%Y-%m-%d")
             if day_key not in daily:
                 daily[day_key] = []
             daily[day_key].append(reading.value)
-        
+
         result = []
         for day_str, values in sorted(daily.items()):
             avg = sum(values) / len(values)
             day_dt = datetime.strptime(day_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             result.append((day_dt, avg))
-        
+
         return result
-    
+
     def calculate_trend(self) -> Optional[float]:
         """
         Calcular tendencia (slope) en unidades por día.
@@ -295,27 +296,27 @@ class SensorHistory:
         Returns None if insufficient data.
         """
         daily = self.get_daily_averages()
-        
+
         if len(daily) < 3:
             return None  # No hay suficientes datos
-        
+
         # Regresión lineal simple
         n = len(daily)
         x_values = list(range(n))  # Días
         y_values = [val for _, val in daily]
-        
+
         x_mean = sum(x_values) / n
         y_mean = sum(y_values) / n
-        
+
         numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, y_values))
         denominator = sum((x - x_mean) ** 2 for x in x_values)
-        
+
         if denominator == 0:
             return None
-        
+
         slope = numerator / denominator  # Unidades por día
         return slope
-    
+
     def get_current_value(self) -> Optional[float]:
         """Obtener valor más reciente"""
         if not self.readings:
@@ -323,11 +324,11 @@ class SensorHistory:
         # Sort by timestamp and get latest
         sorted_readings = sorted(self.readings, key=lambda r: r.timestamp)
         return sorted_readings[-1].value
-    
+
     def get_readings_count(self) -> int:
         """Number of readings in history"""
         return len(self.readings)
-    
+
     def to_dict(self) -> Dict:
         """Serialize for persistence"""
         return {
@@ -338,7 +339,7 @@ class SensorHistory:
                 for r in self.readings
             ],
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict) -> "SensorHistory":
         """Deserialize from persistence"""
@@ -354,9 +355,10 @@ class SensorHistory:
         return history
 
 
-@dataclass  
+@dataclass
 class MaintenancePrediction:
     """Resultado de predicción de mantenimiento"""
+
     truck_id: str
     sensor_name: str
     component: str
@@ -372,7 +374,7 @@ class MaintenancePrediction:
     estimated_cost_if_fail: Optional[str]
     warning_threshold: float
     critical_threshold: float
-    
+
     def to_dict(self) -> Dict:
         """Convert to dictionary for API response"""
         return {
@@ -381,10 +383,16 @@ class MaintenancePrediction:
             "component": self.component,
             "current_value": round(self.current_value, 2),
             "unit": self.unit,
-            "trend_per_day": round(self.trend_per_day, 3) if self.trend_per_day else None,
+            "trend_per_day": (
+                round(self.trend_per_day, 3) if self.trend_per_day else None
+            ),
             "trend_direction": self.trend_direction.value,
-            "days_to_warning": round(self.days_to_warning, 1) if self.days_to_warning else None,
-            "days_to_critical": round(self.days_to_critical, 1) if self.days_to_critical else None,
+            "days_to_warning": (
+                round(self.days_to_warning, 1) if self.days_to_warning else None
+            ),
+            "days_to_critical": (
+                round(self.days_to_critical, 1) if self.days_to_critical else None
+            ),
             "urgency": self.urgency.value,
             "confidence": self.confidence,
             "recommended_action": self.recommended_action,
@@ -392,24 +400,24 @@ class MaintenancePrediction:
             "warning_threshold": self.warning_threshold,
             "critical_threshold": self.critical_threshold,
         }
-    
+
     def to_alert_message(self) -> str:
         """Generar mensaje de alerta legible"""
         if self.urgency == MaintenanceUrgency.NONE:
             return ""
-        
+
         if self.days_to_critical and self.days_to_critical > 0:
             time_str = f"en ~{int(self.days_to_critical)} días"
         elif self.days_to_warning and self.days_to_warning > 0:
             time_str = f"en ~{int(self.days_to_warning)} días"
         else:
             time_str = "próximamente"
-        
+
         trend_str = ""
         if self.trend_per_day:
             direction = "↑" if self.trend_per_day > 0 else "↓"
             trend_str = f" {direction} ({abs(self.trend_per_day):.2f} {self.unit}/día)"
-        
+
         return (
             f"🔧 {self.truck_id} - {self.component}\n"
             f"   Valor actual: {self.current_value:.1f} {self.unit}{trend_str}\n"
@@ -427,190 +435,207 @@ class MaintenancePrediction:
 class PredictiveMaintenanceEngine:
     """
     Motor principal de mantenimiento predictivo.
-    
+
     Analiza tendencias de sensores y predice cuándo se necesitará mantenimiento.
-    
+
     🆕 v1.1.0: MySQL persistence with JSON fallback
     """
-    
+
     VERSION = "1.1.0"
-    
+
     # Path for state persistence (JSON fallback)
     DATA_DIR = Path(__file__).parent / "data"
     STATE_FILE = DATA_DIR / "predictive_maintenance_state.json"
-    
+
     # MySQL configuration
     USE_MYSQL = True  # Set to False to force JSON
     MYSQL_BATCH_SIZE = 100  # Insert batch size
-    
+
     def __init__(self, use_mysql: bool = True):
         # Historial por truck_id -> sensor_name -> SensorHistory
         self.histories: Dict[str, Dict[str, SensorHistory]] = {}
-        
+
         # Active predictions cache
         self.active_predictions: Dict[str, List[MaintenancePrediction]] = {}
-        
+
         # Last analysis timestamp
         self.last_analysis: Dict[str, datetime] = {}
-        
+
         # MySQL availability
         self._use_mysql = use_mysql and _mysql_available and self.USE_MYSQL
         self._mysql_tested = False
-        
+
         # Pending MySQL writes (batched for performance)
         self._pending_writes: List[Tuple[str, str, float, datetime]] = []
-        
+
         # Load persisted state
         self._load_state()
-        
+
         storage_type = "MySQL" if self._use_mysql else "JSON"
-        logger.info(f"🔮 PredictiveMaintenanceEngine v{self.VERSION} initialized ({storage_type} storage)")
-    
+        logger.info(
+            f"🔮 PredictiveMaintenanceEngine v{self.VERSION} initialized ({storage_type} storage)"
+        )
+
     # ═══════════════════════════════════════════════════════════════════════════
     # MYSQL PERSISTENCE METHODS
     # ═══════════════════════════════════════════════════════════════════════════
-    
+
     def _test_mysql_connection(self) -> bool:
         """Test MySQL connection and verify tables exist"""
         if self._mysql_tested:
             return self._use_mysql
-        
+
         self._mysql_tested = True
-        
+
         if not _mysql_available:
             self._use_mysql = False
             return False
-        
+
         try:
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
                 # Check if pm_sensor_history table exists
-                result = conn.execute(text(
-                    "SELECT COUNT(*) FROM information_schema.tables "
-                    "WHERE table_schema = DATABASE() AND table_name = 'pm_sensor_history'"
-                ))
+                result = conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.tables "
+                        "WHERE table_schema = DATABASE() AND table_name = 'pm_sensor_history'"
+                    )
+                )
                 if result.scalar() == 0:
-                    logger.warning("⚠️ pm_sensor_history table not found, using JSON fallback")
+                    logger.warning(
+                        "⚠️ pm_sensor_history table not found, using JSON fallback"
+                    )
                     self._use_mysql = False
                     return False
-                
+
                 logger.info("✅ MySQL PM tables verified")
                 return True
         except Exception as e:
             logger.warning(f"⚠️ MySQL connection failed, using JSON fallback: {e}")
             self._use_mysql = False
             return False
-    
+
     def _load_state_mysql(self) -> bool:
         """Load sensor histories from MySQL"""
         try:
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
                 # Load from pm_sensor_history (last 30 days)
-                result = conn.execute(text("""
+                result = conn.execute(
+                    text(
+                        """
                     SELECT truck_id, sensor_name, value, timestamp
                     FROM pm_sensor_history
                     WHERE timestamp > DATE_SUB(NOW(), INTERVAL 30 DAY)
                     ORDER BY truck_id, sensor_name, timestamp
-                """))
-                
+                """
+                    )
+                )
+
                 rows = result.fetchall()
-                
+
                 if not rows:
                     logger.info("📂 No PM history in MySQL (empty or new installation)")
                     return True
-                
+
                 # Group by truck_id and sensor_name
                 for row in rows:
                     truck_id = row[0]
                     sensor_name = row[1]
                     value = float(row[2])
                     timestamp = row[3]
-                    
+
                     # Ensure timezone-aware
                     if timestamp.tzinfo is None:
                         timestamp = timestamp.replace(tzinfo=timezone.utc)
-                    
+
                     if truck_id not in self.histories:
                         self.histories[truck_id] = {}
-                    
+
                     if sensor_name not in self.histories[truck_id]:
                         self.histories[truck_id][sensor_name] = SensorHistory(
-                            sensor_name=sensor_name,
-                            truck_id=truck_id
+                            sensor_name=sensor_name, truck_id=truck_id
                         )
-                    
+
                     self.histories[truck_id][sensor_name].readings.append(
                         SensorReading(timestamp=timestamp, value=value)
                     )
-                
+
                 total_readings = len(rows)
                 logger.info(
                     f"📂 Loaded {total_readings} readings for "
                     f"{len(self.histories)} trucks from MySQL"
                 )
                 return True
-                
+
         except Exception as e:
             logger.error(f"Failed to load PM state from MySQL: {e}")
             return False
-    
-    def _save_reading_mysql(self, truck_id: str, sensor_name: str, value: float, timestamp: datetime):
+
+    def _save_reading_mysql(
+        self, truck_id: str, sensor_name: str, value: float, timestamp: datetime
+    ):
         """Queue a sensor reading for batch MySQL insert"""
         self._pending_writes.append((truck_id, sensor_name, value, timestamp))
-        
+
         # Flush if batch is full
         if len(self._pending_writes) >= self.MYSQL_BATCH_SIZE:
             self._flush_mysql_writes()
-    
+
     def _flush_mysql_writes(self):
         """Flush pending writes to MySQL"""
         if not self._pending_writes:
             return
-        
+
         if not self._use_mysql:
             self._pending_writes.clear()
             return
-        
+
         try:
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
                 # Batch insert
-                insert_sql = text("""
+                insert_sql = text(
+                    """
                     INSERT INTO pm_sensor_history (truck_id, sensor_name, value, timestamp)
                     VALUES (:truck_id, :sensor_name, :value, :timestamp)
-                """)
-                
+                """
+                )
+
                 params = [
                     {
                         "truck_id": w[0],
                         "sensor_name": w[1],
                         "value": w[2],
-                        "timestamp": w[3].replace(tzinfo=None) if w[3].tzinfo else w[3]
+                        "timestamp": w[3].replace(tzinfo=None) if w[3].tzinfo else w[3],
                     }
                     for w in self._pending_writes
                 ]
-                
+
                 conn.execute(insert_sql, params)
                 conn.commit()
-                
+
                 count = len(self._pending_writes)
                 self._pending_writes.clear()
                 logger.debug(f"💾 Flushed {count} PM readings to MySQL")
-                
+
         except Exception as e:
             logger.error(f"Failed to flush PM writes to MySQL: {e}")
             # Keep pending writes for retry or JSON fallback
-    
-    def _update_daily_avg_mysql(self, truck_id: str, sensor_name: str, value: float, date: datetime):
+
+    def _update_daily_avg_mysql(
+        self, truck_id: str, sensor_name: str, value: float, date: datetime
+    ):
         """Update daily average in MySQL (for long-term trends)"""
         if not self._use_mysql:
             return
-        
+
         try:
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
-                conn.execute(text("""
+                conn.execute(
+                    text(
+                        """
                     INSERT INTO pm_sensor_daily_avg 
                         (truck_id, sensor_name, date, avg_value, min_value, max_value, reading_count)
                     VALUES 
@@ -620,49 +645,54 @@ class PredictiveMaintenanceEngine:
                         min_value = LEAST(min_value, :value),
                         max_value = GREATEST(max_value, :value),
                         reading_count = reading_count + 1
-                """), {
-                    "truck_id": truck_id,
-                    "sensor_name": sensor_name,
-                    "date": date.date() if isinstance(date, datetime) else date,
-                    "value": value
-                })
+                """
+                    ),
+                    {
+                        "truck_id": truck_id,
+                        "sensor_name": sensor_name,
+                        "date": date.date() if isinstance(date, datetime) else date,
+                        "value": value,
+                    },
+                )
                 conn.commit()
         except Exception as e:
             logger.debug(f"Could not update daily avg: {e}")
-    
+
     # ═══════════════════════════════════════════════════════════════════════════
     # LOAD/SAVE STATE (with MySQL/JSON fallback)
     # ═══════════════════════════════════════════════════════════════════════════
-    
+
     def _load_state(self):
         """Load persisted sensor histories (MySQL primary, JSON fallback)"""
         # Test MySQL connection first
         if self._use_mysql:
             self._test_mysql_connection()
-        
+
         # Try MySQL first
         if self._use_mysql:
             if self._load_state_mysql():
                 return
-        
+
         # Fallback to JSON
         self._load_state_json()
-    
+
     def _load_state_json(self):
         """Load persisted sensor histories from JSON file"""
         try:
             if self.STATE_FILE.exists():
-                with open(self.STATE_FILE, 'r') as f:
+                with open(self.STATE_FILE, "r") as f:
                     data = json.load(f)
-                
+
                 for truck_id, sensors in data.get("histories", {}).items():
                     self.histories[truck_id] = {}
                     for sensor_name, history_data in sensors.items():
-                        self.histories[truck_id][sensor_name] = SensorHistory.from_dict(history_data)
-                
+                        self.histories[truck_id][sensor_name] = SensorHistory.from_dict(
+                            history_data
+                        )
+
                 total_readings = sum(
-                    h.get_readings_count() 
-                    for sensors in self.histories.values() 
+                    h.get_readings_count()
+                    for sensors in self.histories.values()
                     for h in sensors.values()
                 )
                 logger.info(
@@ -670,22 +700,24 @@ class PredictiveMaintenanceEngine:
                     f"{len(self.histories)} trucks from JSON file"
                 )
         except Exception as e:
-            logger.warning(f"Could not load predictive maintenance state from JSON: {e}")
-    
+            logger.warning(
+                f"Could not load predictive maintenance state from JSON: {e}"
+            )
+
     def _save_state(self):
         """Persist sensor histories (flush MySQL + save JSON backup)"""
         # Flush any pending MySQL writes
         if self._use_mysql:
             self._flush_mysql_writes()
-        
+
         # Always save JSON as backup
         self._save_state_json()
-    
+
     def _save_state_json(self):
         """Persist sensor histories to JSON file"""
         try:
             self.DATA_DIR.mkdir(parents=True, exist_ok=True)
-            
+
             data = {
                 "version": self.VERSION,
                 "saved_at": datetime.now(timezone.utc).isoformat(),
@@ -695,25 +727,21 @@ class PredictiveMaintenanceEngine:
                         for sensor_name, history in sensors.items()
                     }
                     for truck_id, sensors in self.histories.items()
-                }
+                },
             }
-            
-            with open(self.STATE_FILE, 'w') as f:
+
+            with open(self.STATE_FILE, "w") as f:
                 json.dump(data, f)
-                
+
         except Exception as e:
             logger.error(f"Could not save predictive maintenance state to JSON: {e}")
-    
+
     def add_sensor_reading(
-        self, 
-        truck_id: str, 
-        sensor_name: str, 
-        value: float,
-        timestamp: datetime = None
+        self, truck_id: str, sensor_name: str, value: float, timestamp: datetime = None
     ):
         """
         Agregar lectura de sensor al historial.
-        
+
         Args:
             truck_id: Truck identifier (e.g., "FM3679")
             sensor_name: Sensor name matching SENSOR_THRESHOLDS keys
@@ -722,51 +750,50 @@ class PredictiveMaintenanceEngine:
         """
         if value is None:
             return
-            
+
         if timestamp is None:
             timestamp = datetime.now(timezone.utc)
-        
+
         # Ensure timezone-aware
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
-        
+
         # Skip if sensor not configured
         if sensor_name not in SENSOR_THRESHOLDS:
             return
-        
+
         # Inicializar estructuras si no existen
         if truck_id not in self.histories:
             self.histories[truck_id] = {}
-        
+
         if sensor_name not in self.histories[truck_id]:
             self.histories[truck_id][sensor_name] = SensorHistory(
-                sensor_name=sensor_name,
-                truck_id=truck_id
+                sensor_name=sensor_name, truck_id=truck_id
             )
-        
+
         # Add to in-memory history
         self.histories[truck_id][sensor_name].add_reading(timestamp, value)
-        
+
         # 🆕 v1.1.0: Also persist to MySQL
         if self._use_mysql:
             self._save_reading_mysql(truck_id, sensor_name, value, timestamp)
             self._update_daily_avg_mysql(truck_id, sensor_name, value, timestamp)
-    
+
     def process_sensor_batch(
         self,
         truck_id: str,
         sensor_data: Dict[str, Optional[float]],
-        timestamp: datetime = None
+        timestamp: datetime = None,
     ):
         """
         Procesar un batch de sensores de un camión.
         Call this every time telemetry data arrives.
-        
+
         Args:
             truck_id: Truck identifier
             sensor_data: Dict mapping sensor names to values
             timestamp: Reading timestamp
-            
+
         Example sensor_data:
         {
             "oil_pressure": 32.5,
@@ -780,45 +807,43 @@ class PredictiveMaintenanceEngine:
         """
         if timestamp is None:
             timestamp = datetime.now(timezone.utc)
-        
+
         for sensor_name, value in sensor_data.items():
             if value is not None:
                 self.add_sensor_reading(truck_id, sensor_name, value, timestamp)
-    
+
     def analyze_sensor(
-        self, 
-        truck_id: str, 
-        sensor_name: str
+        self, truck_id: str, sensor_name: str
     ) -> Optional[MaintenancePrediction]:
         """
         Analizar un sensor específico y generar predicción.
-        
+
         Args:
             truck_id: Truck identifier
             sensor_name: Sensor to analyze
-            
+
         Returns:
             MaintenancePrediction or None if insufficient data
         """
         # Verificar que tenemos config para este sensor
         if sensor_name not in SENSOR_THRESHOLDS:
             return None
-        
+
         config = SENSOR_THRESHOLDS[sensor_name]
-        
+
         # Obtener historial
         if truck_id not in self.histories:
             return None
         if sensor_name not in self.histories[truck_id]:
             return None
-        
+
         history = self.histories[truck_id][sensor_name]
         current = history.get_current_value()
         trend = history.calculate_trend()
-        
+
         if current is None:
             return None
-        
+
         # Determinar dirección de tendencia
         if trend is None:
             trend_direction = TrendDirection.UNKNOWN
@@ -839,11 +864,11 @@ class PredictiveMaintenanceEngine:
                 trend_direction = TrendDirection.IMPROVING
             else:
                 trend_direction = TrendDirection.STABLE
-        
+
         # Calcular días hasta umbrales
         days_to_warning = None
         days_to_critical = None
-        
+
         if trend is not None and abs(trend) > 0.01:
             if config.is_higher_bad:
                 # Subiendo hacia umbral (temp subiendo es malo)
@@ -859,12 +884,12 @@ class PredictiveMaintenanceEngine:
                         days_to_warning = (current - config.warning) / abs(trend)
                     if current > config.critical:
                         days_to_critical = (current - config.critical) / abs(trend)
-        
+
         # Determinar urgencia
         urgency = self._calculate_urgency(
             current, config, days_to_warning, days_to_critical, trend_direction
         )
-        
+
         # Determinar confianza basada en cantidad de datos
         daily_data = history.get_daily_averages()
         if len(daily_data) >= 7:
@@ -873,7 +898,7 @@ class PredictiveMaintenanceEngine:
             confidence = "MEDIUM"
         else:
             confidence = "LOW"
-        
+
         # Generar recomendación basada en urgencia
         if urgency == MaintenanceUrgency.CRITICAL:
             action = f"⚠️ URGENTE: {config.maintenance_action}"
@@ -885,7 +910,7 @@ class PredictiveMaintenanceEngine:
             action = f"Incluir en próximo servicio: {config.maintenance_action}"
         else:
             action = "Monitoreo normal, sin acción requerida"
-        
+
         return MaintenancePrediction(
             truck_id=truck_id,
             sensor_name=sensor_name,
@@ -903,17 +928,17 @@ class PredictiveMaintenanceEngine:
             warning_threshold=config.warning,
             critical_threshold=config.critical,
         )
-    
+
     def _calculate_urgency(
         self,
         current: float,
         config: SensorThresholds,
         days_to_warning: Optional[float],
         days_to_critical: Optional[float],
-        trend_direction: TrendDirection
+        trend_direction: TrendDirection,
     ) -> MaintenanceUrgency:
         """Calcular nivel de urgencia basado en valor actual y tendencia"""
-        
+
         # Ya está en zona crítica
         if config.is_higher_bad:
             if current >= config.critical:
@@ -925,7 +950,7 @@ class PredictiveMaintenanceEngine:
                 return MaintenanceUrgency.CRITICAL
             if current <= config.warning:
                 return MaintenanceUrgency.HIGH
-        
+
         # Basado en predicción de días hasta umbral
         if days_to_critical is not None and days_to_critical > 0:
             if days_to_critical <= 3:
@@ -936,39 +961,39 @@ class PredictiveMaintenanceEngine:
                 return MaintenanceUrgency.MEDIUM
             if days_to_critical <= 90:
                 return MaintenanceUrgency.LOW
-        
+
         if days_to_warning is not None and days_to_warning > 0:
             if days_to_warning <= 7:
                 return MaintenanceUrgency.MEDIUM
             if days_to_warning <= 30:
                 return MaintenanceUrgency.LOW
-        
+
         # Degradando pero lejos de umbral
         if trend_direction == TrendDirection.DEGRADING:
             return MaintenanceUrgency.LOW
-        
+
         return MaintenanceUrgency.NONE
-    
+
     def analyze_truck(self, truck_id: str) -> List[MaintenancePrediction]:
         """
         Analizar todos los sensores de un camión.
-        
+
         Args:
             truck_id: Truck to analyze
-            
+
         Returns:
             List of predictions sorted by urgency
         """
         predictions = []
-        
+
         if truck_id not in self.histories:
             return predictions
-        
+
         for sensor_name in self.histories[truck_id].keys():
             pred = self.analyze_sensor(truck_id, sensor_name)
             if pred and pred.urgency != MaintenanceUrgency.NONE:
                 predictions.append(pred)
-        
+
         # Ordenar por urgencia
         urgency_order = {
             MaintenanceUrgency.CRITICAL: 0,
@@ -977,49 +1002,51 @@ class PredictiveMaintenanceEngine:
             MaintenanceUrgency.LOW: 3,
         }
         predictions.sort(key=lambda p: urgency_order.get(p.urgency, 99))
-        
+
         # Cache predictions
         self.active_predictions[truck_id] = predictions
         self.last_analysis[truck_id] = datetime.now(timezone.utc)
-        
+
         return predictions
-    
+
     def analyze_fleet(self) -> Dict[str, List[MaintenancePrediction]]:
         """
         Analizar toda la flota.
-        
+
         Returns:
             Dict mapping truck_id to list of predictions
         """
         all_predictions = {}
-        
+
         for truck_id in self.histories.keys():
             preds = self.analyze_truck(truck_id)
             if preds:
                 all_predictions[truck_id] = preds
-        
+
         return all_predictions
-    
+
     def get_truck_maintenance_status(self, truck_id: str) -> Optional[Dict]:
         """
         Get maintenance status for a specific truck.
-        
+
         Returns dict with predictions and summary for API endpoint.
         """
         predictions = self.analyze_truck(truck_id)
-        
+
         if not predictions and truck_id not in self.histories:
             return None
-        
+
         # Count by urgency
-        critical = len([p for p in predictions if p.urgency == MaintenanceUrgency.CRITICAL])
+        critical = len(
+            [p for p in predictions if p.urgency == MaintenanceUrgency.CRITICAL]
+        )
         high = len([p for p in predictions if p.urgency == MaintenanceUrgency.HIGH])
         medium = len([p for p in predictions if p.urgency == MaintenanceUrgency.MEDIUM])
         low = len([p for p in predictions if p.urgency == MaintenanceUrgency.LOW])
-        
+
         # Get sensor history summary
         sensors_tracked = list(self.histories.get(truck_id, {}).keys())
-        
+
         return {
             "truck_id": truck_id,
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
@@ -1034,53 +1061,57 @@ class PredictiveMaintenanceEngine:
             "predictions": [p.to_dict() for p in predictions],
             "sensors_tracked": sensors_tracked,
         }
-    
+
     def get_fleet_summary(self) -> Dict:
         """
         Resumen de mantenimiento predictivo de la flota.
-        
+
         Returns comprehensive fleet maintenance status.
         """
         all_preds = self.analyze_fleet()
-        
+
         critical_count = 0
         high_count = 0
         medium_count = 0
         low_count = 0
-        
+
         critical_items = []
         high_items = []
-        
+
         for truck_id, preds in all_preds.items():
             for p in preds:
                 if p.urgency == MaintenanceUrgency.CRITICAL:
                     critical_count += 1
-                    critical_items.append({
-                        "truck_id": truck_id,
-                        "component": p.component,
-                        "sensor": p.sensor_name,
-                        "current_value": f"{p.current_value:.1f} {p.unit}",
-                        "days_to_critical": p.days_to_critical,
-                        "action": p.recommended_action,
-                        "cost_if_fail": p.estimated_cost_if_fail,
-                    })
+                    critical_items.append(
+                        {
+                            "truck_id": truck_id,
+                            "component": p.component,
+                            "sensor": p.sensor_name,
+                            "current_value": f"{p.current_value:.1f} {p.unit}",
+                            "days_to_critical": p.days_to_critical,
+                            "action": p.recommended_action,
+                            "cost_if_fail": p.estimated_cost_if_fail,
+                        }
+                    )
                 elif p.urgency == MaintenanceUrgency.HIGH:
                     high_count += 1
-                    high_items.append({
-                        "truck_id": truck_id,
-                        "component": p.component,
-                        "sensor": p.sensor_name,
-                        "days_to_critical": p.days_to_critical,
-                    })
+                    high_items.append(
+                        {
+                            "truck_id": truck_id,
+                            "component": p.component,
+                            "sensor": p.sensor_name,
+                            "days_to_critical": p.days_to_critical,
+                        }
+                    )
                 elif p.urgency == MaintenanceUrgency.MEDIUM:
                     medium_count += 1
                 elif p.urgency == MaintenanceUrgency.LOW:
                     low_count += 1
-        
+
         # Sort critical by urgency (days to critical)
         critical_items.sort(key=lambda x: x.get("days_to_critical") or 999)
         high_items.sort(key=lambda x: x.get("days_to_critical") or 999)
-        
+
         return {
             "analyzed_at": datetime.now(timezone.utc).isoformat(),
             "summary": {
@@ -1095,21 +1126,22 @@ class PredictiveMaintenanceEngine:
             "high_priority_items": high_items[:10],  # Top 10
             "recommendations": self._generate_fleet_recommendations(all_preds),
         }
-    
+
     def _generate_fleet_recommendations(
-        self, 
-        all_preds: Dict[str, List[MaintenancePrediction]]
+        self, all_preds: Dict[str, List[MaintenancePrediction]]
     ) -> List[str]:
         """Generar recomendaciones a nivel flota"""
         recommendations = []
-        
+
         # Contar problemas por componente
         component_issues: Dict[str, int] = {}
         for truck_preds in all_preds.values():
             for p in truck_preds:
                 if p.urgency in [MaintenanceUrgency.CRITICAL, MaintenanceUrgency.HIGH]:
-                    component_issues[p.component] = component_issues.get(p.component, 0) + 1
-        
+                    component_issues[p.component] = (
+                        component_issues.get(p.component, 0) + 1
+                    )
+
         # Identificar problemas sistémicos (múltiples camiones con mismo problema)
         for component, count in component_issues.items():
             if count >= 3:
@@ -1117,22 +1149,24 @@ class PredictiveMaintenanceEngine:
                     f"⚠️ {count} camiones con problemas en {component} - "
                     f"Considerar revisión de flota o problema sistémico"
                 )
-        
+
         # Recomendaciones de programación
         critical_trucks = [
-            tid for tid, preds in all_preds.items() 
+            tid
+            for tid, preds in all_preds.items()
             if any(p.urgency == MaintenanceUrgency.CRITICAL for p in preds)
         ]
         if critical_trucks:
-            trucks_str = ', '.join(critical_trucks[:5])
+            trucks_str = ", ".join(critical_trucks[:5])
             if len(critical_trucks) > 5:
                 trucks_str += f" (+{len(critical_trucks) - 5} más)"
             recommendations.append(
                 f"🔴 {len(critical_trucks)} camión(es) requieren atención inmediata: {trucks_str}"
             )
-        
+
         high_trucks = [
-            tid for tid, preds in all_preds.items() 
+            tid
+            for tid, preds in all_preds.items()
             if any(p.urgency == MaintenanceUrgency.HIGH for p in preds)
             and tid not in critical_trucks
         ]
@@ -1140,59 +1174,69 @@ class PredictiveMaintenanceEngine:
             recommendations.append(
                 f"🟠 {len(high_trucks)} camión(es) necesitan servicio esta semana"
             )
-        
+
         if not recommendations:
-            recommendations.append("✅ Flota en buen estado - continuar monitoreo normal")
-        
+            recommendations.append(
+                "✅ Flota en buen estado - continuar monitoreo normal"
+            )
+
         return recommendations
-    
+
     def get_maintenance_alerts(self, truck_id: str) -> List[Dict]:
         """
         Get active maintenance alerts for a truck.
-        
+
         Returns list of alert dictionaries for API.
         """
         predictions = self.analyze_truck(truck_id)
-        
+
         alerts = []
         for p in predictions:
             if p.urgency in [MaintenanceUrgency.CRITICAL, MaintenanceUrgency.HIGH]:
-                alerts.append({
-                    "truck_id": truck_id,
-                    "urgency": p.urgency.value,
-                    "component": p.component,
-                    "sensor": p.sensor_name,
-                    "message": p.to_alert_message(),
-                    "current_value": f"{p.current_value:.1f} {p.unit}",
-                    "trend": f"{p.trend_per_day:+.2f} {p.unit}/día" if p.trend_per_day else None,
-                    "days_to_critical": round(p.days_to_critical, 1) if p.days_to_critical else None,
-                    "action": p.recommended_action,
-                    "cost_if_fail": p.estimated_cost_if_fail,
-                })
-        
+                alerts.append(
+                    {
+                        "truck_id": truck_id,
+                        "urgency": p.urgency.value,
+                        "component": p.component,
+                        "sensor": p.sensor_name,
+                        "message": p.to_alert_message(),
+                        "current_value": f"{p.current_value:.1f} {p.unit}",
+                        "trend": (
+                            f"{p.trend_per_day:+.2f} {p.unit}/día"
+                            if p.trend_per_day
+                            else None
+                        ),
+                        "days_to_critical": (
+                            round(p.days_to_critical, 1) if p.days_to_critical else None
+                        ),
+                        "action": p.recommended_action,
+                        "cost_if_fail": p.estimated_cost_if_fail,
+                    }
+                )
+
         return alerts
-    
+
     def get_sensor_trend(self, truck_id: str, sensor_name: str) -> Optional[Dict]:
         """
         Get detailed trend data for a specific sensor.
-        
+
         Returns trend information and historical data for visualization.
         """
         if truck_id not in self.histories:
             return None
         if sensor_name not in self.histories[truck_id]:
             return None
-        
+
         history = self.histories[truck_id][sensor_name]
         config = SENSOR_THRESHOLDS.get(sensor_name)
-        
+
         if not config:
             return None
-        
+
         daily = history.get_daily_averages()
         trend = history.calculate_trend()
         current = history.get_current_value()
-        
+
         return {
             "truck_id": truck_id,
             "sensor_name": sensor_name,
@@ -1211,16 +1255,16 @@ class PredictiveMaintenanceEngine:
             ],
             "readings_count": history.get_readings_count(),
         }
-    
+
     def save(self):
         """Persist current state to disk"""
         self._save_state()
-    
+
     def get_storage_info(self) -> Dict[str, Any]:
         """Get information about storage backend"""
         total_readings = sum(
-            h.get_readings_count() 
-            for sensors in self.histories.values() 
+            h.get_readings_count()
+            for sensors in self.histories.values()
             for h in sensors.values()
         )
         return {
@@ -1233,7 +1277,7 @@ class PredictiveMaintenanceEngine:
             "total_readings_in_memory": total_readings,
             "json_file": str(self.STATE_FILE),
         }
-    
+
     def flush(self):
         """Force flush pending MySQL writes"""
         if self._use_mysql:
@@ -1262,86 +1306,94 @@ def get_predictive_maintenance_engine() -> PredictiveMaintenanceEngine:
 
 if __name__ == "__main__":
     import random
-    
+
     logging.basicConfig(level=logging.INFO)
-    
+
     print("\n" + "=" * 80)
     print("🔮 PREDICTIVE MAINTENANCE ENGINE v1.0.0 - TEST")
     print("=" * 80)
-    
+
     engine = get_predictive_maintenance_engine()
-    
+
     # Simular datos históricos (14 días)
     trucks = ["FM3679", "CO0681", "JB8004"]
-    
+
     print("\n📊 Simulando 14 días de datos para 3 camiones...")
-    
+
     for truck in trucks:
         for day in range(14):
-            ts = datetime.now(timezone.utc) - timedelta(days=14-day)
-            
+            ts = datetime.now(timezone.utc) - timedelta(days=14 - day)
+
             # Trans temp subiendo gradualmente (PROBLEMA)
             trans_temp = 175 + (day * 2.5) + random.uniform(-3, 3)
-            
+
             # Oil pressure bajando gradualmente (PROBLEMA)
             oil_pressure = 35 - (day * 0.6) + random.uniform(-2, 2)
-            
+
             # Coolant estable (OK)
             coolant = 195 + random.uniform(-5, 5)
-            
+
             # DEF bajando (necesita llenar)
             def_level = max(5, 80 - day * 5)
-            
-            engine.process_sensor_batch(truck, {
-                "trans_temp": trans_temp,
-                "oil_pressure": oil_pressure,
-                "coolant_temp": coolant,
-                "battery_voltage": 14.1 + random.uniform(-0.3, 0.3),
-                "def_level": def_level,
-            }, ts)
-    
+
+            engine.process_sensor_batch(
+                truck,
+                {
+                    "trans_temp": trans_temp,
+                    "oil_pressure": oil_pressure,
+                    "coolant_temp": coolant,
+                    "battery_voltage": 14.1 + random.uniform(-0.3, 0.3),
+                    "def_level": def_level,
+                },
+                ts,
+            )
+
     # Analizar flota
     print("\n" + "=" * 80)
     print("🔧 ANÁLISIS DE MANTENIMIENTO PREDICTIVO")
     print("=" * 80)
-    
+
     summary = engine.get_fleet_summary()
-    
+
     print(f"\n📊 RESUMEN DE FLOTA:")
     print(f"   Camiones analizados: {summary['summary']['trucks_analyzed']}")
     print(f"   🔴 Críticos: {summary['summary']['critical']}")
     print(f"   🟠 Alta prioridad: {summary['summary']['high']}")
     print(f"   🟡 Media prioridad: {summary['summary']['medium']}")
     print(f"   🟢 Baja prioridad: {summary['summary']['low']}")
-    
-    if summary['critical_items']:
+
+    if summary["critical_items"]:
         print(f"\n🚨 ITEMS CRÍTICOS:")
-        for item in summary['critical_items'][:5]:
-            days = item.get('days_to_critical')
+        for item in summary["critical_items"][:5]:
+            days = item.get("days_to_critical")
             days_str = f"~{int(days)} días" if days else "inmediato"
-            print(f"   • {item['truck_id']} - {item['component']}: {item['current_value']}")
+            print(
+                f"   • {item['truck_id']} - {item['component']}: {item['current_value']}"
+            )
             print(f"     Llegará a crítico en {days_str}")
             print(f"     Costo si falla: {item['cost_if_fail']}")
-    
-    if summary['recommendations']:
+
+    if summary["recommendations"]:
         print(f"\n💡 RECOMENDACIONES:")
-        for rec in summary['recommendations']:
+        for rec in summary["recommendations"]:
             print(f"   {rec}")
-    
+
     # Mostrar detalle de un camión
     print("\n" + "=" * 80)
     print("🚛 DETALLE: FM3679")
     print("=" * 80)
-    
+
     truck_status = engine.get_truck_maintenance_status("FM3679")
     if truck_status:
-        for pred in truck_status['predictions'][:3]:
+        for pred in truck_status["predictions"][:3]:
             print(f"\n   📍 {pred['component']} ({pred['sensor_name']})")
             print(f"      Valor: {pred['current_value']} {pred['unit']}")
-            if pred['trend_per_day']:
-                direction = "↑" if pred['trend_per_day'] > 0 else "↓"
-                print(f"      Tendencia: {direction} {abs(pred['trend_per_day']):.2f} {pred['unit']}/día")
-            if pred['days_to_critical']:
+            if pred["trend_per_day"]:
+                direction = "↑" if pred["trend_per_day"] > 0 else "↓"
+                print(
+                    f"      Tendencia: {direction} {abs(pred['trend_per_day']):.2f} {pred['unit']}/día"
+                )
+            if pred["days_to_critical"]:
                 print(f"      Días hasta crítico: ~{int(pred['days_to_critical'])}")
             print(f"      Urgencia: {pred['urgency']}")
             print(f"      Acción: {pred['recommended_action']}")
