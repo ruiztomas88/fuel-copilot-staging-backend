@@ -62,6 +62,15 @@ from .mpg_baseline_router import router as mpg_baseline_router
 # 🆕 v5.8.3: Alerts router (diagnostics, predictive)
 from .alerts_router import router as alerts_router
 
+# 🆕 v5.11.0: API v2 router (predictive maintenance endpoints)
+try:
+    from api_v2 import router as api_v2_router
+
+    API_V2_AVAILABLE = True
+except ImportError:
+    API_V2_AVAILABLE = False
+    api_v2_router = None
+
 __all__ = [
     "ml_intelligence_router",
     "auth_router",
@@ -135,6 +144,19 @@ def include_all_routers(app, auth_dependency=None):
 
     # 🆕 v5.7.6: MPG Baseline router
     app.include_router(mpg_baseline_router)  # /mpg-baseline/* (5 endpoints)
+
+    # 🆕 v5.11.0: API v2 router (predictive maintenance)
+    if API_V2_AVAILABLE and api_v2_router:
+        app.include_router(
+            api_v2_router,
+            prefix="/fuelAnalytics/api/v2",
+            tags=["API v2 - Predictive Maintenance"],
+        )
+        import logging
+
+        logging.getLogger(__name__).info(
+            "✅ Registered api_v2 router at /fuelAnalytics/api/v2"
+        )
 
     # NOTE: alerts_router NOT included here because /alerts and /alerts/predictive
     # already exist in main.py. Only /alerts/diagnostics is missing - adding it separately.
