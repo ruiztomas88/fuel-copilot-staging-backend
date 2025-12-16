@@ -1270,9 +1270,9 @@ class FleetCommandCenter:
             generated_at=datetime.now(timezone.utc).isoformat(),
             fleet_health=fleet_health,
             total_trucks=total_trucks,
-            trucks_analyzed=len(
-                set(i.truck_id for i in action_items if i.truck_id != "FLEET")
-            ),
+            # 🔧 FIX v1.0.1: trucks_analyzed should be total_trucks, not just trucks with issues
+            # The Command Center analyzes ALL trucks for potential issues
+            trucks_analyzed=total_trucks,
             urgency_summary=urgency,
             sensor_status=sensor_status,
             cost_projection=cost_projection,
