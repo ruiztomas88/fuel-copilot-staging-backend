@@ -1348,7 +1348,7 @@ async def get_truck_detail(truck_id: str):
             tanks_path = Path(__file__).parent / "tanks.yaml"
             logger.info(f"[get_truck_detail] Checking tanks.yaml at {tanks_path}")
             if tanks_path.exists():
-                with open(tanks_path, "r") as f:
+                with open(tanks_path, "r", encoding="utf-8") as f:
                     tanks_config = yaml.safe_load(f)
                     trucks = tanks_config.get("trucks", {})
                     if truck_id in trucks:
@@ -1430,7 +1430,7 @@ async def get_truck_detail(truck_id: str):
 
             tanks_path = Path(__file__).parent / "tanks.yaml"
             if tanks_path.exists():
-                with open(tanks_path, "r") as f:
+                with open(tanks_path, "r", encoding="utf-8") as f:
                     tanks_config = yaml.safe_load(f)
                     trucks = tanks_config.get("trucks", {})
                     if truck_id in trucks:

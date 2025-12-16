@@ -528,7 +528,7 @@ def load_unit_mapping() -> Dict[str, int]:
     """Load truck_id → wialon unit_id mapping from tanks.yaml"""
     try:
         tanks_path = os.path.join(os.path.dirname(__file__), "tanks.yaml")
-        with open(tanks_path, "r") as f:
+        with open(tanks_path, "r", encoding="utf-8") as f:
             tanks = yaml.safe_load(f)
 
         mapping = {}

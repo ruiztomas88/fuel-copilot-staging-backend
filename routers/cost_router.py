@@ -73,6 +73,8 @@ async def get_fleet_cost_per_mile(
 
             # 🔧 v6.2.2: Simplified - 4 columns now (removed gallons from SQL)
             # row[0]=truck_id, row[1]=miles, row[2]=engine_hours, row[3]=avg_mpg
+            total_fleet_miles = 0
+            trucks_with_mpg = 0
             for row in rows:
                 try:
                     miles = float(row[1] or 0)
@@ -80,6 +82,10 @@ async def get_fleet_cost_per_mile(
                     avg_mpg = float(row[3] if row[3] is not None else 5.5)
                     if avg_mpg < 3 or avg_mpg > 12:
                         avg_mpg = 5.5
+                    else:
+                        trucks_with_mpg += 1
+
+                    total_fleet_miles += miles
 
                     # Calculate gallons from miles/mpg
                     gallons = miles / avg_mpg if avg_mpg > 0 else 0
@@ -96,6 +102,10 @@ async def get_fleet_cost_per_mile(
                 except Exception as row_err:
                     logger.warning(f"Error processing row {row[0]}: {row_err}")
                     continue
+
+            logger.info(
+                f"Processed {len(trucks_data)} trucks, total_miles={total_fleet_miles:.0f}, trucks_with_valid_mpg={trucks_with_mpg}"
+            )
         except Exception as db_err:
             logger.warning(f"DB query failed, using fallback: {db_err}")
 

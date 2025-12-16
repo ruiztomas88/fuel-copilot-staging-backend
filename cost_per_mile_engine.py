@@ -610,9 +610,22 @@ class CostPerMileEngine:
         total_engine_hours = sum(t.get("engine_hours", 0) for t in trucks_data)
         total_fuel_cost = total_gallons * self.config["fuel_price_per_gallon"]
 
+        logger.info(
+            f"Fleet totals: miles={total_miles:.0f}, gallons={total_gallons:.0f}, "
+            f"engine_hours={total_engine_hours:.0f}, fuel_cost=${total_fuel_cost:.2f}"
+        )
+
         # Calculate fleet average cost per mile
         fleet_breakdown = self.calculate_cost_breakdown(
             total_miles, total_gallons, total_engine_hours
+        )
+
+        logger.info(
+            f"Cost breakdown: fuel_cpm=${fleet_breakdown.fuel_cost_per_mile:.4f}, "
+            f"maint_cpm=${fleet_breakdown.maintenance_cost_per_mile:.4f}, "
+            f"tire_cpm=${fleet_breakdown.tire_cost_per_mile:.4f}, "
+            f"depr_cpm=${fleet_breakdown.depreciation_per_mile:.4f}, "
+            f"total_cpm=${fleet_breakdown.total_cost_per_mile:.4f}"
         )
 
         # Analyze each truck
