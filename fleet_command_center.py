@@ -981,7 +981,7 @@ async def get_command_center_dashboard():
     """
     try:
         cc = get_command_center()
-        data = cc.get_command_center_data()
+        data = cc.generate_command_center_data()
         return {
             "success": True,
             "data": data,
@@ -1009,7 +1009,7 @@ async def get_prioritized_actions(
     """
     try:
         cc = get_command_center()
-        data = cc.get_command_center_data()
+        data = cc.generate_command_center_data()
 
         actions = data.get("action_items", [])
 
@@ -1040,7 +1040,7 @@ async def get_truck_summary(truck_id: str):
     """
     try:
         cc = get_command_center()
-        data = cc.get_command_center_data()
+        data = cc.generate_command_center_data()
 
         # Filter actions for this truck
         all_actions = data.get("action_items", [])
@@ -1079,7 +1079,7 @@ async def get_fleet_insights():
     """
     try:
         cc = get_command_center()
-        data = cc.get_command_center_data()
+        data = cc.generate_command_center_data()
 
         return {
             "success": True,
