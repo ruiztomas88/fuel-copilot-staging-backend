@@ -1245,12 +1245,13 @@ def get_driver_scorecard(days_back: int = 7) -> Dict[str, Any]:
             COUNT(*) as total_records,
             
             -- Distance (use odom_delta_mi sum for accurate mileage)
-            SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 10 THEN odom_delta_mi ELSE 0 END) as total_miles
+            -- 🔧 v6.2.1: Increased delta limit from 10 to 50 miles (trucks at 60mph can do 5mi in 5min intervals)
+            SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 50 THEN odom_delta_mi ELSE 0 END) as total_miles
             
         FROM fuel_metrics
         WHERE timestamp_utc > UTC_TIMESTAMP() - INTERVAL :days_back DAY
         GROUP BY truck_id
-        HAVING total_records > 5 AND total_moving_count > 0
+        HAVING total_records > 5
     """
     )
 
