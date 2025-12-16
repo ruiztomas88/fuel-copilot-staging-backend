@@ -115,7 +115,11 @@ async def get_fleet_cost_per_mile(
                         gallons = miles_from_driving / avg_mpg if avg_mpg > 0 else 0
 
                     # Use calculated miles
-                    miles = miles_from_driving if miles_from_driving > 10 else (gallons * avg_mpg)
+                    miles = (
+                        miles_from_driving
+                        if miles_from_driving > 10
+                        else (gallons * avg_mpg)
+                    )
 
                     if miles < 10 and gallons < 5:
                         continue  # Skip trucks with minimal activity

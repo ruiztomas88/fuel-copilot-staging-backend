@@ -1138,22 +1138,31 @@ class DriverBehaviorEngine:
                         "score": round(score, 1),
                         "grade": grade,
                         "trend": trend,
+                        # 🔧 v6.2.10: Match frontend expected structure
                         "components": {
-                            "hard_accel_events": estimated_accel_events,
-                            "hard_brake_events": estimated_brake_events,
-                            "high_rpm_minutes": round(high_rpm_min, 1),
-                            "overspeed_minutes": round(overspeed_min, 1),
-                            "daily_avg_accel": round(daily_accel, 1),
-                            "daily_avg_brake": round(daily_brake, 1),
+                            "acceleration": round(100 - (daily_accel * 8), 1),
+                            "braking": round(100 - (daily_brake * 6), 1),
+                            "rpm_management": round(100 - (daily_rpm_high * 0.3), 1),
+                            "gear_usage": round(100 - (daily_rpm_high * 0.2), 1),
+                            "speed_control": round(100 - (daily_overspeed * 0.2), 1),
                         },
-                        "fuel_waste": {
-                            "total_gal": round(
+                        "events": {
+                            "hard_accelerations": estimated_accel_events,
+                            "hard_brakes": estimated_brake_events,
+                            "high_rpm_minutes": round(high_rpm_min, 1),
+                            "wrong_gear_minutes": 0,
+                            "overspeeding_minutes": round(overspeed_min, 1),
+                        },
+                        "fuel_impact": {
+                            "total_waste_gallons": round(
                                 waste_accel + waste_brake + waste_rpm + waste_speed, 2
                             ),
-                            "accel_gal": round(waste_accel, 3),
-                            "brake_gal": round(waste_brake, 3),
-                            "rpm_gal": round(waste_rpm, 3),
-                            "speed_gal": round(waste_speed, 3),
+                            "breakdown": {
+                                "accel_gal": round(waste_accel, 3),
+                                "brake_gal": round(waste_brake, 3),
+                                "rpm_gal": round(waste_rpm, 3),
+                                "speed_gal": round(waste_speed, 3),
+                            },
                         },
                         "avg_mpg": round(avg_mpg, 1),
                         "active_days": active_days,
@@ -1174,16 +1183,16 @@ class DriverBehaviorEngine:
             # Score = 100 - penalty based on average events per truck
             n_trucks = len(truck_data) if truck_data else 1
             total_accel_events = sum(
-                t["components"].get("hard_accel_events", 0) for t in truck_data
+                t["events"].get("hard_accelerations", 0) for t in truck_data
             )
             total_brake_events = sum(
-                t["components"].get("hard_brake_events", 0) for t in truck_data
+                t["events"].get("hard_brakes", 0) for t in truck_data
             )
             total_rpm_min = sum(
-                t["components"].get("high_rpm_minutes", 0) for t in truck_data
+                t["events"].get("high_rpm_minutes", 0) for t in truck_data
             )
             total_overspeed_min = sum(
-                t["components"].get("overspeed_minutes", 0) for t in truck_data
+                t["events"].get("overspeeding_minutes", 0) for t in truck_data
             )
 
             # Calculate avg events per truck per day (assuming 7 days period)
