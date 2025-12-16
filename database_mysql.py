@@ -1386,9 +1386,14 @@ def get_driver_scorecard(days_back: int = 7) -> Dict[str, Any]:
                 )
 
             # 🔧 FIX v3.10.3: Filter by activity (records) not miles
-            # Changed from total_miles > 1 to total_records > 50 to include
+            # 🔧 v6.2.8: Lowered threshold from 50 to 10 to include more trucks
+            # Changed from total_miles > 1 to total_records > 10 to include
             # drivers with activity even if odom_delta_mi is null/0
-            drivers = [d for d in drivers if d["metrics"].get("total_records", 0) > 50]
+            before_filter = len(drivers)
+            drivers = [d for d in drivers if d["metrics"].get("total_records", 0) > 10]
+            logger.info(
+                f"[DriverScorecard] Filtered {before_filter} -> {len(drivers)} drivers (threshold: 10 records)"
+            )
 
             # Sort by overall score descending
             drivers.sort(key=lambda x: x["overall_score"], reverse=True)
