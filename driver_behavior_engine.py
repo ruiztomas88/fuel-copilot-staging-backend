@@ -910,6 +910,12 @@ class DriverBehaviorEngine:
             "overspeeding": 0.0,
         }
 
+        # Track total events for behavior scores
+        total_accel_events = 0
+        total_brake_events = 0
+        total_rpm_events = 0
+        total_speed_events = 0
+
         for truck_id, state in self.truck_states.items():
             score = self.calculate_heavy_foot_score(truck_id)
             scores.append(score)
@@ -920,19 +926,47 @@ class DriverBehaviorEngine:
             total_waste["wrong_gear"] += state.fuel_waste_gear
             total_waste["overspeeding"] += state.fuel_waste_speed
 
+            # Count events from score components
+            total_accel_events += score.components.get("hard_accel_events", 0)
+            total_brake_events += score.components.get("hard_brake_events", 0)
+            total_rpm_events += score.components.get("high_rpm_events", 0)
+            total_speed_events += score.components.get("overspeed_events", 0)
+
         # Sort by score (ascending = worst first)
         scores.sort(key=lambda x: x.score)
 
         # Identify biggest issue
         biggest_waste = max(total_waste.items(), key=lambda x: x[1])
 
+        # Calculate behavior scores (similar to database version)
+        n_trucks = len(scores) if scores else 1
+        avg_daily_accel = total_accel_events / n_trucks
+        avg_daily_brake = total_brake_events / n_trucks
+        avg_daily_rpm = total_rpm_events / n_trucks
+        avg_daily_speed = total_speed_events / n_trucks
+
+        behavior_scores = {
+            "acceleration": round(max(0, min(100, 100 - (avg_daily_accel * 8))), 1),
+            "braking": round(max(0, min(100, 100 - (avg_daily_brake * 6))), 1),
+            "rpm_mgmt": round(max(0, min(100, 100 - (avg_daily_rpm * 2))), 1),
+            "gear_usage": round(max(0, min(100, 100 - (avg_daily_rpm * 1.5))), 1),
+            "speed_control": round(max(0, min(100, 100 - (avg_daily_speed * 1))), 1),
+        }
+
+        # Count needs work
+        needs_work_count = len([s for s in scores if s.score < 70])
+
         return {
             "fleet_size": len(scores),
-            "average_score": round(sum(s.score for s in scores) / len(scores), 1),
+            "average_score": (
+                round(sum(s.score for s in scores) / len(scores), 1) if scores else 0
+            ),
             "best_performers": [s.to_dict() for s in scores[-3:]],  # Top 3
             "worst_performers": [s.to_dict() for s in scores[:3]],  # Bottom 3
             "total_fuel_waste_gal": round(sum(total_waste.values()), 2),
             "waste_breakdown": {k: round(v, 3) for k, v in total_waste.items()},
+            "behavior_scores": behavior_scores,  # 🆕 Fleet-wide behavior scores by category
+            "needs_work_count": needs_work_count,  # 🆕 Count of trucks with score < 70
             "biggest_issue": {
                 "category": biggest_waste[0],
                 "gallons": round(biggest_waste[1], 2),
@@ -1090,6 +1124,53 @@ class DriverBehaviorEngine:
                 else 0
             )
 
+            # 🆕 Calculate behavior scores per category (aggregate across fleet)
+            # Score = 100 - penalty based on average events per truck
+            n_trucks = len(truck_data) if truck_data else 1
+            total_accel_events = sum(
+                t["components"].get("hard_accel_events", 0) for t in truck_data
+            )
+            total_brake_events = sum(
+                t["components"].get("hard_brake_events", 0) for t in truck_data
+            )
+            total_rpm_min = sum(
+                t["components"].get("high_rpm_minutes", 0) for t in truck_data
+            )
+            total_overspeed_min = sum(
+                t["components"].get("overspeed_minutes", 0) for t in truck_data
+            )
+
+            # Calculate avg events per truck per day (assuming 7 days period)
+            days = 7
+            avg_daily_accel = (total_accel_events / n_trucks) / days
+            avg_daily_brake = (total_brake_events / n_trucks) / days
+            avg_daily_rpm = (total_rpm_min / n_trucks) / days
+            avg_daily_speed = (total_overspeed_min / n_trucks) / days
+
+            # Score formula: 100 - (events * penalty_factor), capped at min 0
+            # More aggressive scaling to show realistic scores
+            accel_score = max(
+                0, min(100, 100 - (avg_daily_accel * 8))
+            )  # 8 events/day = 36% penalty
+            brake_score = max(
+                0, min(100, 100 - (avg_daily_brake * 6))
+            )  # 6 events/day = 36% penalty
+            rpm_score = max(
+                0, min(100, 100 - (avg_daily_rpm * 2))
+            )  # 20 min/day = 40% penalty
+            gear_score = max(0, min(100, 100 - (avg_daily_rpm * 1.5)))  # Related to RPM
+            speed_score = max(
+                0, min(100, 100 - (avg_daily_speed * 1))
+            )  # 40 min/day = 40% penalty
+
+            behavior_scores = {
+                "acceleration": round(accel_score, 1),
+                "braking": round(brake_score, 1),
+                "rpm_mgmt": round(rpm_score, 1),
+                "gear_usage": round(gear_score, 1),
+                "speed_control": round(speed_score, 1),
+            }
+
             # Identify biggest issue
             biggest_waste = max(total_waste.items(), key=lambda x: x[1])
 
@@ -1097,6 +1178,9 @@ class DriverBehaviorEngine:
             recommendations = self._generate_fleet_recommendations_from_data(
                 truck_data, total_waste, avg_score
             )
+
+            # Count trucks needing work (score < 70)
+            needs_work_count = len([t for t in truck_data if t["score"] < 70])
 
             return {
                 "fleet_size": len(truck_data),
@@ -1107,6 +1191,8 @@ class DriverBehaviorEngine:
                 "worst_performers": truck_data[:3],  # Bottom 3 (lowest scores)
                 "total_fuel_waste_gal": round(sum(total_waste.values()), 2),
                 "waste_breakdown": {k: round(v, 3) for k, v in total_waste.items()},
+                "behavior_scores": behavior_scores,  # 🆕 Fleet-wide behavior scores by category
+                "needs_work_count": needs_work_count,  # 🆕 Count of trucks with score < 70
                 "biggest_issue": {
                     "category": biggest_waste[0],
                     "gallons": round(biggest_waste[1], 2),
