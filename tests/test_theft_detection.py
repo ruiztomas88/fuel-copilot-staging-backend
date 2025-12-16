@@ -311,6 +311,9 @@ class TestDetectFuelTheft:
 
     def test_stopped_theft_moderate_drop(self):
         """Moderate drop (5-10%) while stopped should raise suspicion."""
+        # 🔧 v5.8.2: Use night timestamp to ensure base_confidence (0.6) doesn't get
+        # reduced by business hours factor (0.8) below the 0.5 threshold
+        night_time = datetime(2025, 1, 8, 2, 0, 0, tzinfo=timezone.utc)
         result = detect_fuel_theft(
             sensor_pct=83.0,
             estimated_pct=88.0,
@@ -318,6 +321,7 @@ class TestDetectFuelTheft:
             truck_status="STOPPED",
             time_gap_hours=1.0,
             tank_capacity_gal=200.0,
+            timestamp=night_time,  # Night time increases suspicion
         )
 
         assert result is not None
@@ -729,6 +733,9 @@ class TestDetectFuelTheft:
 
     def test_low_priority_recommendation(self):
         """Confidence 0.5-0.7 should get LOW recommendation."""
+        # 🔧 v5.8.2: Use evening timestamp (factor 1.0) to keep confidence at
+        # exactly base level (0.6) without business hours penalty
+        evening_time = datetime(2025, 1, 8, 19, 0, 0, tzinfo=timezone.utc)  # 7PM
         result = detect_fuel_theft(
             sensor_pct=83.0,
             estimated_pct=88.0,
@@ -736,6 +743,7 @@ class TestDetectFuelTheft:
             truck_status="STOPPED",
             time_gap_hours=2.0,
             tank_capacity_gal=200.0,
+            timestamp=evening_time,  # Evening hours (neutral factor)
         )
 
         assert result is not None

@@ -30,7 +30,6 @@ def sanitize_json(obj: Any) -> Any:
 
 
 @router.get("/cost/per-mile")
-@router.get("/cost/per-mile")
 async def get_fleet_cost_per_mile(
     days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
 ):

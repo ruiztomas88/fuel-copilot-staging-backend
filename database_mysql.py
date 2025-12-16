@@ -1380,12 +1380,15 @@ def get_driver_scorecard(days_back: int = 7) -> Dict[str, Any]:
                             "best_mpg": round(float(row[13] or 0), 2),
                             "worst_mpg": round(float(row[14] or 0), 2),
                             "total_miles": round(float(row[16] or 0), 1),
+                            "total_records": int(row[15] or 0),
                         },
                     }
                 )
 
-            # 🔧 FIX v3.10.2: Filter out drivers with 0 miles (no activity)
-            drivers = [d for d in drivers if d["metrics"]["total_miles"] > 1]
+            # 🔧 FIX v3.10.3: Filter by activity (records) not miles
+            # Changed from total_miles > 1 to total_records > 50 to include
+            # drivers with activity even if odom_delta_mi is null/0
+            drivers = [d for d in drivers if d["metrics"].get("total_records", 0) > 50]
 
             # Sort by overall score descending
             drivers.sort(key=lambda x: x["overall_score"], reverse=True)
