@@ -1032,7 +1032,8 @@ class FleetCommandCenter:
                         "AFTERTREATMENT": IssueCategory.ENGINE,
                         "ELECTRICAL": IssueCategory.ELECTRICAL,
                         "FUEL": IssueCategory.FUEL,
-                        "BRAKE": IssueCategory.BRAKE,
+                        "BRAKE": IssueCategory.BRAKES,
+                        "BRAKES": IssueCategory.BRAKES,
                     }
                     issue_cat = system_category_map.get(
                         (system or "").upper(), IssueCategory.ENGINE
