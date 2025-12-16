@@ -41,6 +41,15 @@ import pymysql
 import yaml
 from sqlalchemy import text
 
+# Import database engine for persistence
+try:
+    from database_pool import get_local_engine
+except ImportError:
+    # Fallback if database_pool not available
+    def get_local_engine():
+        return None
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -187,12 +196,14 @@ class TheftAnalysisResult:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 v4.2.0: THEFT PATTERN ANALYZER - Historical pattern detection
+# 🔧 v4.2.1: Added persistence to DB to survive restarts
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TheftPatternAnalyzer:
     """
     🆕 v4.2.0: Analyzes theft patterns based on historical data.
+    🔧 v4.2.1: Now persists history to database to survive service restarts.
 
     Tracks confirmed/suspected theft events per truck and calculates
     pattern_factor based on:
@@ -202,9 +213,96 @@ class TheftPatternAnalyzer:
     - Recency of previous events
     """
 
+    CACHE_KEY = "theft_pattern_history"
+
     def __init__(self, history_days: int = 90):
         self._theft_history: Dict[str, List[Dict]] = {}
         self.history_days = history_days
+        self._loaded_from_db = False
+
+    def _load_from_db(self):
+        """Load theft history from database on first access."""
+        if self._loaded_from_db:
+            return
+
+        try:
+            engine = get_local_engine()
+            if engine:
+                with engine.connect() as conn:
+                    # Try to load from theft_events table if it exists
+                    result = conn.execute(
+                        text(
+                            """
+                            SELECT truck_id, timestamp, drop_gallons, confidence
+                            FROM theft_events
+                            WHERE timestamp > NOW() - INTERVAL :days DAY
+                            AND classification IN ('ROBO CONFIRMADO', 'ROBO SOSPECHOSO')
+                            ORDER BY truck_id, timestamp
+                        """
+                        ),
+                        {"days": self.history_days},
+                    )
+
+                    for row in result:
+                        truck_id = row[0]
+                        timestamp = row[1]
+                        drop_gal = float(row[2]) if row[2] else 0
+                        confidence = float(row[3]) if row[3] else 70.0
+
+                        if truck_id not in self._theft_history:
+                            self._theft_history[truck_id] = []
+
+                        self._theft_history[truck_id].append(
+                            {
+                                "timestamp": timestamp,
+                                "drop_gal": drop_gal,
+                                "confidence": confidence,
+                                "day_of_week": timestamp.weekday(),
+                                "hour": timestamp.hour,
+                            }
+                        )
+
+                    total_events = sum(len(v) for v in self._theft_history.values())
+                    if total_events > 0:
+                        logger.info(
+                            f"🔄 TheftPatternAnalyzer: Loaded {total_events} events "
+                            f"for {len(self._theft_history)} trucks from DB"
+                        )
+        except Exception as e:
+            # Table might not exist yet - that's OK
+            logger.debug(f"Could not load theft history from DB: {e}")
+
+        self._loaded_from_db = True
+
+    def _persist_event(
+        self, truck_id: str, timestamp: datetime, drop_gal: float, confidence: float
+    ):
+        """Persist a theft event to database."""
+        try:
+            engine = get_local_engine()
+            if engine:
+                with engine.connect() as conn:
+                    # Insert into theft_events table (create if not exists)
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO theft_events 
+                            (truck_id, timestamp, drop_gallons, confidence, classification, created_at)
+                            VALUES (:truck_id, :timestamp, :drop_gal, :confidence, 'ROBO SOSPECHOSO', NOW())
+                            ON DUPLICATE KEY UPDATE confidence = :confidence
+                        """
+                        ),
+                        {
+                            "truck_id": truck_id,
+                            "timestamp": timestamp,
+                            "drop_gal": drop_gal,
+                            "confidence": confidence,
+                        },
+                    )
+                    conn.commit()
+        except Exception as e:
+            # Log but don't fail - in-memory still works
+            logger.debug(f"Could not persist theft event to DB: {e}")
 
     def add_confirmed_theft(
         self,
@@ -214,8 +312,17 @@ class TheftPatternAnalyzer:
         confidence: float,
     ):
         """Record a confirmed or suspected theft event for pattern analysis."""
+        # Ensure we've loaded existing history
+        self._load_from_db()
+
         if truck_id not in self._theft_history:
             self._theft_history[truck_id] = []
+
+        # Check if this event already exists (avoid duplicates)
+        for existing in self._theft_history[truck_id]:
+            if abs((existing["timestamp"] - timestamp).total_seconds()) < 60:
+                # Same event within 1 minute - skip
+                return
 
         self._theft_history[truck_id].append(
             {
@@ -233,6 +340,9 @@ class TheftPatternAnalyzer:
             e for e in self._theft_history[truck_id] if e["timestamp"] > cutoff
         ]
 
+        # 🔧 v4.2.1: Persist to database
+        self._persist_event(truck_id, timestamp, drop_gal, confidence)
+
     def calculate_pattern_factor(
         self,
         truck_id: str,
@@ -244,6 +354,9 @@ class TheftPatternAnalyzer:
         Returns:
             Tuple of (factor, reason_description)
         """
+        # Ensure we've loaded history
+        self._load_from_db()
+
         history = self._theft_history.get(truck_id, [])
 
         if not history:
@@ -294,6 +407,9 @@ class TheftPatternAnalyzer:
 
     def get_truck_risk_profile(self, truck_id: str) -> Dict:
         """Get risk profile summary for a truck."""
+        # Ensure we've loaded history
+        self._load_from_db()
+
         history = self._theft_history.get(truck_id, [])
 
         if not history:
@@ -322,6 +438,14 @@ class TheftPatternAnalyzer:
             "avg_confidence": round(avg_confidence, 1),
             "last_event": history[-1]["timestamp"].isoformat() if history else None,
         }
+
+    def get_all_truck_profiles(self) -> List[Dict]:
+        """Get risk profiles for all trucks with theft history."""
+        self._load_from_db()
+        return [
+            self.get_truck_risk_profile(truck_id)
+            for truck_id in self._theft_history.keys()
+        ]
 
 
 # Global pattern analyzer instance

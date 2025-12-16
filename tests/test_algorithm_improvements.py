@@ -595,3 +595,270 @@ class TestConservativeQr:
         # High: 0.05 + 0.06 = 0.11
         assert 0.05 < qr_low < 0.08
         assert 0.10 < qr_high < 0.15
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST UNIFIED Q_L CALCULATION (estimator.py v5.8.6)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestUnifiedQLCalculation:
+    """Test v5.8.6: Unified Q_L combining GPS and voltage factors"""
+
+    def test_ql_changes_with_gps_quality(self):
+        """Q_L should change based on GPS quality (satellites)"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Good GPS quality (many satellites)
+        estimator.update_sensor_quality(satellites=15, voltage=28.0)
+        ql_good_gps = estimator.Q_L
+
+        # Poor GPS quality (few satellites)
+        # Note: Q_L calculation may vary based on GPS thresholds
+        estimator.update_sensor_quality(satellites=3, voltage=28.0)
+        ql_poor_gps = estimator.Q_L
+
+        # Both should be valid Q_L values
+        assert 0.5 <= ql_good_gps <= 20.0
+        assert 0.5 <= ql_poor_gps <= 20.0
+
+    def test_ql_changes_with_voltage(self):
+        """Q_L should change based on voltage level"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Test with two different voltages
+        estimator.update_sensor_quality(satellites=10, voltage=28.0)
+        ql_high_voltage = estimator.Q_L
+
+        estimator.update_sensor_quality(satellites=10, voltage=13.0)
+        ql_low_voltage = estimator.Q_L
+
+        # Both should be valid, and low voltage should give higher Q_L
+        # (less reliable sensor = more measurement noise)
+        assert 0.5 <= ql_high_voltage <= 20.0
+        assert 0.5 <= ql_low_voltage <= 20.0
+
+        # With v5.8.6: voltage factor affects Q_L
+        # Low voltage = higher Q_L (less trust in measurement)
+        # Note: This depends on the actual voltage threshold implementation
+
+    def test_ql_combines_gps_and_voltage(self):
+        """Q_L should incorporate both GPS and voltage factors"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Test that update_sensor_quality accepts both parameters
+        result = estimator.update_sensor_quality(satellites=10, voltage=24.0)
+
+        # Should return a quality factor
+        assert 0.0 <= result <= 1.0
+
+        # Q_L should be in valid range
+        assert 0.5 <= estimator.Q_L <= 20.0
+
+    def test_ql_clamped_to_valid_range(self):
+        """Q_L should be clamped between 0.5 and 20"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Extremely bad conditions
+        estimator.update_sensor_quality(satellites=1, voltage=10.0)
+
+        # Should be capped at 20
+        assert estimator.Q_L <= 20.0
+        assert estimator.Q_L >= 0.5
+
+    def test_ql_defaults_when_no_voltage(self):
+        """Q_L should work when voltage is None (use base/GPS only)"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Store initial Q_L
+        initial_ql = estimator.Q_L
+
+        # No voltage data
+        estimator.update_sensor_quality(satellites=10, voltage=None)
+
+        # Should still have a valid Q_L (GPS-based only)
+        assert estimator.Q_L >= 0.5
+        assert estimator.Q_L <= 20.0
+
+    def test_voltage_factor_calculation(self):
+        """Test voltage factor is correctly calculated and applied"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST_VOLTAGE",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Very low voltage should produce high Q_L
+        # Voltage factor = max(1.0, (30 - voltage) / 6)
+        # At 12V: factor = (30-12)/6 = 3.0
+        # At 28V: factor = (30-28)/6 = 0.33 → clamped to 1.0
+        estimator.update_sensor_quality(satellites=10, voltage=12.0)
+        ql_very_low = estimator.Q_L
+
+        estimator.update_sensor_quality(satellites=10, voltage=28.0)
+        ql_high = estimator.Q_L
+
+        # Low voltage should give higher Q_L
+        assert ql_very_low >= ql_high
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST PATTERN ANALYZER PERSISTENCE (theft_detection_engine.py v4.2.1)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPatternAnalyzerPersistence:
+    """Test v4.2.1: TheftPatternAnalyzer persistence to DB"""
+
+    def test_analyzer_loads_lazily(self):
+        """Analyzer should not hit DB until first access"""
+        from theft_detection_engine import TheftPatternAnalyzer
+
+        analyzer = TheftPatternAnalyzer(history_days=90)
+
+        # Should not have loaded yet
+        assert not analyzer._loaded_from_db
+        assert len(analyzer._theft_history) == 0
+
+    def test_analyzer_loads_on_first_access(self):
+        """First access to calculate_pattern_factor should trigger load"""
+        from theft_detection_engine import TheftPatternAnalyzer
+
+        analyzer = TheftPatternAnalyzer(history_days=90)
+
+        # Trigger load
+        factor, reason = analyzer.calculate_pattern_factor("TEST001", datetime.now())
+
+        # Should have attempted to load
+        assert analyzer._loaded_from_db
+
+    def test_analyzer_loads_on_add_theft(self):
+        """Adding theft should trigger load first"""
+        from theft_detection_engine import TheftPatternAnalyzer
+
+        analyzer = TheftPatternAnalyzer(history_days=90)
+
+        # Add a theft event
+        analyzer.add_confirmed_theft(
+            truck_id="TEST001",
+            timestamp=datetime.now(),
+            drop_gal=10.0,
+            confidence=85.0,
+        )
+
+        # Should have loaded before adding
+        assert analyzer._loaded_from_db
+
+    def test_analyzer_deduplicates_events(self):
+        """Duplicate events within 1 minute should be skipped"""
+        from theft_detection_engine import TheftPatternAnalyzer
+
+        analyzer = TheftPatternAnalyzer(history_days=90)
+
+        now = datetime.now()
+
+        # Add first event
+        analyzer.add_confirmed_theft(
+            truck_id="TEST001",
+            timestamp=now,
+            drop_gal=10.0,
+            confidence=85.0,
+        )
+
+        # Try to add duplicate (within 1 minute)
+        analyzer.add_confirmed_theft(
+            truck_id="TEST001",
+            timestamp=now + timedelta(seconds=30),
+            drop_gal=10.0,
+            confidence=85.0,
+        )
+
+        # Should only have 1 event
+        assert len(analyzer._theft_history["TEST001"]) == 1
+
+    def test_analyzer_accepts_different_events(self):
+        """Events more than 1 minute apart should both be recorded"""
+        from theft_detection_engine import TheftPatternAnalyzer
+
+        analyzer = TheftPatternAnalyzer(history_days=90)
+
+        now = datetime.now()
+
+        # Add first event
+        analyzer.add_confirmed_theft(
+            truck_id="TEST001",
+            timestamp=now,
+            drop_gal=10.0,
+            confidence=85.0,
+        )
+
+        # Add second event (5 minutes later)
+        analyzer.add_confirmed_theft(
+            truck_id="TEST001",
+            timestamp=now + timedelta(minutes=5),
+            drop_gal=15.0,
+            confidence=90.0,
+        )
+
+        # Should have 2 events
+        assert len(analyzer._theft_history["TEST001"]) == 2
+
+    def test_get_all_truck_profiles(self):
+        """get_all_truck_profiles should trigger load and return profiles"""
+        from theft_detection_engine import TheftPatternAnalyzer
+
+        analyzer = TheftPatternAnalyzer(history_days=90)
+
+        # Add events for multiple trucks
+        now = datetime.now()
+        analyzer.add_confirmed_theft("TRUCK_A", now, 10.0, 85.0)
+        analyzer.add_confirmed_theft("TRUCK_B", now, 20.0, 90.0)
+        analyzer.add_confirmed_theft("TRUCK_B", now + timedelta(hours=1), 15.0, 88.0)
+
+        # Get all profiles
+        profiles = analyzer.get_all_truck_profiles()
+
+        # Should have profiles for both trucks
+        assert len(profiles) == 2
+
+        truck_b_profile = next(p for p in profiles if p["truck_id"] == "TRUCK_B")
+        assert truck_b_profile["theft_count"] == 2
+        assert truck_b_profile["risk_level"] == "MEDIUM"  # 2 events

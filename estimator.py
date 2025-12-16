@@ -14,9 +14,10 @@ Kalman Filter for Fuel Level Estimation with:
 - 🔧 v5.8.5: More conservative Q_r for PARKED/IDLE states
 - 🔧 v5.8.5: Auto-resync cooldown (30 min) to prevent oscillation
 - 🔧 v5.8.5: Innovation-based K adjustment for faster correction
+- 🔧 v5.8.6: Unified Q_L calculation (GPS + Voltage combined)
 
 Author: Fuel Copilot Team
-Version: 5.8.5
+Version: 5.8.6
 Date: December 2025
 """
 
@@ -400,10 +401,14 @@ class FuelEstimator:
     ) -> float:
         """
         🆕 v5.4.0: Update Q_L based on GPS and voltage quality.
+        🔧 v5.8.6: Unified - Q_L now reflects BOTH GPS and voltage factors.
 
         This provides adaptive measurement noise based on sensor reliability:
-        - Poor GPS (few satellites) → more smoothing → lower Q_L
-        - Poor voltage → sensor readings less reliable → adjusted confidence
+        - Poor GPS (few satellites) → increase Q_L (less trust in measurement)
+        - Poor voltage → increase Q_L (sensor readings less reliable)
+
+        The combined effect means worse sensor conditions = higher Q_L =
+        Kalman filter trusts predictions more than measurements.
 
         Call this before update() to adapt measurement noise.
 
@@ -418,7 +423,10 @@ class FuelEstimator:
         gps_factor = 1.0
         voltage_factor = 1.0
 
-        # GPS Quality adaptive Q_L
+        # Start with base Q_L (moving or static based on current state)
+        base_Q_L = self.Q_L_moving if self.is_moving else self.Q_L_static
+
+        # GPS Quality factor
         if (
             satellites is not None
             and GPS_QUALITY_AVAILABLE
@@ -428,16 +436,16 @@ class FuelEstimator:
                 self.truck_id,
                 satellites,
             )
-            self.Q_L = adaptive_Q_L
+            # Calculate GPS factor relative to base
+            gps_factor = adaptive_Q_L / base_Q_L if base_Q_L > 0 else 1.0
 
             # Store quality info
             gps_result = analyze_gps_quality(satellites, self.truck_id)
             self.last_gps_quality = gps_result.to_dict()
-            gps_factor = gps_result.q_l_factor
 
             logger.debug(
                 f"[{self.truck_id}] GPS Quality: {gps_result.quality.value} "
-                f"({satellites} sats) → Q_L={adaptive_Q_L:.4f}"
+                f"({satellites} sats) → factor={gps_factor:.2f}"
             )
 
         # Voltage Quality factor
@@ -445,14 +453,33 @@ class FuelEstimator:
             voltage_factor = get_voltage_quality_factor(voltage, is_engine_running)
             self.last_voltage_quality = voltage_factor
 
+            # Invert: low voltage quality means HIGHER Q_L (less trust)
+            # voltage_factor 0.7 → Q_L multiplier 1.43 (1/0.7)
+            voltage_q_multiplier = 1.0 / max(voltage_factor, 0.5)
+
             if voltage_factor < 0.9:
                 logger.debug(
                     f"[{self.truck_id}] Voltage quality degraded: {voltage:.1f}V "
-                    f"→ factor={voltage_factor:.2f}"
+                    f"→ factor={voltage_factor:.2f}, Q_L mult={voltage_q_multiplier:.2f}"
                 )
+        else:
+            voltage_q_multiplier = 1.0
 
-        # Combined quality factor (multiply both)
-        self.sensor_quality_factor = gps_factor * voltage_factor
+        # 🔧 v5.8.6: UNIFIED Q_L calculation
+        # Combined Q_L = base * gps_factor * voltage_multiplier
+        # Higher Q_L = less trust in measurement = more smoothing
+        combined_Q_L = base_Q_L * gps_factor * voltage_q_multiplier
+
+        # Clamp to reasonable bounds
+        self.Q_L = max(0.5, min(combined_Q_L, 20.0))
+
+        # Combined quality factor for reporting (0.5-1.0, higher = better)
+        self.sensor_quality_factor = min(1.0, 1.0 / (gps_factor * voltage_q_multiplier))
+
+        logger.debug(
+            f"[{self.truck_id}] Unified Q_L: base={base_Q_L:.2f} × "
+            f"gps={gps_factor:.2f} × volt={voltage_q_multiplier:.2f} = {self.Q_L:.2f}"
+        )
 
         return self.sensor_quality_factor
 
