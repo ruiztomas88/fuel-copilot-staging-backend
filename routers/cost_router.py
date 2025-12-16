@@ -31,14 +31,12 @@ async def get_fleet_cost_per_mile(
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
 
-        # 🔧 v6.2.1: Fixed query - use SUM(odom_delta_mi) instead of MAX-MIN
-        # MAX-MIN odometer gives wildly inflated values if there are gaps or resets
+        # 🔧 v6.2.2: Simplified query - calculate gallons from miles/mpg in Python
+        # to avoid SQL division issues
         query = """
             SELECT 
                 truck_id,
                 SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 100 THEN odom_delta_mi ELSE 0 END) as miles,
-                SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 100 THEN 
-                    odom_delta_mi / NULLIF(mpg_current, 0) ELSE 0 END) as gallons,
                 COUNT(DISTINCT DATE(timestamp_utc)) * 8 as engine_hours,
                 AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg
             FROM fuel_metrics
@@ -53,26 +51,23 @@ async def get_fleet_cost_per_mile(
                 result = conn.execute(text(query), {"days": days})
                 rows = result.fetchall()
 
-            # 🔧 v6.2.1: Updated column indices after adding gallons column
-            # row[0]=truck_id, row[1]=miles, row[2]=gallons, row[3]=engine_hours, row[4]=avg_mpg
+            # 🔧 v6.2.2: Simplified - 4 columns now (removed gallons from SQL)
+            # row[0]=truck_id, row[1]=miles, row[2]=engine_hours, row[3]=avg_mpg
             for row in rows:
                 miles = float(row[1] or 0)
-                gallons = float(row[2] or 0)
-                engine_hours = float(row[3] or 0)
-                avg_mpg = float(row[4] or 5.5)
+                engine_hours = float(row[2] or 0)
+                avg_mpg = float(row[3] or 5.5)
                 if avg_mpg < 3:
                     avg_mpg = 5.5
 
-                # Use calculated gallons if available, otherwise derive from miles/mpg
-                final_gallons = (
-                    gallons if gallons > 0 else (miles / avg_mpg if avg_mpg > 0 else 0)
-                )
+                # Calculate gallons from miles/mpg
+                gallons = miles / avg_mpg if avg_mpg > 0 else 0
 
                 trucks_data.append(
                     {
                         "truck_id": row[0],
                         "miles": miles,
-                        "gallons": final_gallons,
+                        "gallons": gallons,
                         "engine_hours": engine_hours,
                         "avg_mpg": avg_mpg,
                     }
