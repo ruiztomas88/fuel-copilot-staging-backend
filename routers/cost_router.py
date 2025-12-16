@@ -71,7 +71,7 @@ async def get_fleet_cost_per_mile(
             LEFT JOIN (
                 SELECT truck_id, SUM(gallons_added) as total_gallons
                 FROM refuel_events
-                WHERE timestamp >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)
+                WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)
                 GROUP BY truck_id
             ) ref ON fm.truck_id = ref.truck_id
             WHERE fm.timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)
