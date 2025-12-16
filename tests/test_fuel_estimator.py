@@ -679,18 +679,18 @@ class TestAdaptiveQr:
     """Tests for adaptive Q_r calculation"""
 
     def test_parked_low_noise(self):
-        """Parked status should have very low process noise"""
+        """Parked status should have very low process noise (v5.8.5: more conservative)"""
         from estimator import calculate_adaptive_Q_r
 
         Q_r = calculate_adaptive_Q_r("PARKED", 0.0)
-        assert Q_r == 0.01
+        assert Q_r == 0.005  # v5.8.5: reduced from 0.01
 
     def test_stopped_low_noise(self):
-        """Stopped status should have low process noise"""
+        """Stopped status should have low process noise (v5.8.5: more conservative)"""
         from estimator import calculate_adaptive_Q_r
 
         Q_r = calculate_adaptive_Q_r("STOPPED", 0.0)
-        assert Q_r == 0.05
+        assert Q_r == 0.02  # v5.8.5: reduced from 0.05
 
     def test_idle_scales_with_consumption(self):
         """Idle noise should scale with consumption"""
@@ -850,28 +850,28 @@ class TestUpdateAdaptiveQr:
     """Tests for update_adaptive_Q_r method"""
 
     def test_parked_status(self):
-        """Parked truck should have low Q_r"""
+        """Parked truck should have low Q_r (v5.8.5: more conservative)"""
         est = make_estimator(50.0)
 
         est.update_adaptive_Q_r(speed=0, rpm=0)
 
-        assert est.Q_r == 0.01
+        assert est.Q_r == 0.005  # v5.8.5: reduced from 0.01
 
     def test_idle_status(self):
-        """Idle truck should have low-medium Q_r"""
+        """Idle truck should have low-medium Q_r (v5.8.5: more conservative)"""
         est = make_estimator(50.0)
 
         est.update_adaptive_Q_r(speed=1, rpm=700)
 
-        assert est.Q_r == 0.05
+        assert est.Q_r == 0.02  # v5.8.5: reduced from 0.05
 
     def test_stopped_status(self):
-        """Stopped (engine on, not moving) should have medium Q_r"""
+        """Stopped (engine on, not moving) should have medium Q_r (v5.8.5: more conservative)"""
         est = make_estimator(50.0)
 
         est.update_adaptive_Q_r(speed=2, rpm=1000)
 
-        assert est.Q_r == 0.05
+        assert est.Q_r == 0.02  # v5.8.5: reduced from 0.05
 
     def test_moving_status(self):
         """Moving truck should have higher Q_r"""
@@ -879,7 +879,8 @@ class TestUpdateAdaptiveQr:
 
         est.update_adaptive_Q_r(speed=50, rpm=1500, consumption_lph=20.0)
 
-        assert est.Q_r > 0.1
+        # v5.8.5: MOVING uses 0.05 + (consumption/50)*0.1 = 0.05 + 0.04 = 0.09
+        assert est.Q_r >= 0.09  # Adjusted from 0.1
 
     def test_moving_scales_with_consumption(self):
         """Moving Q_r should scale with consumption"""

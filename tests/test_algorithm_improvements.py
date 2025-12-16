@@ -3,7 +3,7 @@ Tests for algorithm improvements v4.2.0 / v5.8.4 / v3.13.0
 
 Tests cover:
 1. Negative consumption handling in estimator.py
-2. MAD-based outlier filtering in mpg_engine.py  
+2. MAD-based outlier filtering in mpg_engine.py
 3. TheftPatternAnalyzer in theft_detection_engine.py
 4. Enhanced get_sensor_health_fast in theft_detection_engine.py
 
@@ -33,20 +33,20 @@ class TestNegativeConsumptionHandling:
             config=COMMON_CONFIG,
         )
         estimator.initialize(fuel_lvl_pct=50.0)
-        
+
         initial_level = estimator.level_liters
-        
+
         # Predict with negative consumption (sensor error) at low speed
         estimator.predict(
             dt_hours=0.5,
             consumption_lph=-5.0,  # Negative = error
             speed_mph=3.0,  # Low speed = idle
         )
-        
+
         # Should have used idle fallback (2.0 LPH)
         expected_consumption = 2.0 * 0.5  # 1 liter
         actual_consumption = initial_level - estimator.level_liters
-        
+
         assert abs(actual_consumption - expected_consumption) < 0.1
 
     def test_negative_consumption_uses_fallback_moving(self):
@@ -59,20 +59,20 @@ class TestNegativeConsumptionHandling:
             config=COMMON_CONFIG,
         )
         estimator.initialize(fuel_lvl_pct=50.0)
-        
+
         initial_level = estimator.level_liters
-        
+
         # Predict with negative consumption at moving speed
         estimator.predict(
             dt_hours=0.5,
             consumption_lph=-10.0,  # Negative = error
             speed_mph=40.0,  # Moving speed = city fallback
         )
-        
+
         # Should have used city fallback (15.0 LPH)
         expected_consumption = 15.0 * 0.5  # 7.5 liters
         actual_consumption = initial_level - estimator.level_liters
-        
+
         assert abs(actual_consumption - expected_consumption) < 0.1
 
     def test_zero_consumption_uses_provided_value(self):
@@ -85,16 +85,16 @@ class TestNegativeConsumptionHandling:
             config=COMMON_CONFIG,
         )
         estimator.initialize(fuel_lvl_pct=50.0)
-        
+
         initial_level = estimator.level_liters
-        
+
         # Predict with zero consumption (parked truck)
         estimator.predict(
             dt_hours=0.5,
             consumption_lph=0.0,
             speed_mph=0.0,
         )
-        
+
         # Should have consumed exactly 0
         actual_consumption = initial_level - estimator.level_liters
         assert abs(actual_consumption) < 0.01
@@ -114,7 +114,7 @@ class TestMADOutlierFilter:
 
         readings = [5.0, 5.2, 15.0]  # 15.0 is clearly an outlier
         filtered = filter_outliers_mad(readings)
-        
+
         assert 15.0 not in filtered
         assert 5.0 in filtered
         assert 5.2 in filtered
@@ -125,7 +125,7 @@ class TestMADOutlierFilter:
 
         readings = [5.0, 5.3, 5.6]
         filtered = filter_outliers_mad(readings)
-        
+
         assert len(filtered) == 3
         assert filtered == readings
 
@@ -135,7 +135,7 @@ class TestMADOutlierFilter:
 
         readings = [5.5]
         filtered = filter_outliers_mad(readings)
-        
+
         assert filtered == readings
 
     def test_mad_filter_two_values_returns_original(self):
@@ -145,7 +145,7 @@ class TestMADOutlierFilter:
         # With only 2 values, hard to determine outlier
         readings = [5.0, 5.5]
         filtered = filter_outliers_mad(readings)
-        
+
         # Should return original for 2 similar values
         assert len(filtered) == 2
 
@@ -155,7 +155,7 @@ class TestMADOutlierFilter:
 
         readings = [5.0, 5.5, 20.0]  # 20.0 is outlier
         filtered = filter_outliers_iqr(readings)
-        
+
         # MAD should filter out 20.0
         assert 20.0 not in filtered
         assert 5.0 in filtered
@@ -178,7 +178,7 @@ class TestTheftPatternAnalyzer:
             "NEW_TRUCK",
             datetime.now(),
         )
-        
+
         assert factor == 0.0
         assert reason == ""
 
@@ -187,7 +187,7 @@ class TestTheftPatternAnalyzer:
         from theft_detection_engine import TheftPatternAnalyzer
 
         analyzer = TheftPatternAnalyzer()
-        
+
         # Add one confirmed theft
         analyzer.add_confirmed_theft(
             truck_id="CO0681",
@@ -195,12 +195,12 @@ class TestTheftPatternAnalyzer:
             drop_gal=30.0,
             confidence=85.0,
         )
-        
+
         factor, reason = analyzer.calculate_pattern_factor(
             "CO0681",
             datetime.now(),
         )
-        
+
         assert factor >= 10.0  # At least +10 for 1 previous theft
         assert "robo previo" in reason.lower()
 
@@ -209,7 +209,7 @@ class TestTheftPatternAnalyzer:
         from theft_detection_engine import TheftPatternAnalyzer
 
         analyzer = TheftPatternAnalyzer()
-        
+
         # Add two confirmed thefts
         analyzer.add_confirmed_theft(
             truck_id="CO0681",
@@ -223,12 +223,12 @@ class TestTheftPatternAnalyzer:
             drop_gal=30.0,
             confidence=85.0,
         )
-        
+
         factor, reason = analyzer.calculate_pattern_factor(
             "CO0681",
             datetime.now(),
         )
-        
+
         assert factor >= 15.0  # +15 for 2+ thefts
         assert "2 robos previos" in reason
 
@@ -237,18 +237,18 @@ class TestTheftPatternAnalyzer:
         from theft_detection_engine import TheftPatternAnalyzer
 
         analyzer = TheftPatternAnalyzer()
-        
+
         # Add thefts on same day of week (Monday)
         monday_1 = datetime(2025, 12, 1, 3, 0)  # Monday 3am
         monday_2 = datetime(2025, 12, 8, 2, 30)  # Monday 2:30am
-        
+
         analyzer.add_confirmed_theft("CO0681", monday_1, 30.0, 85.0)
         analyzer.add_confirmed_theft("CO0681", monday_2, 28.0, 82.0)
-        
+
         # Check pattern on another Monday
         monday_3 = datetime(2025, 12, 15, 3, 15)  # Monday
         factor, reason = analyzer.calculate_pattern_factor("CO0681", monday_3)
-        
+
         # Should have day of week bonus
         assert factor >= 15.0  # 15 (2 thefts) + 5 (same day)
         assert "Lun" in reason or "patrón" in reason.lower()
@@ -258,7 +258,7 @@ class TestTheftPatternAnalyzer:
         from theft_detection_engine import TheftPatternAnalyzer
 
         analyzer = TheftPatternAnalyzer()
-        
+
         # Add very recent theft
         analyzer.add_confirmed_theft(
             truck_id="CO0681",
@@ -266,12 +266,12 @@ class TestTheftPatternAnalyzer:
             drop_gal=30.0,
             confidence=85.0,
         )
-        
+
         factor, reason = analyzer.calculate_pattern_factor(
             "CO0681",
             datetime.now(),
         )
-        
+
         # Should have recent event bonus
         assert factor >= 15.0  # 10 (1 theft) + 5 (recent)
         assert "reciente" in reason.lower()
@@ -281,7 +281,7 @@ class TestTheftPatternAnalyzer:
         from theft_detection_engine import TheftPatternAnalyzer
 
         analyzer = TheftPatternAnalyzer(history_days=30)
-        
+
         # Add very old theft
         analyzer.add_confirmed_theft(
             truck_id="CO0681",
@@ -289,12 +289,12 @@ class TestTheftPatternAnalyzer:
             drop_gal=30.0,
             confidence=85.0,
         )
-        
+
         factor, reason = analyzer.calculate_pattern_factor(
             "CO0681",
             datetime.now(),
         )
-        
+
         # Old event should be pruned, factor = 0
         assert factor == 0.0
 
@@ -303,13 +303,17 @@ class TestTheftPatternAnalyzer:
         from theft_detection_engine import TheftPatternAnalyzer
 
         analyzer = TheftPatternAnalyzer()
-        
+
         # Add thefts
-        analyzer.add_confirmed_theft("CO0681", datetime.now() - timedelta(days=5), 30.0, 85.0)
-        analyzer.add_confirmed_theft("CO0681", datetime.now() - timedelta(days=10), 25.0, 80.0)
-        
+        analyzer.add_confirmed_theft(
+            "CO0681", datetime.now() - timedelta(days=5), 30.0, 85.0
+        )
+        analyzer.add_confirmed_theft(
+            "CO0681", datetime.now() - timedelta(days=10), 25.0, 80.0
+        )
+
         profile = analyzer.get_truck_risk_profile("CO0681")
-        
+
         assert profile["truck_id"] == "CO0681"
         assert profile["theft_count"] == 2
         assert profile["total_loss_gal"] == 55.0
@@ -332,7 +336,7 @@ class TestEnhancedSensorHealth:
             fuel_before_pct=75.0,
             fuel_after_pct=3.0,
         )
-        
+
         assert health.is_connected is False
         assert health.volatility_score == 100.0
 
@@ -346,7 +350,7 @@ class TestEnhancedSensorHealth:
             drop_pct=30.0,
             time_gap_minutes=3.0,  # 30% in 3 minutes = physically impossible
         )
-        
+
         assert health.is_connected is True
         assert health.volatility_score >= 45.0  # Should be high
 
@@ -360,7 +364,7 @@ class TestEnhancedSensorHealth:
             drop_pct=10.0,
             time_gap_minutes=60.0,  # 10% in 60 min = reasonable
         )
-        
+
         assert health.is_connected is True
         assert health.volatility_score <= 20.0
 
@@ -375,7 +379,7 @@ class TestEnhancedSensorHealth:
             drop_pct=50.0,
             time_gap_minutes=30.0,
         )
-        
+
         assert health.volatility_score >= 35.0
 
     def test_drop_to_round_number_suspicious(self):
@@ -388,7 +392,7 @@ class TestEnhancedSensorHealth:
             drop_pct=23.0,
             time_gap_minutes=30.0,
         )
-        
+
         assert health.volatility_score >= 20.0
 
     def test_normal_drop_low_volatility(self):
@@ -401,6 +405,193 @@ class TestEnhancedSensorHealth:
             drop_pct=12.0,
             time_gap_minutes=45.0,
         )
-        
+
         assert health.is_connected is True
         assert health.volatility_score <= 10.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST KALMAN FILTER IMPROVEMENTS v5.8.5
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestKalmanAutoResyncCooldown:
+    """Test v5.8.5: Auto-resync cooldown prevents oscillation"""
+
+    def test_first_resync_happens_immediately(self):
+        """First resync should happen without cooldown"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Force high drift (>15% triggers resync)
+        estimator.L = 0.80 * 800  # 80% in liters
+        estimator.level_pct = 80.0
+
+        # Auto-resync should happen (sensor at 50%, estimate at 80%)
+        estimator.auto_resync(sensor_pct=50.0)
+
+        # Check that resync time was recorded
+        assert hasattr(estimator, "_last_resync_time")
+        assert estimator._last_resync_time is not None
+
+    def test_second_resync_blocked_by_cooldown(self):
+        """Second resync within 30 minutes should be blocked"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+        from datetime import datetime, timezone
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # First resync
+        estimator.L = 0.80 * 800
+        estimator.level_pct = 80.0
+        estimator.auto_resync(sensor_pct=50.0)
+
+        # After resync, level should be ~50%
+        level_after_first = estimator.level_pct
+
+        # Force drift again
+        estimator.L = 0.85 * 800
+        estimator.level_pct = 85.0
+
+        # Second attempt (should be blocked by cooldown)
+        estimator.auto_resync(sensor_pct=50.0)
+
+        # Level should NOT have resynced (still at 85%)
+        assert estimator.level_pct == 85.0
+
+    def test_resync_allowed_after_cooldown(self):
+        """Resync should be allowed after 30 minute cooldown"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+        from datetime import datetime, timezone, timedelta
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # First resync
+        estimator.L = 0.80 * 800
+        estimator.level_pct = 80.0
+        estimator.auto_resync(sensor_pct=50.0)
+
+        # Simulate 31 minutes passing
+        estimator._last_resync_time = datetime.now(timezone.utc) - timedelta(minutes=31)
+
+        # Force drift again
+        estimator.L = 0.85 * 800
+        estimator.level_pct = 85.0
+
+        # Second resync should be allowed after cooldown
+        estimator.auto_resync(sensor_pct=50.0)
+
+        # Level should have resynced to ~50%
+        assert abs(estimator.level_pct - 50.0) < 1.0
+
+
+class TestInnovationBasedKAdjustment:
+    """Test v5.8.5: Innovation-based K adjustment for faster correction"""
+
+    def test_large_innovation_boosts_k_max(self):
+        """Large unexpected change should boost K_max for faster correction"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Simulate several updates to build confidence (low P)
+        for _ in range(10):
+            estimator.update(measured_pct=50.0)
+
+        P_before = estimator.P
+        level_before = estimator.level_pct
+
+        # Large measurement change (like a refuel not yet detected)
+        estimator.update(measured_pct=75.0)
+
+        # With innovation-based K, the correction should be more substantial
+        # than without it (because P was low, K_max would normally be 0.20)
+        correction = estimator.level_pct - level_before
+
+        # Correction should be significant (at least 10% of the 25% difference)
+        assert correction > 2.5
+
+    def test_small_innovation_no_k_boost(self):
+        """Small expected changes should not boost K_max"""
+        from estimator import FuelEstimator, COMMON_CONFIG
+
+        estimator = FuelEstimator(
+            truck_id="TEST001",
+            capacity_liters=800,
+            config=COMMON_CONFIG,
+        )
+        estimator.initialize(fuel_lvl_pct=50.0)
+
+        # Build confidence
+        for _ in range(10):
+            estimator.update(measured_pct=50.0)
+
+        level_before = estimator.level_pct
+
+        # Small measurement change (within noise expectations)
+        estimator.update(measured_pct=50.5)
+
+        # Correction should be small/normal
+        correction = estimator.level_pct - level_before
+        assert correction < 0.2  # Less than 40% of 0.5% difference
+
+
+class TestConservativeQr:
+    """Test v5.8.5: More conservative Q_r values"""
+
+    def test_parked_qr_is_very_low(self):
+        """PARKED Q_r should be 0.005 (fuel shouldn't change)"""
+        from estimator import calculate_adaptive_Q_r
+
+        qr = calculate_adaptive_Q_r("PARKED", 0.0)
+        assert qr == 0.005
+
+    def test_idle_qr_is_conservative(self):
+        """IDLE Q_r should be around 0.02 (very predictable)"""
+        from estimator import calculate_adaptive_Q_r
+
+        qr = calculate_adaptive_Q_r("IDLE", 2.0)
+        # 0.02 + (2.0/100)*0.01 = 0.0202
+        assert 0.02 <= qr <= 0.025
+
+    def test_stopped_qr_is_conservative(self):
+        """STOPPED Q_r should be 0.02"""
+        from estimator import calculate_adaptive_Q_r
+
+        qr = calculate_adaptive_Q_r("STOPPED", 0.0)
+        assert qr == 0.02
+
+    def test_moving_qr_scales_with_consumption(self):
+        """MOVING Q_r should scale with consumption rate"""
+        from estimator import calculate_adaptive_Q_r
+
+        qr_low = calculate_adaptive_Q_r("MOVING", 5.0)
+        qr_high = calculate_adaptive_Q_r("MOVING", 30.0)
+
+        assert qr_high > qr_low
+        # Formula: 0.05 + (consumption/50)*0.1
+        # Low: 0.05 + 0.01 = 0.06
+        # High: 0.05 + 0.06 = 0.11
+        assert 0.05 < qr_low < 0.08
+        assert 0.10 < qr_high < 0.15

@@ -68,19 +68,22 @@ class TestAdaptiveQr:
         assert Q_r <= 0.1, "Parked should have very low Q_r"
 
     def test_calculate_adaptive_Q_r_idle(self):
-        """Idle vehicles should have low Q_r"""
+        """Idle vehicles should have low Q_r (v5.8.5: more conservative)"""
         Q_r = calculate_adaptive_Q_r("IDLE", consumption_lph=2.0)
-        assert 0.05 <= Q_r <= 0.3, "Idle should have moderate Q_r"
+        # v5.8.5: Idle now uses 0.02 base + small consumption factor
+        assert 0.02 <= Q_r <= 0.1, "Idle should have low Q_r"
 
     def test_calculate_adaptive_Q_r_stopped(self):
-        """Stopped vehicles should have moderate Q_r"""
+        """Stopped vehicles should have low Q_r (v5.8.5: more conservative)"""
         Q_r = calculate_adaptive_Q_r("STOPPED", consumption_lph=1.0)
-        assert 0.05 <= Q_r <= 0.4
+        # v5.8.5: Stopped now uses fixed 0.02
+        assert 0.02 <= Q_r <= 0.1
 
     def test_calculate_adaptive_Q_r_moving(self):
         """Moving vehicles should have higher Q_r"""
         Q_r = calculate_adaptive_Q_r("MOVING", consumption_lph=15.0)
-        assert Q_r >= 0.1, "Moving should have higher Q_r"
+        # v5.8.5: MOVING = 0.05 + (15/50)*0.1 = 0.08
+        assert Q_r >= 0.08, "Moving should have higher Q_r"
 
     def test_calculate_adaptive_Q_r_unknown_status(self):
         """Unknown status should default to MOVING"""

@@ -10,9 +10,13 @@ Kalman Filter for Fuel Level Estimation with:
 - 🆕 v5.3.0: Kalman confidence indicator
 - 🆕 v5.4.0: GPS Quality adaptive Q_L (satellites-based)
 - 🆕 v5.4.0: Voltage quality factor integration
+- 🔧 v5.8.4: Negative consumption treated as sensor error
+- 🔧 v5.8.5: More conservative Q_r for PARKED/IDLE states
+- 🔧 v5.8.5: Auto-resync cooldown (30 min) to prevent oscillation
+- 🔧 v5.8.5: Innovation-based K adjustment for faster correction
 
 Author: Fuel Copilot Team
-Version: 5.4.0
+Version: 5.8.5
 Date: December 2025
 """
 
@@ -72,9 +76,10 @@ class TruckStatus(Enum):
 def calculate_adaptive_Q_r(truck_status: str, consumption_lph: float = 0.0) -> float:
     """
     🆕 v5.3.0: Calculate adaptive process noise based on truck operational state.
+    🔧 v5.8.5: Made more conservative for PARKED/IDLE per audit recommendations.
 
     - PARKED: Very low process noise (fuel shouldn't change)
-    - STOPPED/IDLE: Low process noise (only idle consumption)
+    - STOPPED/IDLE: Low process noise (only idle consumption ~1-2 GPH)
     - MOVING: Higher process noise (active consumption)
 
     This improves Kalman filter accuracy by adjusting expectations
@@ -87,15 +92,20 @@ def calculate_adaptive_Q_r(truck_status: str, consumption_lph: float = 0.0) -> f
     Returns:
         Recommended Q_r (process noise) value
     """
+    # 🔧 v5.8.5: More conservative values per audit
+    # PARKED: 0.005 (was 0.01) - fuel should NOT change
+    # IDLE: 0.02 (was 0.05) - very predictable ~1-2 GPH
     if truck_status == "PARKED":
-        return 0.01  # Almost no expected change
+        return 0.005  # Almost no expected change
     elif truck_status == "STOPPED":
-        return 0.05  # Small idle consumption
+        return 0.02  # Minimal idle consumption
     elif truck_status == "IDLE":
-        return 0.05 + (consumption_lph / 100) * 0.02
+        # Idle is very predictable: ~2-4 LPH (0.5-1 GPH)
+        return 0.02 + (consumption_lph / 100) * 0.01
     else:  # MOVING
         # Base + proportional to consumption rate
-        return 0.1 + (consumption_lph / 50) * 0.1
+        # Higher consumption = more uncertainty
+        return 0.05 + (consumption_lph / 50) * 0.1
 
 
 def get_kalman_confidence(P: float) -> Dict:
@@ -300,7 +310,10 @@ class FuelEstimator:
         return False
 
     def auto_resync(self, sensor_pct: float):
-        """Auto-resync on extreme drift (>15%)"""
+        """
+        Auto-resync on extreme drift (>15%)
+        🔧 v5.8.5: Added 30-minute cooldown to prevent oscillation.
+        """
         if not self.initialized or sensor_pct is None or self.L is None:
             return
 
@@ -309,6 +322,15 @@ class FuelEstimator:
 
         RESYNC_THRESHOLD = 15.0
         RESYNC_THRESHOLD_REFUEL = 30.0
+        RESYNC_COOLDOWN_SECONDS = 1800  # 🆕 v5.8.5: 30 min cooldown
+
+        # 🆕 v5.8.5: Check cooldown to prevent oscillation
+        if hasattr(self, "_last_resync_time") and self._last_resync_time:
+            time_since_resync = (
+                datetime.now(timezone.utc) - self._last_resync_time
+            ).total_seconds()
+            if time_since_resync < RESYNC_COOLDOWN_SECONDS:
+                return  # Still in cooldown period
 
         if drift_pct > RESYNC_THRESHOLD and (
             not self.recent_refuel or drift_pct > RESYNC_THRESHOLD_REFUEL
@@ -317,6 +339,9 @@ class FuelEstimator:
                 f"[{self.truck_id}] ⚠️ EXTREME DRIFT ({drift_pct:.1f}%) - Auto-resyncing"
             )
             self.initialize(sensor_pct=sensor_pct)
+            self._last_resync_time = datetime.now(
+                timezone.utc
+            )  # 🆕 v5.8.5: Track resync time
 
     def update_adaptive_Q_r(
         self, speed: float = None, rpm: float = None, consumption_lph: float = None
@@ -700,10 +725,23 @@ class FuelEstimator:
             k_max = 0.35  # Medium confidence
         else:
             k_max = 0.20  # High confidence: limit over-correction
-        K = min(K, k_max)
 
-        # Update state
+        # 🆕 v5.8.5: Innovation-based K adjustment
+        # If innovation is unexpectedly large (>3x expected noise), allow faster correction
+        # This helps the filter react quickly to real changes (refuels, actual drift)
         innovation = measured_liters - self.level_liters
+        innovation_pct = abs(innovation / self.capacity_liters * 100)
+        expected_noise_pct = (R**0.5) * 2  # ~2 sigma of expected measurement noise
+
+        if innovation_pct > expected_noise_pct * 3:
+            # Large unexpected change - allow stronger correction
+            k_max = min(k_max * 1.5, 0.70)  # Boost k_max but cap at 0.70
+            logger.debug(
+                f"[{self.truck_id}] Large innovation ({innovation_pct:.1f}%) > "
+                f"3x expected ({expected_noise_pct:.1f}%) - boosting K_max to {k_max:.2f}"
+            )
+
+        K = min(K, k_max)
         self.level_liters += K * innovation
         self.level_pct = (self.level_liters / self.capacity_liters) * 100.0
 
