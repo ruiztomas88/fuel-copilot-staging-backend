@@ -164,7 +164,7 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
         with connection.cursor() as cursor:
             measure_dt = sensor_data["timestamp"]
 
-            # Extract sensor values
+            # Extract sensor values - Core
             speed = sensor_data.get("speed")  # mph
             rpm = sensor_data.get("rpm")
             fuel_lvl = sensor_data.get("fuel_lvl")  # Percentage (0-100)
@@ -178,6 +178,34 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
             coolant_temp = sensor_data.get("coolant_temp")
             pwr_ext = sensor_data.get("pwr_ext")  # Battery voltage (V)
             engine_load = sensor_data.get("engine_load")  # Engine load %
+
+            # 🆕 v6.3.0: Extract NEW Wialon sensors
+            # Predictive Maintenance sensors
+            oil_press = sensor_data.get("oil_press")  # Oil pressure PSI
+            oil_temp = sensor_data.get("oil_temp")  # Oil temperature °F
+            oil_level = sensor_data.get("oil_level")  # Oil level %
+            intake_press = sensor_data.get("intake_press")  # Intake pressure PSI
+            intake_temp = sensor_data.get("intake_air_temp")  # Intake temp °F
+            
+            # Cost tracking sensors
+            def_level = sensor_data.get("def_level")  # DEF level %
+            total_idle_fuel = sensor_data.get("total_idle_fuel")  # Idle fuel gal
+            fuel_temp = sensor_data.get("fuel_temp")  # Fuel temperature °F
+            ambient_temp = sensor_data.get("ambient_temp")  # Ambient temp °F
+            
+            # Driver behavior sensors
+            gear = sensor_data.get("gear")  # Current gear
+            brake_switch = sensor_data.get("brake_switch")  # Brake active (0/1)
+            pto_hours = sensor_data.get("pto_hours")  # PTO hours
+            
+            # Safety sensors
+            backup_battery = sensor_data.get("battery")  # Backup battery V
+            barometer = sensor_data.get("barometer")  # Barometric pressure
+            sats = sensor_data.get("sats")  # GPS satellites
+            
+            # DTC/Diagnostics
+            dtc = sensor_data.get("dtc")  # DTC count or codes
+            idle_hours = sensor_data.get("idle_hours")  # ECU idle hours
 
             # Get tank capacity for this truck
             tank_capacity = TANK_CAPACITIES.get(truck_id, TANK_CAPACITIES["default"])
@@ -266,8 +294,15 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
                  rpm, engine_hours, odometer_mi,
                  altitude_ft, hdop, coolant_temp_f,
                  idle_method, idle_mode, drift_pct, drift_warning,
-                 anchor_detected, anchor_type, data_age_min)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 anchor_detected, anchor_type, data_age_min,
+                 battery_voltage, sats, dtc, idle_gph,
+                 engine_load_pct, oil_pressure_psi, oil_temp_f, oil_level_pct,
+                 intake_pressure_psi, intake_temp_f,
+                 def_level_pct, total_idle_fuel_gal, fuel_temp_f, ambient_temp_f,
+                 gear_position, brake_active, pto_hours,
+                 backup_battery_v, barometric_pressure)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -292,8 +327,32 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
                     idle_mode = VALUES(idle_mode),
                     drift_pct = VALUES(drift_pct),
                     drift_warning = VALUES(drift_warning),
-                    data_age_min = VALUES(data_age_min)
+                    data_age_min = VALUES(data_age_min),
+                    battery_voltage = VALUES(battery_voltage),
+                    sats = VALUES(sats),
+                    dtc = VALUES(dtc),
+                    idle_gph = VALUES(idle_gph),
+                    engine_load_pct = VALUES(engine_load_pct),
+                    oil_pressure_psi = VALUES(oil_pressure_psi),
+                    oil_temp_f = VALUES(oil_temp_f),
+                    oil_level_pct = VALUES(oil_level_pct),
+                    intake_pressure_psi = VALUES(intake_pressure_psi),
+                    intake_temp_f = VALUES(intake_temp_f),
+                    def_level_pct = VALUES(def_level_pct),
+                    total_idle_fuel_gal = VALUES(total_idle_fuel_gal),
+                    fuel_temp_f = VALUES(fuel_temp_f),
+                    ambient_temp_f = VALUES(ambient_temp_f),
+                    gear_position = VALUES(gear_position),
+                    brake_active = VALUES(brake_active),
+                    pto_hours = VALUES(pto_hours),
+                    backup_battery_v = VALUES(backup_battery_v),
+                    barometric_pressure = VALUES(barometric_pressure)
             """
+
+            # Calculate idle_gph for idle tracking
+            idle_gph = None
+            if truck_status == "STOPPED" and consumption_gph:
+                idle_gph = consumption_gph
 
             values = (
                 measure_dt,
@@ -325,6 +384,26 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
                 "NO",  # anchor_detected
                 "NONE",  # anchor_type
                 round(data_age_min, 2),  # data_age_min
+                # 🆕 v6.3.0: New sensor columns
+                pwr_ext,  # battery_voltage
+                int(sats) if sats else None,  # sats
+                int(dtc) if dtc and str(dtc).isdigit() else 0,  # dtc
+                idle_gph,  # idle_gph
+                engine_load,  # engine_load_pct
+                oil_press,  # oil_pressure_psi
+                oil_temp,  # oil_temp_f
+                oil_level,  # oil_level_pct
+                intake_press,  # intake_pressure_psi
+                intake_temp,  # intake_temp_f
+                def_level,  # def_level_pct
+                total_idle_fuel,  # total_idle_fuel_gal
+                fuel_temp,  # fuel_temp_f
+                ambient_temp,  # ambient_temp_f
+                int(gear) if gear else None,  # gear_position
+                1 if brake_switch else 0 if brake_switch == 0 else None,  # brake_active
+                pto_hours,  # pto_hours
+                backup_battery,  # backup_battery_v
+                barometer,  # barometric_pressure
             )
 
             cursor.execute(query, values)

@@ -1009,6 +1009,129 @@ class FleetCommandCenter:
                     )
                 )
 
+            # 🆕 v6.3.0: Oil pressure issues
+            oil_pressure_issues = sensor_data.get("trucks_with_oil_pressure_issues", 0)
+            if oil_pressure_issues > 0:
+                action_items.append(
+                    ActionItem(
+                        id=self._generate_action_id(),
+                        truck_id="FLEET",
+                        priority=Priority.CRITICAL,
+                        priority_score=90,
+                        category=IssueCategory.ENGINE,
+                        component="Sistema de Lubricación",
+                        title=f"⚠️ {oil_pressure_issues} Camiones con Presión de Aceite Baja",
+                        description="Presión de aceite por debajo de 25 PSI - riesgo de daño al motor",
+                        days_to_critical=0,
+                        cost_if_ignored="$15,000 - $50,000 (motor fundido)",
+                        current_value=None,
+                        trend=None,
+                        threshold="<25 PSI",
+                        confidence="HIGH",
+                        action_type=ActionType.STOP_IMMEDIATELY,
+                        action_steps=[
+                            "🛑 DETENER el vehículo inmediatamente",
+                            "🔍 Verificar nivel de aceite",
+                            "🔧 Revisar sensor y bomba de aceite",
+                            "🚫 No conducir hasta resolver",
+                        ],
+                        icon="🛢️",
+                        sources=["Oil Pressure Sensor"],
+                    )
+                )
+
+            # 🆕 v6.3.0: DEF level warnings
+            def_warnings = sensor_data.get("trucks_with_def_warning", 0)
+            if def_warnings > 0:
+                action_items.append(
+                    ActionItem(
+                        id=self._generate_action_id(),
+                        truck_id="FLEET",
+                        priority=Priority.MEDIUM,
+                        priority_score=50,
+                        category=IssueCategory.DEF,
+                        component="Sistema DEF/AdBlue",
+                        title=f"🧪 {def_warnings} Camiones con DEF Bajo",
+                        description="Nivel de DEF por debajo del 15% - requiere recarga pronto",
+                        days_to_critical=3,
+                        cost_if_ignored="$5,000+ (derate del motor)",
+                        current_value=None,
+                        trend=None,
+                        threshold="<15%",
+                        confidence="HIGH",
+                        action_type=ActionType.SCHEDULE_THIS_WEEK,
+                        action_steps=[
+                            "⛽ Recargar DEF en próxima parada",
+                            "📍 Localizar estación de DEF cercana",
+                            "📝 Verificar consumo normal de DEF",
+                        ],
+                        icon="🧪",
+                        sources=["DEF Level Sensor"],
+                    )
+                )
+
+            # 🆕 v6.3.0: Engine overload alerts
+            engine_overload = sensor_data.get("trucks_with_engine_overload", 0)
+            if engine_overload > 0:
+                action_items.append(
+                    ActionItem(
+                        id=self._generate_action_id(),
+                        truck_id="FLEET",
+                        priority=Priority.HIGH,
+                        priority_score=70,
+                        category=IssueCategory.ENGINE,
+                        component="Carga del Motor",
+                        title=f"🔥 {engine_overload} Camiones con Sobrecarga de Motor",
+                        description="Motor operando sobre 90% de carga - desgaste acelerado",
+                        days_to_critical=7,
+                        cost_if_ignored="$5,000 - $15,000 (reparaciones prematuras)",
+                        current_value=None,
+                        trend=None,
+                        threshold=">90%",
+                        confidence="MEDIUM",
+                        action_type=ActionType.MONITOR,
+                        action_steps=[
+                            "📊 Revisar historial de carga",
+                            "🚛 Verificar peso de carga transportada",
+                            "📈 Considerar rutas alternativas",
+                            "🔧 Inspeccionar filtros de aire",
+                        ],
+                        icon="🔥",
+                        sources=["Engine Load Sensor"],
+                    )
+                )
+
+            # 🆕 v6.3.0: Coolant temperature high
+            coolant_high = sensor_data.get("trucks_with_coolant_high", 0)
+            if coolant_high > 0:
+                action_items.append(
+                    ActionItem(
+                        id=self._generate_action_id(),
+                        truck_id="FLEET",
+                        priority=Priority.CRITICAL,
+                        priority_score=85,
+                        category=IssueCategory.ENGINE,
+                        component="Sistema de Enfriamiento",
+                        title=f"🌡️ {coolant_high} Camiones con Temperatura de Coolant Alta",
+                        description="Temperatura de refrigerante sobre 220°F - riesgo de sobrecalentamiento",
+                        days_to_critical=0,
+                        cost_if_ignored="$3,000 - $20,000 (daño por sobrecalentamiento)",
+                        current_value=None,
+                        trend=None,
+                        threshold=">220°F",
+                        confidence="HIGH",
+                        action_type=ActionType.STOP_IMMEDIATELY,
+                        action_steps=[
+                            "🛑 Detener y dejar enfriar el motor",
+                            "💧 Verificar nivel de refrigerante",
+                            "🔍 Revisar termostato y ventilador",
+                            "🚫 No abrir radiador si está caliente",
+                        ],
+                        icon="🌡️",
+                        sources=["Coolant Temperature Sensor"],
+                    )
+                )
+
         except Exception as e:
             logger.debug(f"Could not get sensor health data: {e}")
 

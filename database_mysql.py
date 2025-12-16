@@ -4990,12 +4990,16 @@ def get_sensor_health_summary() -> Dict[str, Any]:
     🆕 v6.2.4: Get fleet-wide sensor health summary for Command Center.
     🔧 v6.2.5: Fixed voltage threshold to match email alerts
     🔧 v6.2.6: Fixed column name to battery_voltage
+    🆕 v6.3.0: Added oil, DEF, engine load monitoring from new Wialon sensors
 
     Returns counts of trucks with various sensor issues:
     - GPS quality problems
     - Voltage issues (battery/alternator) - threshold: <12.2V or >15.0V
     - Active DTCs
     - Idle calculation deviations
+    - Oil pressure issues (<25 psi)
+    - DEF level warnings (<15%)
+    - Engine load alerts (sustained >90%)
 
     This function is used by fleet_command_center.py to detect issues
     that should affect the fleet health score.
@@ -5003,44 +5007,81 @@ def get_sensor_health_summary() -> Dict[str, Any]:
     try:
         engine = get_sqlalchemy_engine()
 
-        # 🔧 v6.2.5: Voltage thresholds match voltage_monitor.py
-        # LOW: < 12.2V (battery_low threshold)
-        # HIGH: > 15.0V (charging_high threshold)
-        # 🔧 v6.2.6: Column is battery_voltage, not pwr_ext
-
-        # Query to get sensor health status from latest records
+        # 🔧 v6.3.0: Enhanced query with all new sensor thresholds
         query = """
             WITH latest_records AS (
                 SELECT 
                     truck_id,
                     battery_voltage,
                     dtc,
-                    gps_fix_quality,
+                    sats,
                     idle_gph,
+                    oil_pressure_psi,
+                    oil_temp_f,
+                    def_level_pct,
+                    engine_load_pct,
+                    coolant_temp_f,
+                    intake_temp_f,
+                    speed_mph,
                     ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY timestamp_utc DESC) as rn
                 FROM fuel_metrics
                 WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
             )
             SELECT 
                 COUNT(DISTINCT truck_id) as total_trucks,
+                -- Voltage issues: <12.2V (low) or >15.0V (overcharge)
                 SUM(CASE 
                     WHEN battery_voltage IS NOT NULL AND battery_voltage > 0 AND battery_voltage < 12.2 THEN 1 
                     WHEN battery_voltage IS NOT NULL AND battery_voltage > 15.0 THEN 1
                     ELSE 0 
                 END) as voltage_issues,
+                -- DTC active
                 SUM(CASE WHEN dtc > 0 THEN 1 ELSE 0 END) as dtc_active,
+                -- GPS issues: <4 satellites
                 SUM(CASE 
-                    WHEN gps_fix_quality IS NOT NULL AND gps_fix_quality < 2 THEN 1 
+                    WHEN sats IS NOT NULL AND sats < 4 THEN 1 
                     ELSE 0 
                 END) as gps_issues,
+                -- Idle deviation: unusual idle consumption
                 SUM(CASE 
                     WHEN idle_gph IS NOT NULL AND (idle_gph < 0.3 OR idle_gph > 2.5) THEN 1 
                     ELSE 0 
                 END) as idle_deviation,
-                -- 🔧 v6.2.6: Diagnostic info
+                -- 🆕 v6.3.0: Oil pressure issues (<25 psi at idle, <40 psi driving)
+                SUM(CASE 
+                    WHEN oil_pressure_psi IS NOT NULL AND oil_pressure_psi > 0 
+                         AND oil_pressure_psi < 25 THEN 1 
+                    ELSE 0 
+                END) as oil_pressure_issues,
+                -- 🆕 v6.3.0: DEF level warnings (<15%)
+                SUM(CASE 
+                    WHEN def_level_pct IS NOT NULL AND def_level_pct > 0 
+                         AND def_level_pct < 15 THEN 1 
+                    ELSE 0 
+                END) as def_level_warnings,
+                -- 🆕 v6.3.0: Engine overload (>90% sustained)
+                SUM(CASE 
+                    WHEN engine_load_pct IS NOT NULL AND engine_load_pct > 90 THEN 1 
+                    ELSE 0 
+                END) as engine_overload,
+                -- 🆕 v6.3.0: Coolant temp high (>220°F)
+                SUM(CASE 
+                    WHEN coolant_temp_f IS NOT NULL AND coolant_temp_f > 220 THEN 1 
+                    ELSE 0 
+                END) as coolant_high,
+                -- 🆕 v6.3.0: Intake temp high (>150°F)
+                SUM(CASE 
+                    WHEN intake_temp_f IS NOT NULL AND intake_temp_f > 150 THEN 1 
+                    ELSE 0 
+                END) as intake_temp_high,
+                -- Diagnostic info
                 COUNT(CASE WHEN battery_voltage IS NOT NULL AND battery_voltage > 0 THEN 1 END) as trucks_with_voltage_data,
                 MIN(CASE WHEN battery_voltage > 0 THEN battery_voltage END) as min_voltage,
-                MAX(battery_voltage) as max_voltage
+                MAX(battery_voltage) as max_voltage,
+                -- 🆕 v6.3.0: Sensor availability stats
+                COUNT(CASE WHEN oil_pressure_psi IS NOT NULL AND oil_pressure_psi > 0 THEN 1 END) as trucks_with_oil_data,
+                COUNT(CASE WHEN def_level_pct IS NOT NULL THEN 1 END) as trucks_with_def_data,
+                COUNT(CASE WHEN engine_load_pct IS NOT NULL THEN 1 END) as trucks_with_load_data
             FROM latest_records
             WHERE rn = 1
         """
@@ -5055,15 +5096,24 @@ def get_sensor_health_summary() -> Dict[str, Any]:
             dtc_active = int(row[2] or 0)
             gps_issues = int(row[3] or 0)
             idle_deviation = int(row[4] or 0)
-            trucks_with_voltage = int(row[5] or 0)
-            min_voltage = float(row[6]) if row[6] else None
-            max_voltage = float(row[7]) if row[7] else None
+            # 🆕 v6.3.0: New sensor issues
+            oil_pressure_issues = int(row[5] or 0)
+            def_level_warnings = int(row[6] or 0)
+            engine_overload = int(row[7] or 0)
+            coolant_high = int(row[8] or 0)
+            intake_temp_high = int(row[9] or 0)
+            # Diagnostic info
+            trucks_with_voltage = int(row[10] or 0)
+            min_voltage = float(row[11]) if row[11] else None
+            max_voltage = float(row[12]) if row[12] else None
+            trucks_with_oil_data = int(row[13] or 0)
+            trucks_with_def_data = int(row[14] or 0)
+            trucks_with_load_data = int(row[15] or 0)
 
             logger.info(
                 f"[SensorHealth] Trucks: {total_trucks}, "
-                f"Voltage issues: {voltage_issues}, "
-                f"Trucks with voltage data: {trucks_with_voltage}, "
-                f"Min V: {min_voltage}, Max V: {max_voltage}"
+                f"Voltage: {voltage_issues}, DTC: {dtc_active}, GPS: {gps_issues}, "
+                f"Oil: {oil_pressure_issues}, DEF: {def_level_warnings}, Overload: {engine_overload}"
             )
 
             return {
@@ -5072,9 +5122,18 @@ def get_sensor_health_summary() -> Dict[str, Any]:
                 "trucks_with_dtc_active": dtc_active,
                 "trucks_with_gps_issues": gps_issues,
                 "trucks_with_idle_deviation": idle_deviation,
-                # 🆕 v6.2.5: Diagnostic info
+                # 🆕 v6.3.0: New sensor-based issues
+                "trucks_with_oil_pressure_issues": oil_pressure_issues,
+                "trucks_with_def_warning": def_level_warnings,
+                "trucks_with_engine_overload": engine_overload,
+                "trucks_with_coolant_high": coolant_high,
+                "trucks_with_intake_temp_high": intake_temp_high,
+                # Diagnostic info
                 "_debug": {
                     "trucks_with_voltage_data": trucks_with_voltage,
+                    "trucks_with_oil_data": trucks_with_oil_data,
+                    "trucks_with_def_data": trucks_with_def_data,
+                    "trucks_with_load_data": trucks_with_load_data,
                     "min_voltage": min_voltage,
                     "max_voltage": max_voltage,
                     "voltage_threshold_low": 12.2,
