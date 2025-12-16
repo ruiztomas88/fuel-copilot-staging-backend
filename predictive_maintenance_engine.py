@@ -38,6 +38,21 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# MYSQL CONNECTION (with fallback to JSON)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_mysql_available = False
+_sqlalchemy_engine = None
+
+try:
+    from database_mysql import get_sqlalchemy_engine
+    from sqlalchemy import text
+    _mysql_available = True
+    logger.info("✅ MySQL available for Predictive Maintenance persistence")
+except ImportError:
+    logger.warning("⚠️ MySQL not available, using JSON fallback for PM persistence")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENUMS AND CONSTANTS
@@ -414,15 +429,21 @@ class PredictiveMaintenanceEngine:
     Motor principal de mantenimiento predictivo.
     
     Analiza tendencias de sensores y predice cuándo se necesitará mantenimiento.
+    
+    🆕 v1.1.0: MySQL persistence with JSON fallback
     """
     
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
     
-    # Path for state persistence
+    # Path for state persistence (JSON fallback)
     DATA_DIR = Path(__file__).parent / "data"
     STATE_FILE = DATA_DIR / "predictive_maintenance_state.json"
     
-    def __init__(self):
+    # MySQL configuration
+    USE_MYSQL = True  # Set to False to force JSON
+    MYSQL_BATCH_SIZE = 100  # Insert batch size
+    
+    def __init__(self, use_mysql: bool = True):
         # Historial por truck_id -> sensor_name -> SensorHistory
         self.histories: Dict[str, Dict[str, SensorHistory]] = {}
         
@@ -432,13 +453,203 @@ class PredictiveMaintenanceEngine:
         # Last analysis timestamp
         self.last_analysis: Dict[str, datetime] = {}
         
+        # MySQL availability
+        self._use_mysql = use_mysql and _mysql_available and self.USE_MYSQL
+        self._mysql_tested = False
+        
+        # Pending MySQL writes (batched for performance)
+        self._pending_writes: List[Tuple[str, str, float, datetime]] = []
+        
         # Load persisted state
         self._load_state()
         
-        logger.info(f"🔮 PredictiveMaintenanceEngine v{self.VERSION} initialized")
+        storage_type = "MySQL" if self._use_mysql else "JSON"
+        logger.info(f"🔮 PredictiveMaintenanceEngine v{self.VERSION} initialized ({storage_type} storage)")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # MYSQL PERSISTENCE METHODS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    def _test_mysql_connection(self) -> bool:
+        """Test MySQL connection and verify tables exist"""
+        if self._mysql_tested:
+            return self._use_mysql
+        
+        self._mysql_tested = True
+        
+        if not _mysql_available:
+            self._use_mysql = False
+            return False
+        
+        try:
+            engine = get_sqlalchemy_engine()
+            with engine.connect() as conn:
+                # Check if pm_sensor_history table exists
+                result = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = DATABASE() AND table_name = 'pm_sensor_history'"
+                ))
+                if result.scalar() == 0:
+                    logger.warning("⚠️ pm_sensor_history table not found, using JSON fallback")
+                    self._use_mysql = False
+                    return False
+                
+                logger.info("✅ MySQL PM tables verified")
+                return True
+        except Exception as e:
+            logger.warning(f"⚠️ MySQL connection failed, using JSON fallback: {e}")
+            self._use_mysql = False
+            return False
+    
+    def _load_state_mysql(self) -> bool:
+        """Load sensor histories from MySQL"""
+        try:
+            engine = get_sqlalchemy_engine()
+            with engine.connect() as conn:
+                # Load from pm_sensor_history (last 30 days)
+                result = conn.execute(text("""
+                    SELECT truck_id, sensor_name, value, timestamp
+                    FROM pm_sensor_history
+                    WHERE timestamp > DATE_SUB(NOW(), INTERVAL 30 DAY)
+                    ORDER BY truck_id, sensor_name, timestamp
+                """))
+                
+                rows = result.fetchall()
+                
+                if not rows:
+                    logger.info("📂 No PM history in MySQL (empty or new installation)")
+                    return True
+                
+                # Group by truck_id and sensor_name
+                for row in rows:
+                    truck_id = row[0]
+                    sensor_name = row[1]
+                    value = float(row[2])
+                    timestamp = row[3]
+                    
+                    # Ensure timezone-aware
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
+                    
+                    if truck_id not in self.histories:
+                        self.histories[truck_id] = {}
+                    
+                    if sensor_name not in self.histories[truck_id]:
+                        self.histories[truck_id][sensor_name] = SensorHistory(
+                            sensor_name=sensor_name,
+                            truck_id=truck_id
+                        )
+                    
+                    self.histories[truck_id][sensor_name].readings.append(
+                        SensorReading(timestamp=timestamp, value=value)
+                    )
+                
+                total_readings = len(rows)
+                logger.info(
+                    f"📂 Loaded {total_readings} readings for "
+                    f"{len(self.histories)} trucks from MySQL"
+                )
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to load PM state from MySQL: {e}")
+            return False
+    
+    def _save_reading_mysql(self, truck_id: str, sensor_name: str, value: float, timestamp: datetime):
+        """Queue a sensor reading for batch MySQL insert"""
+        self._pending_writes.append((truck_id, sensor_name, value, timestamp))
+        
+        # Flush if batch is full
+        if len(self._pending_writes) >= self.MYSQL_BATCH_SIZE:
+            self._flush_mysql_writes()
+    
+    def _flush_mysql_writes(self):
+        """Flush pending writes to MySQL"""
+        if not self._pending_writes:
+            return
+        
+        if not self._use_mysql:
+            self._pending_writes.clear()
+            return
+        
+        try:
+            engine = get_sqlalchemy_engine()
+            with engine.connect() as conn:
+                # Batch insert
+                insert_sql = text("""
+                    INSERT INTO pm_sensor_history (truck_id, sensor_name, value, timestamp)
+                    VALUES (:truck_id, :sensor_name, :value, :timestamp)
+                """)
+                
+                params = [
+                    {
+                        "truck_id": w[0],
+                        "sensor_name": w[1],
+                        "value": w[2],
+                        "timestamp": w[3].replace(tzinfo=None) if w[3].tzinfo else w[3]
+                    }
+                    for w in self._pending_writes
+                ]
+                
+                conn.execute(insert_sql, params)
+                conn.commit()
+                
+                count = len(self._pending_writes)
+                self._pending_writes.clear()
+                logger.debug(f"💾 Flushed {count} PM readings to MySQL")
+                
+        except Exception as e:
+            logger.error(f"Failed to flush PM writes to MySQL: {e}")
+            # Keep pending writes for retry or JSON fallback
+    
+    def _update_daily_avg_mysql(self, truck_id: str, sensor_name: str, value: float, date: datetime):
+        """Update daily average in MySQL (for long-term trends)"""
+        if not self._use_mysql:
+            return
+        
+        try:
+            engine = get_sqlalchemy_engine()
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    INSERT INTO pm_sensor_daily_avg 
+                        (truck_id, sensor_name, date, avg_value, min_value, max_value, reading_count)
+                    VALUES 
+                        (:truck_id, :sensor_name, :date, :value, :value, :value, 1)
+                    ON DUPLICATE KEY UPDATE
+                        avg_value = (avg_value * reading_count + :value) / (reading_count + 1),
+                        min_value = LEAST(min_value, :value),
+                        max_value = GREATEST(max_value, :value),
+                        reading_count = reading_count + 1
+                """), {
+                    "truck_id": truck_id,
+                    "sensor_name": sensor_name,
+                    "date": date.date() if isinstance(date, datetime) else date,
+                    "value": value
+                })
+                conn.commit()
+        except Exception as e:
+            logger.debug(f"Could not update daily avg: {e}")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # LOAD/SAVE STATE (with MySQL/JSON fallback)
+    # ═══════════════════════════════════════════════════════════════════════════
     
     def _load_state(self):
-        """Load persisted sensor histories from disk"""
+        """Load persisted sensor histories (MySQL primary, JSON fallback)"""
+        # Test MySQL connection first
+        if self._use_mysql:
+            self._test_mysql_connection()
+        
+        # Try MySQL first
+        if self._use_mysql:
+            if self._load_state_mysql():
+                return
+        
+        # Fallback to JSON
+        self._load_state_json()
+    
+    def _load_state_json(self):
+        """Load persisted sensor histories from JSON file"""
         try:
             if self.STATE_FILE.exists():
                 with open(self.STATE_FILE, 'r') as f:
@@ -456,13 +667,22 @@ class PredictiveMaintenanceEngine:
                 )
                 logger.info(
                     f"📂 Loaded {total_readings} readings for "
-                    f"{len(self.histories)} trucks from state file"
+                    f"{len(self.histories)} trucks from JSON file"
                 )
         except Exception as e:
-            logger.warning(f"Could not load predictive maintenance state: {e}")
+            logger.warning(f"Could not load predictive maintenance state from JSON: {e}")
     
     def _save_state(self):
-        """Persist sensor histories to disk"""
+        """Persist sensor histories (flush MySQL + save JSON backup)"""
+        # Flush any pending MySQL writes
+        if self._use_mysql:
+            self._flush_mysql_writes()
+        
+        # Always save JSON as backup
+        self._save_state_json()
+    
+    def _save_state_json(self):
+        """Persist sensor histories to JSON file"""
         try:
             self.DATA_DIR.mkdir(parents=True, exist_ok=True)
             
@@ -482,7 +702,7 @@ class PredictiveMaintenanceEngine:
                 json.dump(data, f)
                 
         except Exception as e:
-            logger.error(f"Could not save predictive maintenance state: {e}")
+            logger.error(f"Could not save predictive maintenance state to JSON: {e}")
     
     def add_sensor_reading(
         self, 
@@ -506,6 +726,10 @@ class PredictiveMaintenanceEngine:
         if timestamp is None:
             timestamp = datetime.now(timezone.utc)
         
+        # Ensure timezone-aware
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        
         # Skip if sensor not configured
         if sensor_name not in SENSOR_THRESHOLDS:
             return
@@ -520,7 +744,13 @@ class PredictiveMaintenanceEngine:
                 truck_id=truck_id
             )
         
+        # Add to in-memory history
         self.histories[truck_id][sensor_name].add_reading(timestamp, value)
+        
+        # 🆕 v1.1.0: Also persist to MySQL
+        if self._use_mysql:
+            self._save_reading_mysql(truck_id, sensor_name, value, timestamp)
+            self._update_daily_avg_mysql(truck_id, sensor_name, value, timestamp)
     
     def process_sensor_batch(
         self,
@@ -985,6 +1215,30 @@ class PredictiveMaintenanceEngine:
     def save(self):
         """Persist current state to disk"""
         self._save_state()
+    
+    def get_storage_info(self) -> Dict[str, Any]:
+        """Get information about storage backend"""
+        total_readings = sum(
+            h.get_readings_count() 
+            for sensors in self.histories.values() 
+            for h in sensors.values()
+        )
+        return {
+            "version": self.VERSION,
+            "storage_type": "MySQL" if self._use_mysql else "JSON",
+            "mysql_available": _mysql_available,
+            "mysql_active": self._use_mysql,
+            "pending_writes": len(self._pending_writes),
+            "trucks_tracked": len(self.histories),
+            "total_readings_in_memory": total_readings,
+            "json_file": str(self.STATE_FILE),
+        }
+    
+    def flush(self):
+        """Force flush pending MySQL writes"""
+        if self._use_mysql:
+            self._flush_mysql_writes()
+        logger.info(f"💾 PM Engine flush complete (MySQL={self._use_mysql})")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
