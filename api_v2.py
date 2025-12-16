@@ -22,7 +22,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Create router
-router = APIRouter(prefix="/fuelAnalytics/api/v2", tags=["v2"])
+# Note: The prefix /fuelAnalytics/api/v2 is added by routers.py registration
+# So we only define the base routes here (e.g., /maintenance/fleet)
+router = APIRouter(tags=["v2"])
 
 
 # =============================================================================

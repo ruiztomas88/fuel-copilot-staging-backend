@@ -24,8 +24,11 @@ def register_v3_12_21_routers(app: FastAPI) -> None:
         # API v2 - New consolidated endpoints
         from api_v2 import router as api_v2_router
 
-        app.include_router(api_v2_router, prefix="/api/v2", tags=["API v2"])
-        logger.info("✅ Registered api_v2 router")
+        # 🔧 v5.11.1: Fixed prefix - frontend expects /fuelAnalytics/api/v2/...
+        app.include_router(
+            api_v2_router, prefix="/fuelAnalytics/api/v2", tags=["API v2"]
+        )
+        logger.info("✅ Registered api_v2 router at /fuelAnalytics/api/v2")
     except ImportError as e:
         logger.warning(f"⚠️ Could not import api_v2 router: {e}")
 
