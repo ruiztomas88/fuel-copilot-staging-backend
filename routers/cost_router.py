@@ -4,14 +4,32 @@ Cost per mile and speed impact analysis endpoints
 """
 
 from fastapi import APIRouter, Query, HTTPException
-from typing import Optional
+from typing import Optional, Any
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/fuelAnalytics/api", tags=["Cost Analysis"])
 
 
+def sanitize_json(obj: Any) -> Any:
+    """
+    🔧 v6.2.3: Recursively sanitize data to be JSON-safe.
+    Replaces inf, -inf, nan with 0 to prevent JSON serialization errors.
+    """
+    if isinstance(obj, dict):
+        return {k: sanitize_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0
+        return obj
+    return obj
+
+
+@router.get("/cost/per-mile")
 @router.get("/cost/per-mile")
 async def get_fleet_cost_per_mile(
     days: int = Query(30, ge=1, le=365, description="Analysis period in days"),
@@ -29,7 +47,7 @@ async def get_fleet_cost_per_mile(
         from sqlalchemy import text
 
         logger.info(f"Starting cost per mile analysis for {days} days")
-        
+
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
 
@@ -126,7 +144,8 @@ async def get_fleet_cost_per_mile(
             ]
 
         report = cpm_engine.generate_cost_report(trucks_data, period_days=days)
-        return report
+        # 🔧 v6.2.3: Sanitize response to remove inf/nan values
+        return sanitize_json(report)
 
     except Exception as e:
         logger.error(f"Cost per mile analysis error: {e}")
