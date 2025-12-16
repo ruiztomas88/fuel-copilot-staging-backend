@@ -88,6 +88,9 @@ from database_mysql import (
     GEOFENCE_ZONES,
 )
 
+# 🆕 v5.10.0: Import driver behavior engine for heavy foot detection
+from driver_behavior_engine import get_behavior_engine, BehaviorEvent
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -2060,7 +2063,37 @@ def sync_cycle(
                 "sats": truck_data.sats,
                 "pwr_int": truck_data.pwr_int,
                 "course": truck_data.course,
+                # 🆕 v5.10.0: Driver behavior & MPG cross-validation sensors
+                "fuel_economy": getattr(truck_data, "fuel_economy", None),  # ECU MPG
+                "gear": getattr(truck_data, "gear", None),  # Current gear position
+                "barometer": getattr(
+                    truck_data, "barometer", None
+                ),  # Barometric pressure
             }
+
+            # 🆕 v5.10.0: Process driver behavior detection
+            try:
+                behavior_engine = get_behavior_engine()
+                behavior_events = behavior_engine.process_reading(
+                    truck_id=truck_id,
+                    timestamp=truck_data.timestamp,
+                    speed=truck_data.speed,
+                    rpm=truck_data.rpm,
+                    gear=getattr(truck_data, "gear", None),
+                    fuel_rate=truck_data.fuel_rate,
+                    fuel_economy=getattr(truck_data, "fuel_economy", None),
+                )
+                # Log severe behavior events
+                for event in behavior_events:
+                    if event.severity.value in ["severe", "critical"]:
+                        logger.warning(
+                            f"⚠️ [{truck_id}] {event.behavior_type.value}: "
+                            f"{event.value:.2f} (threshold: {event.threshold:.2f})"
+                        )
+            except Exception as behavior_error:
+                logger.debug(
+                    f"Behavior detection error for {truck_id}: {behavior_error}"
+                )
 
             # 🆕 v3.12.28 / v5.7.5: Process DTC codes and generate alerts
             # Prefer dtc_code (actual codes like "100.4,157.3") over dtc (which may be just 0/1 flag)

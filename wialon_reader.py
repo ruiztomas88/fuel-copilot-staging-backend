@@ -87,6 +87,10 @@ class WialonConfig:
         "sats": "sats",  # GPS Satellites count
         "pwr_int": "pwr_int",  # GPS tracker internal battery (~3-4V)
         "course": "course",  # GPS Heading/Course (degrees)
+        # 🆕 v5.10.0: Driver behavior & MPG cross-validation sensors
+        "fuel_economy": "fuel_economy",  # ECU fuel economy (MPG) - for cross-validation
+        "gear": "gear",  # Current gear position (1-18) - for heavy foot detection
+        "barometer": "barometer",  # Barometric pressure - engine load correlation
     }
 
 
@@ -136,6 +140,10 @@ class TruckSensorData:
     sats: Optional[int] = None  # GPS Satellites count
     pwr_int: Optional[float] = None  # GPS tracker internal battery (~3-4V)
     course: Optional[float] = None  # GPS Heading/Course (degrees 0-360)
+    # 🆕 v5.10.0: Driver behavior & MPG cross-validation sensors
+    fuel_economy: Optional[float] = None  # ECU fuel economy (MPG) - cross-validation
+    gear: Optional[int] = None  # Current gear position (1-18)
+    barometer: Optional[float] = None  # Barometric pressure (kPa)
 
     def __post_init__(self):
         """Ensure timestamp is timezone-aware"""

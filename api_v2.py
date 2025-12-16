@@ -565,3 +565,141 @@ async def list_carriers(
         "carriers": carriers,
         "total": len(carriers),
     }
+
+
+# =============================================================================
+# DRIVER BEHAVIOR ENDPOINTS (#NEW v5.10.0)
+# =============================================================================
+@router.get(
+    "/behavior/score/{truck_id}",
+    summary="Heavy Foot Score",
+    tags=["Driver Behavior"],
+)
+async def get_heavy_foot_score(
+    truck_id: str,
+    period_hours: float = Query(24.0, ge=1, le=168, description="Hours to analyze"),
+):
+    """
+    Get "Heavy Foot" score for a specific truck.
+
+    Score breakdown:
+    - 100 = Perfect driver
+    - 80+ = Good driver (grade A/B)
+    - 60-79 = Average driver (grade C/D)
+    - <60 = Aggressive driver (grade F)
+
+    Components analyzed:
+    - Hard acceleration events
+    - Hard braking events
+    - High RPM operation
+    - Wrong gear usage (if gear sensor available)
+    - Overspeeding
+    """
+    from driver_behavior_engine import get_behavior_engine
+
+    engine = get_behavior_engine()
+    score = engine.calculate_heavy_foot_score(truck_id, period_hours=period_hours)
+
+    return score.to_dict()
+
+
+@router.get(
+    "/behavior/fleet",
+    summary="Fleet Behavior Summary",
+    tags=["Driver Behavior"],
+)
+async def get_fleet_behavior_summary():
+    """
+    Get fleet-wide driver behavior summary.
+
+    Returns:
+    - Best/worst performers
+    - Total fuel waste by behavior category
+    - Common issues across fleet
+    - Actionable recommendations
+    """
+    from driver_behavior_engine import get_behavior_engine
+
+    engine = get_behavior_engine()
+    summary = engine.get_fleet_behavior_summary()
+
+    if "error" in summary:
+        raise HTTPException(status_code=404, detail=summary["error"])
+
+    return summary
+
+
+@router.get(
+    "/behavior/mpg-validation/{truck_id}",
+    summary="MPG Cross-Validation",
+    tags=["Driver Behavior"],
+)
+async def get_mpg_cross_validation(truck_id: str):
+    """
+    Compare Kalman-filtered MPG vs ECU fuel_economy sensor.
+
+    Returns validation status showing if our MPG calculation
+    matches the truck's ECU reading.
+
+    Requires fuel_economy sensor to be available.
+    """
+    from driver_behavior_engine import get_behavior_engine
+
+    engine = get_behavior_engine()
+    result = engine.cross_validate_mpg(truck_id)
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Not enough data for cross-validation. Need fuel_economy sensor and recent readings.",
+        )
+
+    return result.to_dict()
+
+
+@router.get(
+    "/behavior/events/{truck_id}",
+    summary="Recent Behavior Events",
+    tags=["Driver Behavior"],
+)
+async def get_behavior_events(
+    truck_id: str,
+    severity: Optional[str] = Query(
+        None, description="Filter by severity: minor, moderate, severe, critical"
+    ),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """
+    Get recent behavior events for a truck.
+
+    Events include:
+    - Hard acceleration
+    - Hard braking
+    - Excessive RPM
+    - Wrong gear usage
+    - Overspeeding
+    """
+    from driver_behavior_engine import get_behavior_engine
+
+    engine = get_behavior_engine()
+    state = engine.truck_states.get(truck_id)
+
+    if state is None:
+        raise HTTPException(
+            status_code=404, detail=f"No behavior data for truck {truck_id}"
+        )
+
+    events = state.events
+
+    # Filter by severity if specified
+    if severity:
+        events = [e for e in events if e.severity.value == severity]
+
+    # Return most recent events
+    events = sorted(events, key=lambda e: e.timestamp, reverse=True)[:limit]
+
+    return {
+        "truck_id": truck_id,
+        "total_events": len(state.events),
+        "events": [e.to_dict() for e in events],
+    }
