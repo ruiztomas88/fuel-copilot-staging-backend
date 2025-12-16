@@ -5160,3 +5160,174 @@ def get_sensor_health_summary() -> Dict[str, Any]:
             "trucks_with_idle_deviation": 0,
             "error": str(e),
         }
+
+
+def get_trucks_with_sensor_issues() -> Dict[str, Any]:
+    """
+    🆕 v6.3.1: Get detailed list of trucks with sensor issues.
+
+    Returns truck IDs and current values for each type of issue,
+    so Command Center can show WHICH trucks have problems.
+    """
+    try:
+        engine = get_sqlalchemy_engine()
+
+        # Query to get specific trucks with issues
+        query = """
+            WITH latest_records AS (
+                SELECT 
+                    truck_id,
+                    battery_voltage,
+                    dtc,
+                    sats,
+                    oil_pressure_psi,
+                    def_level_pct,
+                    engine_load_pct,
+                    coolant_temp_f,
+                    intake_temp_f,
+                    ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY timestamp_utc DESC) as rn
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
+            )
+            SELECT 
+                truck_id,
+                battery_voltage,
+                dtc,
+                sats,
+                oil_pressure_psi,
+                def_level_pct,
+                engine_load_pct,
+                coolant_temp_f,
+                intake_temp_f
+            FROM latest_records
+            WHERE rn = 1
+        """
+
+        results = {
+            "voltage_low": [],
+            "dtc_active": [],
+            "gps_issues": [],
+            "oil_pressure_low": [],
+            "def_low": [],
+            "engine_overload": [],
+            "coolant_high": [],
+            "intake_temp_high": [],
+        }
+
+        with engine.connect() as conn:
+            rows = conn.execute(text(query)).fetchall()
+
+        for row in rows:
+            truck_id = row[0]
+            voltage = float(row[1]) if row[1] else None
+            dtc = int(row[2]) if row[2] else 0
+            sats = int(row[3]) if row[3] else None
+            oil_psi = float(row[4]) if row[4] else None
+            def_pct = float(row[5]) if row[5] else None
+            engine_load = float(row[6]) if row[6] else None
+            coolant = float(row[7]) if row[7] else None
+            intake = float(row[8]) if row[8] else None
+
+            # Voltage issues
+            if voltage and voltage > 0 and (voltage < 12.2 or voltage > 15.0):
+                results["voltage_low"].append(
+                    {
+                        "truck_id": truck_id,
+                        "value": round(voltage, 2),
+                        "unit": "V",
+                        "threshold": "12.2-15.0V",
+                    }
+                )
+
+            # DTC active
+            if dtc > 0:
+                results["dtc_active"].append(
+                    {"truck_id": truck_id, "value": dtc, "unit": "codes"}
+                )
+
+            # GPS issues
+            if sats is not None and sats < 4:
+                results["gps_issues"].append(
+                    {
+                        "truck_id": truck_id,
+                        "value": sats,
+                        "unit": "sats",
+                        "threshold": "≥4",
+                    }
+                )
+
+            # Oil pressure low
+            if oil_psi is not None and oil_psi > 0 and oil_psi < 25:
+                results["oil_pressure_low"].append(
+                    {
+                        "truck_id": truck_id,
+                        "value": round(oil_psi, 1),
+                        "unit": "PSI",
+                        "threshold": "≥25 PSI",
+                    }
+                )
+
+            # DEF low
+            if def_pct is not None and def_pct > 0 and def_pct < 15:
+                results["def_low"].append(
+                    {
+                        "truck_id": truck_id,
+                        "value": round(def_pct, 1),
+                        "unit": "%",
+                        "threshold": "≥15%",
+                    }
+                )
+
+            # Engine overload
+            if engine_load is not None and engine_load > 90:
+                results["engine_overload"].append(
+                    {
+                        "truck_id": truck_id,
+                        "value": round(engine_load, 1),
+                        "unit": "%",
+                        "threshold": "≤90%",
+                    }
+                )
+
+            # Coolant high
+            if coolant is not None and coolant > 220:
+                results["coolant_high"].append(
+                    {
+                        "truck_id": truck_id,
+                        "value": round(coolant, 1),
+                        "unit": "°F",
+                        "threshold": "≤220°F",
+                    }
+                )
+
+            # Intake temp high
+            if intake is not None and intake > 150:
+                results["intake_temp_high"].append(
+                    {
+                        "truck_id": truck_id,
+                        "value": round(intake, 1),
+                        "unit": "°F",
+                        "threshold": "≤150°F",
+                    }
+                )
+
+        logger.info(
+            f"[SensorIssues] Found: oil={len(results['oil_pressure_low'])}, "
+            f"def={len(results['def_low'])}, voltage={len(results['voltage_low'])}"
+        )
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Error in get_trucks_with_sensor_issues: {e}", exc_info=True)
+        return {
+            "voltage_low": [],
+            "dtc_active": [],
+            "gps_issues": [],
+            "oil_pressure_low": [],
+            "def_low": [],
+            "engine_overload": [],
+            "coolant_high": [],
+            "intake_temp_high": [],
+            "error": str(e),
+        }
