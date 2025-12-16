@@ -706,78 +706,44 @@ async def get_behavior_events(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🆕 v5.11.0: PREDICTIVE MAINTENANCE / COMPONENT WEAR ENDPOINTS
+# 🆕 v5.11.0: PREDICTIVE MAINTENANCE ENDPOINTS
+# Uses trend analysis to predict failures BEFORE they happen
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 @router.get(
-    "/maintenance/wear/{truck_id}",
-    summary="Component Wear Status",
+    "/maintenance/status/{truck_id}",
+    summary="Truck Maintenance Status",
     tags=["Predictive Maintenance"],
 )
-async def get_component_wear(truck_id: str):
+async def get_truck_maintenance_status(truck_id: str):
     """
-    Get current wear status for all monitored components.
+    Get predictive maintenance status for a truck.
 
-    Components tracked:
-    - BRAKE_PADS: Based on brake usage, pressure, harsh events
-    - TRANSMISSION: Based on trans temp, gear shifts, abuse
-    - TURBO: Based on turbo/intercooler temps, boost pressure
-    - ENGINE: Based on oil/coolant temps, oil pressure
+    Uses sensor trend analysis to predict when components will need service.
+    
+    Example: "Trans temp subiendo +2.1°F/día → llegará a zona crítica en ~5 días"
 
-    Returns wear percentage (0-100%) and health score.
+    Sensors analyzed:
+    - Oil pressure (bomba de aceite)
+    - Coolant temp (sistema enfriamiento)
+    - Trans temp (transmisión)
+    - Turbo temp (turbocompresor)
+    - Boost pressure (turbo/intercooler)
+    - DEF level (sistema DEF)
+    - Battery voltage (sistema eléctrico)
     """
-    from component_wear_engine import get_wear_engine
+    from predictive_maintenance_engine import get_predictive_maintenance_engine
 
-    engine = get_wear_engine()
-    wear_status = engine.get_truck_wear_status(truck_id)
+    engine = get_predictive_maintenance_engine()
+    status = engine.get_truck_maintenance_status(truck_id)
 
-    if wear_status is None:
+    if status is None:
         raise HTTPException(
-            status_code=404, detail=f"No wear data for truck {truck_id}"
+            status_code=404, detail=f"No maintenance data for truck {truck_id}"
         )
 
-    return wear_status
-
-
-@router.get(
-    "/maintenance/predictions/{truck_id}",
-    summary="Maintenance Predictions",
-    tags=["Predictive Maintenance"],
-)
-async def get_maintenance_predictions(truck_id: str):
-    """
-    Get predictive maintenance estimates for a truck.
-
-    Returns:
-    - Days until maintenance needed per component
-    - Miles remaining for brake pads
-    - Confidence levels
-    - Recommended actions
-
-    Example response:
-    {
-        "brake_pads": {
-            "wear_pct": 65.3,
-            "miles_remaining": 24000,
-            "days_to_service": 45,
-            "confidence": 0.82,
-            "action": "Schedule brake inspection within 6 weeks"
-        }
-    }
-    """
-    from component_wear_engine import get_wear_engine
-
-    engine = get_wear_engine()
-    predictions = engine.get_maintenance_predictions(truck_id)
-
-    if predictions is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Not enough data for predictions on truck {truck_id}",
-        )
-
-    return predictions
+    return status
 
 
 @router.get(
@@ -789,15 +755,17 @@ async def get_maintenance_alerts(truck_id: str):
     """
     Get active maintenance alerts for a truck.
 
-    Alerts are generated when:
-    - Component wear exceeds 70% (warning)
-    - Component wear exceeds 85% (urgent)
-    - Abnormal readings detected (e.g., high trans temp)
-    - Accelerated wear pattern detected
+    Only returns CRITICAL and HIGH priority items that need attention.
+    
+    Alerts include:
+    - Days until component reaches critical threshold
+    - Current value and trend
+    - Recommended action
+    - Estimated cost if failure occurs
     """
-    from component_wear_engine import get_wear_engine
+    from predictive_maintenance_engine import get_predictive_maintenance_engine
 
-    engine = get_wear_engine()
+    engine = get_predictive_maintenance_engine()
     alerts = engine.get_maintenance_alerts(truck_id)
 
     return {
@@ -814,55 +782,57 @@ async def get_maintenance_alerts(truck_id: str):
 )
 async def get_fleet_maintenance():
     """
-    Get fleet-wide maintenance overview.
+    Get fleet-wide predictive maintenance summary.
 
     Returns:
-    - Trucks requiring urgent attention
-    - Upcoming maintenance schedule
-    - Component wear distribution across fleet
-    - Cost-saving opportunities (proactive vs reactive)
+    - Count of trucks by urgency level (critical/high/medium/low)
+    - Top critical items requiring immediate attention
+    - High priority items for this week
+    - Fleet-wide recommendations
+    
+    Example insight:
+    "3 camiones con problemas en Transmisión - considerar revisión de flota"
     """
-    from component_wear_engine import get_wear_engine
+    from predictive_maintenance_engine import get_predictive_maintenance_engine
 
-    engine = get_wear_engine()
-    fleet_status = engine.get_fleet_maintenance_summary()
+    engine = get_predictive_maintenance_engine()
+    summary = engine.get_fleet_summary()
 
-    return fleet_status
+    return summary
 
 
 @router.get(
-    "/maintenance/history/{truck_id}",
-    summary="Wear History",
+    "/maintenance/trend/{truck_id}/{sensor_name}",
+    summary="Sensor Trend Analysis",
     tags=["Predictive Maintenance"],
 )
-async def get_wear_history(
-    truck_id: str,
-    component: Optional[str] = Query(
-        None, description="Component type: BRAKE_PADS, TRANSMISSION, TURBO, ENGINE"
-    ),
-    days: int = Query(30, ge=1, le=365),
-):
+async def get_sensor_trend(truck_id: str, sensor_name: str):
     """
-    Get historical wear progression for a truck.
+    Get detailed trend analysis for a specific sensor.
 
-    Useful for:
-    - Visualizing wear trends
-    - Identifying accelerated wear periods
-    - Correlating with driver behavior
+    Valid sensor names:
+    - oil_pressure, coolant_temp, oil_temp
+    - turbo_temp, boost_pressure, intercooler_temp
+    - trans_temp, fuel_temp
+    - battery_voltage, def_level
+    - brake_air_pressure, mpg
+
+    Returns:
+    - Current value
+    - Trend per day (e.g., +2.1°F/día)
+    - Historical daily averages
+    - Warning and critical thresholds
     """
-    from component_wear_engine import get_wear_engine
+    from predictive_maintenance_engine import get_predictive_maintenance_engine
 
-    engine = get_wear_engine()
-    history = engine.get_wear_history(truck_id, component=component, days=days)
+    engine = get_predictive_maintenance_engine()
+    trend = engine.get_sensor_trend(truck_id, sensor_name)
 
-    if not history:
+    if trend is None:
         raise HTTPException(
-            status_code=404, detail=f"No wear history for truck {truck_id}"
+            status_code=404,
+            detail=f"No trend data for {sensor_name} on truck {truck_id}",
         )
 
-    return {
-        "truck_id": truck_id,
-        "period_days": days,
-        "component_filter": component,
-        "history": history,
-    }
+    return trend
+

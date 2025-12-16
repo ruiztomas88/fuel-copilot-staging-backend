@@ -91,8 +91,8 @@ from database_mysql import (
 # 🆕 v5.10.0: Import driver behavior engine for heavy foot detection
 from driver_behavior_engine import get_behavior_engine, BehaviorEvent
 
-# 🆕 v5.11.0: Import component wear engine for predictive maintenance
-from component_wear_engine import get_wear_engine, ComponentType
+# 🆕 v5.11.0: Import predictive maintenance engine
+from predictive_maintenance_engine import get_predictive_maintenance_engine
 
 # Configure logging
 logging.basicConfig(
@@ -2128,42 +2128,37 @@ def sync_cycle(
                     f"Behavior detection error for {truck_id}: {behavior_error}"
                 )
 
-            # 🆕 v5.11.0: Process component wear / predictive maintenance
+            # 🆕 v5.11.0: Feed predictive maintenance engine with sensor data
             try:
-                wear_engine = get_wear_engine()
-                wear_engine.process_reading(
+                pm_engine = get_predictive_maintenance_engine()
+                pm_engine.process_sensor_batch(
                     truck_id=truck_id,
+                    sensor_data={
+                        # Engine sensors
+                        "oil_pressure": truck_data.oil_pressure,
+                        "coolant_temp": truck_data.coolant_temp,
+                        "oil_temp": truck_data.oil_temp,
+                        # Turbo sensors (may be None until Pacific Track enables them)
+                        "turbo_temp": getattr(truck_data, "turbo_temp", None),
+                        "boost_pressure": getattr(truck_data, "boost_pressure", None),
+                        "intercooler_temp": getattr(truck_data, "intercooler_temp", None),
+                        # Transmission
+                        "trans_temp": getattr(truck_data, "trans_temp", None),
+                        # Fuel system
+                        "fuel_temp": getattr(truck_data, "fuel_temp", None),
+                        # Electrical
+                        "battery_voltage": truck_data.battery,
+                        # DEF
+                        "def_level": truck_data.def_level,
+                        # Brakes
+                        "brake_air_pressure": getattr(truck_data, "brake_app_press", None),
+                        # Efficiency (from MPG engine)
+                        "mpg": sensor_data.get("mpg"),
+                    },
                     timestamp=truck_data.timestamp,
-                    odometer=truck_data.odometer,
-                    engine_hours=truck_data.engine_hours,
-                    # Brake sensors
-                    brake_app_press=getattr(truck_data, "brake_app_press", None),
-                    brake_switch=getattr(truck_data, "brake_switch", None),
-                    speed=truck_data.speed,
-                    # Transmission sensors
-                    trans_temp=getattr(truck_data, "trans_temp", None),
-                    gear=getattr(truck_data, "gear", None),
-                    rpm=truck_data.rpm,
-                    # Turbo sensors
-                    turbo_temp=getattr(truck_data, "turbo_temp", None),
-                    boost_pressure=getattr(truck_data, "boost_pressure", None),
-                    intercooler_temp=getattr(truck_data, "intercooler_temp", None),
-                    # Engine sensors
-                    coolant_temp=truck_data.coolant_temp,
-                    oil_temp=truck_data.oil_temp,
-                    oil_pressure=truck_data.oil_pressure,
-                    # Events from behavior engine
-                    harsh_brake_event=(
-                        any(
-                            e.behavior_type.value == "hard_braking"
-                            for e in behavior_events
-                        )
-                        if behavior_events
-                        else False
-                    ),
                 )
-            except Exception as wear_error:
-                logger.debug(f"Wear engine error for {truck_id}: {wear_error}")
+            except Exception as pm_error:
+                logger.debug(f"Predictive maintenance error for {truck_id}: {pm_error}")
 
             # 🆕 v3.12.28 / v5.7.5: Process DTC codes and generate alerts
             # Prefer dtc_code (actual codes like "100.4,157.3") over dtc (which may be just 0/1 flag)
