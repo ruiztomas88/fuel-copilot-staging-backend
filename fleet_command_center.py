@@ -954,7 +954,9 @@ def get_command_center() -> FleetCommandCenter:
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/command-center", tags=["Fleet Command Center"])
+router = APIRouter(
+    prefix="/fuelAnalytics/api/command-center", tags=["Fleet Command Center"]
+)
 
 
 class CommandCenterResponse(BaseModel):

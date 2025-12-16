@@ -171,13 +171,12 @@ def include_all_routers(app, auth_dependency=None):
     if COMMAND_CENTER_AVAILABLE and command_center_router:
         app.include_router(
             command_center_router,
-            prefix="/api",
             tags=["Fleet Command Center"],
         )
         import logging
 
         logging.getLogger(__name__).info(
-            "✅ Registered command_center router at /api/command-center"
+            "✅ Registered command_center router at /fuelAnalytics/api/command-center"
         )
 
     # NOTE: alerts_router NOT included here because /alerts and /alerts/predictive
