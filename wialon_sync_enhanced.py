@@ -1445,20 +1445,9 @@ def process_truck(
 
     # Kalman predict phase (only if reasonable time delta)
     if dt_hours > 0 and dt_hours < 1.0:
-        # Calculate adaptive noise based on conditions
-        base_Q_L = estimator.calculate_adaptive_noise(speed, altitude, timestamp)
-
-        # 🔧 FIX v5.7.1: Apply sensor quality factor from GPS/Voltage analysis
-        # If sensor quality is degraded, increase Q_L (more uncertainty)
-        sensor_quality_factor = getattr(estimator, "sensor_quality_factor", 1.0)
-        if sensor_quality_factor < 1.0:
-            # Inverse: lower quality = higher Q_L (more noise)
-            Q_L = base_Q_L / max(sensor_quality_factor, 0.2)
-            logger.debug(
-                f"[KALMAN] {truck_id}: Q_L adjusted {base_Q_L:.4f} -> {Q_L:.4f} (sensor_quality={sensor_quality_factor:.2f})"
-            )
-        else:
-            Q_L = base_Q_L
+        # 🔧 v5.9.0: Q_L is now set by update_sensor_quality() above (line 1432)
+        # No need to calculate_adaptive_noise - it was removed as dead code
+        # The estimator.Q_L already contains the unified GPS + voltage adjustments
 
         # Predict
         estimator.predict(
