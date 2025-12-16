@@ -167,6 +167,9 @@ class MPGState:
 
         🔧 FIX v3.9.6: Apply IQR outlier rejection before variance calculation
         to prevent extreme values from skewing the dynamic alpha.
+
+        🔧 FIX v3.14.1: Return high variance (1.0) when filtered is empty
+        to force conservative alpha (more smoothing) instead of using corrupted data.
         """
         if len(self.mpg_history) < 3:
             return 0.0
@@ -174,7 +177,9 @@ class MPGState:
         # Apply IQR filter to remove outliers before variance calculation
         filtered = filter_outliers_iqr(self.mpg_history)
         if len(filtered) < 2:
-            filtered = self.mpg_history  # Fallback if too many removed
+            # 🔧 v3.14.1: Return high variance to force conservative smoothing
+            # instead of using potentially corrupted mpg_history
+            return 1.0
 
         mean = sum(filtered) / len(filtered)
         variance = sum((x - mean) ** 2 for x in filtered) / len(filtered)
