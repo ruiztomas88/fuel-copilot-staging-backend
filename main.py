@@ -1948,10 +1948,14 @@ async def get_loss_analysis(days: int = 1):
 
 @app.get("/fuelAnalytics/api/analytics/driver-scorecard")
 async def get_driver_scorecard_endpoint(
-    days: int = Query(default=7, ge=1, le=30, description="Days to analyze")
+    days: int = Query(default=7, ge=1, le=30, description="Days to analyze"),
+    include_tips: bool = Query(default=True, description="Include coaching tips"),
+    include_history: bool = Query(default=False, description="Include score history"),
+    language: str = Query(default="en", description="Language for tips: en or es"),
 ):
     """
     🆕 v3.10.0: Comprehensive Driver Scorecard System
+    🆕 v3.11.0: Added coaching_tips and score_history
 
     Returns multi-dimensional driver scores based on:
     - Speed Optimization (55-65 mph optimal)
@@ -1960,13 +1964,37 @@ async def get_driver_scorecard_endpoint(
     - Fuel Consistency (consumption variability)
     - MPG Performance (vs 5.7 baseline)
 
+    New in v3.11.0:
+    - coaching_tips: Personalized tips per driver (bilingual)
+    - score_history: Historical trend for each driver
+    - trend_analysis: Is the driver improving?
+
     Returns:
-        Driver rankings with overall score, grade (A+/A/B/C/D), and breakdown
+        Driver rankings with overall score, grade (A+/A/B/C/D), breakdown, tips, and history
     """
     try:
-        from database_mysql import get_driver_scorecard
+        from database_mysql import get_driver_scorecard, get_driver_score_history, get_driver_score_trend
+        from driver_behavior_engine import generate_coaching_tips
 
         result = get_driver_scorecard(days_back=days)
+        
+        # Enhance each driver with tips and history
+        if result.get("drivers"):
+            for driver in result["drivers"]:
+                # Add personalized coaching tips
+                if include_tips:
+                    driver["coaching_tips"] = generate_coaching_tips(
+                        driver_data=driver,
+                        language=language,
+                        max_tips=5,
+                    )
+                
+                # Add score history and trend
+                if include_history:
+                    truck_id = driver.get("truck_id")
+                    driver["score_history"] = get_driver_score_history(truck_id, days_back=30)
+                    driver["trend_analysis"] = get_driver_score_trend(truck_id, days_back=30)
+        
         return result
 
     except Exception as e:
@@ -1974,6 +2002,64 @@ async def get_driver_scorecard_endpoint(
         raise HTTPException(
             status_code=500, detail=f"Error in driver scorecard: {str(e)}"
         )
+
+
+@app.get("/fuelAnalytics/api/analytics/driver/{truck_id}/history")
+async def get_driver_history_endpoint(
+    truck_id: str,
+    days: int = Query(default=30, ge=1, le=90, description="Days of history"),
+):
+    """
+    🆕 v3.11.0: Get historical score data for a specific driver/truck
+    
+    Returns:
+        List of historical scores and trend analysis
+    """
+    try:
+        from database_mysql import get_driver_score_history, get_driver_score_trend
+        
+        history = get_driver_score_history(truck_id, days_back=days)
+        trend = get_driver_score_trend(truck_id, days_back=days)
+        
+        return {
+            "truck_id": truck_id,
+            "period_days": days,
+            "history": history,
+            "trend_analysis": trend,
+        }
+    except Exception as e:
+        logger.error(f"Error getting driver history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/fuelAnalytics/api/analytics/driver-scores/snapshot")
+async def save_driver_scores_snapshot():
+    """
+    🆕 v3.11.0: Save current driver scores to history table
+    
+    Should be called daily (via cron) to build trend data.
+    
+    Returns:
+        Number of records saved
+    """
+    try:
+        from database_mysql import get_driver_scorecard, save_driver_score_history
+        
+        # Get current scores
+        result = get_driver_scorecard(days_back=1)
+        drivers = result.get("drivers", [])
+        
+        # Save to history
+        saved = save_driver_score_history(drivers)
+        
+        return {
+            "success": True,
+            "records_saved": saved,
+            "message": f"Saved {saved} driver score snapshots",
+        }
+    except Exception as e:
+        logger.error(f"Error saving driver scores snapshot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/fuelAnalytics/api/analytics/enhanced-kpis")

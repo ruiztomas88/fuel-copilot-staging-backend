@@ -979,6 +979,301 @@ class DriverBehaviorEngine:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# COACHING TIPS ENGINE v1.1.0
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Bilingual coaching tips library - personalized by behavior
+COACHING_TIPS_LIBRARY = {
+    "hard_acceleration": {
+        "mild": {
+            "en": "💡 Tip: Accelerate smoothly over 10-15 seconds to improve fuel economy by up to 10%.",
+            "es": "💡 Tip: Acelera suavemente durante 10-15 segundos para mejorar el consumo hasta un 10%.",
+        },
+        "moderate": {
+            "en": "⚠️ Your hard accelerations are costing ~$0.15 each. Try pretending there's an egg under the pedal.",
+            "es": "⚠️ Tus aceleraciones bruscas cuestan ~$0.15 cada una. Imagina que hay un huevo bajo el pedal.",
+        },
+        "severe": {
+            "en": "🚨 Aggressive acceleration detected. Each event wastes 0.05 gal. This week: ~${waste:.2f} lost.",
+            "es": "🚨 Aceleración agresiva detectada. Cada evento desperdicia 0.05 gal. Esta semana: ~${waste:.2f} perdidos.",
+        },
+    },
+    "hard_braking": {
+        "mild": {
+            "en": "💡 Tip: Anticipate stops by coasting. Looking further ahead saves brakes AND fuel.",
+            "es": "💡 Tip: Anticipa las paradas dejando rodar. Mirar más adelante ahorra frenos Y combustible.",
+        },
+        "moderate": {
+            "en": "⚠️ Hard braking wastes momentum. Each event loses energy equivalent to ~0.02 gallons.",
+            "es": "⚠️ El frenado brusco desperdicia momentum. Cada evento pierde energía equivalente a ~0.02 galones.",
+        },
+        "severe": {
+            "en": "🚨 Frequent hard braking detected. This indicates late reaction or tailgating. Safety concern.",
+            "es": "🚨 Frenados bruscos frecuentes detectados. Indica reacción tardía o seguir muy cerca. Riesgo de seguridad.",
+        },
+    },
+    "high_rpm": {
+        "mild": {
+            "en": "💡 Tip: Sweet spot is 1200-1600 RPM. Your engine's peak torque = best efficiency.",
+            "es": "💡 Tip: El punto óptimo es 1200-1600 RPM. Torque máximo de tu motor = mejor eficiencia.",
+        },
+        "moderate": {
+            "en": "⚠️ Running above 1800 RPM? That's {rpm_pct:.0f}% above optimal. Upshift earlier to save fuel.",
+            "es": "⚠️ ¿Corriendo arriba de 1800 RPM? Eso es {rpm_pct:.0f}% arriba de lo óptimo. Sube cambio antes.",
+        },
+        "severe": {
+            "en": "🚨 Excessive RPM burning fuel fast. Every minute at 2100+ RPM wastes ~0.02 gal extra.",
+            "es": "🚨 RPM excesivo quema combustible rápido. Cada minuto a 2100+ RPM desperdicia ~0.02 gal extra.",
+        },
+    },
+    "wrong_gear": {
+        "mild": {
+            "en": "💡 Tip: Match RPM to speed. If RPM > 1700 and you can upshift, do it!",
+            "es": "💡 Tip: Sincroniza RPM con velocidad. Si RPM > 1700 y puedes subir cambio, ¡hazlo!",
+        },
+        "moderate": {
+            "en": "⚠️ Wrong gear detected {min:.0f}+ minutes. Upshifting earlier saves ~0.03 gal/min.",
+            "es": "⚠️ Cambio incorrecto detectado {min:.0f}+ minutos. Subir cambio antes ahorra ~0.03 gal/min.",
+        },
+        "severe": {
+            "en": "🚨 Significant wrong gear usage. This is costing ~${waste:.2f}/day in extra fuel.",
+            "es": "🚨 Uso significativo de cambio incorrecto. Esto cuesta ~${waste:.2f}/día en combustible extra.",
+        },
+    },
+    "overspeeding": {
+        "mild": {
+            "en": "💡 Tip: 65 mph = optimal. Each mph above reduces efficiency by ~0.1 MPG.",
+            "es": "💡 Tip: 65 mph = óptimo. Cada mph arriba reduce eficiencia ~0.1 MPG.",
+        },
+        "moderate": {
+            "en": "⚠️ Averaging {avg_speed:.0f} mph. Slowing to 65 could save ~${weekly_savings:.0f}/week.",
+            "es": "⚠️ Promediando {avg_speed:.0f} mph. Bajar a 65 podría ahorrar ~${weekly_savings:.0f}/semana.",
+        },
+        "severe": {
+            "en": "🚨 Speed consistently above 70 mph. Fuel economy drops ~15% compared to 65 mph.",
+            "es": "🚨 Velocidad constantemente arriba de 70 mph. Economía de combustible cae ~15% vs 65 mph.",
+        },
+    },
+    "idle": {
+        "mild": {
+            "en": "💡 Tip: 1 hour idle = 1 gallon. Consider APU or turn off when parked > 3 min.",
+            "es": "💡 Tip: 1 hora idle = 1 galón. Considera APU o apagar cuando estacionas > 3 min.",
+        },
+        "moderate": {
+            "en": "⚠️ Idle time {idle_pct:.0f}% of driving. Fleet avg is {fleet_idle:.0f}%. Reducing saves ~${potential_save:.0f}/month.",
+            "es": "⚠️ Tiempo idle {idle_pct:.0f}% del manejo. Promedio flota es {fleet_idle:.0f}%. Reducir ahorra ~${potential_save:.0f}/mes.",
+        },
+        "severe": {
+            "en": "🚨 Excessive idling detected. You're using ~{idle_gal:.1f} gal/day just sitting still.",
+            "es": "🚨 Ralentí excesivo detectado. Estás usando ~{idle_gal:.1f} gal/día solo estando parado.",
+        },
+    },
+    "mpg_performance": {
+        "below_baseline": {
+            "en": "📊 Your MPG ({mpg:.1f}) is {pct:.0f}% below fleet baseline ({baseline:.1f}). Focus on smooth driving.",
+            "es": "📊 Tu MPG ({mpg:.1f}) está {pct:.0f}% abajo del baseline de flota ({baseline:.1f}). Enfócate en manejo suave.",
+        },
+        "at_baseline": {
+            "en": "✅ On track! Your MPG ({mpg:.1f}) matches fleet baseline. Keep it up!",
+            "es": "✅ ¡En buen camino! Tu MPG ({mpg:.1f}) iguala el baseline de flota. ¡Sigue así!",
+        },
+        "above_baseline": {
+            "en": "🌟 Excellent! Your MPG ({mpg:.1f}) is {pct:.0f}% ABOVE baseline. You're a fuel champion!",
+            "es": "🌟 ¡Excelente! Tu MPG ({mpg:.1f}) está {pct:.0f}% ARRIBA del baseline. ¡Eres un campeón del combustible!",
+        },
+    },
+    "overall_grade": {
+        "A": {
+            "en": "🏆 Grade A - Excellent driver! Share your techniques with the team.",
+            "es": "🏆 Calificación A - ¡Excelente conductor! Comparte tus técnicas con el equipo.",
+        },
+        "B": {
+            "en": "👍 Grade B - Good performance. Small tweaks can push you to A level.",
+            "es": "👍 Calificación B - Buen desempeño. Pequeños ajustes pueden llevarte a nivel A.",
+        },
+        "C": {
+            "en": "📈 Grade C - Room for improvement. Focus on your biggest issue first.",
+            "es": "📈 Calificación C - Espacio para mejorar. Enfócate en tu problema más grande primero.",
+        },
+        "D": {
+            "en": "⚠️ Grade D - Needs attention. Let's schedule a coaching session.",
+            "es": "⚠️ Calificación D - Necesita atención. Programemos una sesión de coaching.",
+        },
+        "F": {
+            "en": "🚨 Grade F - Urgent improvement needed. Contact your fleet manager.",
+            "es": "🚨 Calificación F - Mejora urgente necesaria. Contacta a tu gerente de flota.",
+        },
+    },
+}
+
+
+def generate_coaching_tips(
+    driver_data: Dict[str, Any],
+    language: str = "en",
+    max_tips: int = 5,
+) -> List[Dict[str, Any]]:
+    """
+    Generate personalized coaching tips based on driver performance data.
+    
+    Args:
+        driver_data: Dict with scores, metrics, etc from driver scorecard
+        language: "en" or "es"
+        max_tips: Maximum number of tips to return
+        
+    Returns:
+        List of tip dicts with priority, category, message, and potential_savings
+    """
+    tips = []
+    scores = driver_data.get("scores", {})
+    metrics = driver_data.get("metrics", {})
+    overall_score = driver_data.get("overall_score", 50)
+    grade = driver_data.get("grade", "C")
+    
+    # Fuel price for savings calculations
+    FUEL_PRICE = 3.50  # $/gal
+    BASELINE_MPG = 6.5
+    
+    # Determine severity level based on score
+    def get_severity(score: float) -> str:
+        if score >= 80:
+            return "mild"
+        elif score >= 60:
+            return "moderate"
+        return "severe"
+    
+    # 1. Analyze each behavior category
+    behavior_priorities = []
+    
+    # Speed optimization
+    speed_score = scores.get("speed_optimization", 70)
+    if speed_score < 85:
+        severity = get_severity(speed_score)
+        avg_speed = metrics.get("avg_speed_mph", 65)
+        weekly_miles = metrics.get("total_miles", 500) / 7 * 7  # Weekly projection
+        # Calculate savings: each mph above 65 = ~0.1 MPG loss
+        mph_above_65 = max(0, avg_speed - 65)
+        mpg_loss = mph_above_65 * 0.1
+        weekly_fuel_without = weekly_miles / max(BASELINE_MPG - mpg_loss, 3)
+        weekly_fuel_with = weekly_miles / BASELINE_MPG
+        weekly_savings = (weekly_fuel_without - weekly_fuel_with) * FUEL_PRICE
+        
+        tip_template = COACHING_TIPS_LIBRARY["overspeeding"].get(severity, {})
+        message = tip_template.get(language, tip_template.get("en", ""))
+        message = message.format(avg_speed=avg_speed, weekly_savings=weekly_savings)
+        
+        behavior_priorities.append({
+            "priority": 100 - speed_score,
+            "category": "overspeeding",
+            "message": message,
+            "potential_savings_weekly": round(weekly_savings, 2),
+            "score": speed_score,
+            "severity": severity,
+        })
+    
+    # RPM discipline
+    rpm_score = scores.get("rpm_discipline", 70)
+    if rpm_score < 85:
+        severity = get_severity(rpm_score)
+        avg_rpm = metrics.get("avg_rpm", 1500)
+        rpm_pct = max(0, (avg_rpm - 1600) / 1600 * 100) if avg_rpm > 1600 else 0
+        
+        tip_template = COACHING_TIPS_LIBRARY["high_rpm"].get(severity, {})
+        message = tip_template.get(language, tip_template.get("en", ""))
+        message = message.format(rpm_pct=rpm_pct)
+        
+        # Estimate weekly waste: ~0.02 gal/min at high RPM
+        estimated_high_rpm_mins = (100 - rpm_score) / 100 * 60 * 8  # per day estimate
+        weekly_waste = estimated_high_rpm_mins * 7 * 0.02
+        
+        behavior_priorities.append({
+            "priority": 100 - rpm_score,
+            "category": "high_rpm",
+            "message": message,
+            "potential_savings_weekly": round(weekly_waste * FUEL_PRICE, 2),
+            "score": rpm_score,
+            "severity": severity,
+        })
+    
+    # Idle management
+    idle_score = scores.get("idle_management", 70)
+    if idle_score < 85:
+        severity = get_severity(idle_score)
+        idle_pct = metrics.get("idle_pct", 15)
+        fleet_idle = 10.0  # Assume fleet average
+        
+        # Estimate savings: 1 gal/hour idle, ~8 hours driving/day
+        daily_idle_hours = (idle_pct / 100) * 8
+        monthly_idle_gal = daily_idle_hours * 22  # 22 working days
+        potential_save = monthly_idle_gal * 0.5 * FUEL_PRICE  # Assume can cut 50%
+        
+        tip_template = COACHING_TIPS_LIBRARY["idle"].get(severity, {})
+        message = tip_template.get(language, tip_template.get("en", ""))
+        message = message.format(
+            idle_pct=idle_pct, 
+            fleet_idle=fleet_idle,
+            potential_save=potential_save,
+            idle_gal=daily_idle_hours,
+        )
+        
+        behavior_priorities.append({
+            "priority": 100 - idle_score,
+            "category": "idle_management",
+            "message": message,
+            "potential_savings_weekly": round(potential_save / 4, 2),
+            "score": idle_score,
+            "severity": severity,
+        })
+    
+    # MPG Performance
+    mpg_score = scores.get("mpg_performance", 70)
+    avg_mpg = metrics.get("avg_mpg", BASELINE_MPG)
+    mpg_diff_pct = ((avg_mpg - BASELINE_MPG) / BASELINE_MPG) * 100
+    
+    if mpg_diff_pct < -5:
+        category = "below_baseline"
+        pct = abs(mpg_diff_pct)
+    elif mpg_diff_pct > 5:
+        category = "above_baseline"
+        pct = mpg_diff_pct
+    else:
+        category = "at_baseline"
+        pct = 0
+    
+    tip_template = COACHING_TIPS_LIBRARY["mpg_performance"].get(category, {})
+    message = tip_template.get(language, tip_template.get("en", ""))
+    message = message.format(mpg=avg_mpg, pct=pct, baseline=BASELINE_MPG)
+    
+    behavior_priorities.append({
+        "priority": 50 if category == "below_baseline" else 10,
+        "category": "mpg_performance",
+        "message": message,
+        "potential_savings_weekly": 0,
+        "score": mpg_score,
+        "severity": "info",
+    })
+    
+    # Overall grade tip
+    grade_key = grade[0] if grade else "C"  # Handle "A+", "A-", etc.
+    tip_template = COACHING_TIPS_LIBRARY["overall_grade"].get(grade_key, {})
+    message = tip_template.get(language, tip_template.get("en", ""))
+    
+    behavior_priorities.append({
+        "priority": 5,  # Always show but low priority
+        "category": "overall_grade",
+        "message": message,
+        "potential_savings_weekly": 0,
+        "score": overall_score,
+        "severity": "info",
+    })
+    
+    # Sort by priority (highest first) and take top N
+    behavior_priorities.sort(key=lambda x: x["priority"], reverse=True)
+    tips = behavior_priorities[:max_tips]
+    
+    return tips
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # GLOBAL INSTANCE
 # ═══════════════════════════════════════════════════════════════════════════════
 

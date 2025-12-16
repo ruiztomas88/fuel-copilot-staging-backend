@@ -65,6 +65,10 @@ try:
         get_driver_scorecard,
         get_enhanced_kpis,
         get_enhanced_loss_analysis,
+        # Driver Score History v1.1.0
+        get_driver_score_history,
+        get_driver_score_trend,
+        save_driver_score_history,
         # Route & Cost Functions
         get_route_efficiency_analysis,
         get_cost_attribution_report,
@@ -195,6 +199,11 @@ __all__ = [
     "get_driver_scorecard",
     "get_enhanced_kpis",
     "get_enhanced_loss_analysis",
+    # Driver Score History v1.1.0
+    "get_driver_score_history",
+    "get_driver_score_trend",
+    "save_driver_score_history",
+    # Routes
     "get_route_efficiency_analysis",
     "get_cost_attribution_report",
     "get_geofence_events",
