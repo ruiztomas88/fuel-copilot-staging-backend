@@ -1,6 +1,6 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                    🎯 FLEET COMMAND CENTER v1.0.0                              ║
+║                    🎯 FLEET COMMAND CENTER v1.1.0                              ║
 ║                                                                                ║
 ║       The UNIFIED source of truth for fleet health and maintenance            ║
 ║                                                                                ║
@@ -16,11 +16,19 @@
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 Author: Fuel Copilot Team
-Version: 1.0.0
+Version: 1.1.0 - Algorithmic improvements based on AI code review
 Created: December 2025
+Updated: January 2025
+
+CHANGELOG v1.1.0:
+- Added weighted priority scoring by component criticality
+- Replaced counter-based IDs with UUID for thread safety
+- Added comprehensive cost database replacing string parsing
+- Improved pattern detection thresholds (% of fleet vs fixed count)
 """
 
 import logging
+import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
@@ -292,9 +300,15 @@ class CommandCenterData:
 class FleetCommandCenter:
     """
     Main engine that combines all data sources into unified actionable insights.
+
+    v1.1.0 Improvements:
+    - Component criticality weights for more accurate prioritization
+    - UUID-based action IDs for thread safety
+    - Comprehensive cost database
+    - Fleet-size-aware pattern detection
     """
 
-    VERSION = "1.0.0"
+    VERSION = "1.1.0"
 
     # Component to category mapping
     COMPONENT_CATEGORIES = {
@@ -331,27 +345,118 @@ class FleetCommandCenter:
         "DTC": "🔧",
     }
 
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # v1.1.0: COMPONENT CRITICALITY WEIGHTS
+    # Higher weight = higher priority boost for same days_to_critical
+    # Based on: safety impact, cost of failure, fleet downtime risk
+    # ═══════════════════════════════════════════════════════════════════════════════
+    COMPONENT_CRITICALITY = {
+        # Safety-critical (3.0x) - Can cause accidents or strand vehicle
+        "Transmisión": 3.0,
+        "Sistema de frenos de aire": 3.0,
+        "Sistema eléctrico": 2.8,  # Battery = stranded
+        # High-cost failure (2.5x) - Expensive repair if ignored
+        "Turbocompresor": 2.5,
+        "Turbo / Intercooler": 2.5,
+        "Sistema de enfriamiento": 2.3,  # Engine damage if overheat
+        # Compliance/Operational (2.0x) - Fines or operational issues
+        "Sistema DEF": 2.0,  # EPA fines, limp mode
+        "Sistema de lubricación": 2.0,
+        "Sistema de combustible": 1.8,
+        # Monitoring/Efficiency (1.0x) - Important but not urgent
+        "Bomba de aceite / Filtro": 1.5,
+        "Intercooler": 1.5,
+        "Eficiencia general": 1.0,
+        "GPS": 0.8,
+        "Voltaje": 1.0,
+        "DTC": 1.2,
+    }
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # v1.1.0: COST DATABASE
+    # Replaces string parsing with structured cost data
+    # Values in USD, based on industry averages for Class 8 trucks
+    # ═══════════════════════════════════════════════════════════════════════════════
+    COMPONENT_COSTS = {
+        "Transmisión": {"min": 8000, "max": 15000, "avg": 11500},
+        "Sistema de frenos de aire": {"min": 2000, "max": 5000, "avg": 3500},
+        "Sistema eléctrico": {"min": 1500, "max": 4000, "avg": 2750},
+        "Turbocompresor": {"min": 3500, "max": 6000, "avg": 4750},
+        "Turbo / Intercooler": {"min": 3500, "max": 6000, "avg": 4750},
+        "Sistema de enfriamiento": {"min": 2000, "max": 5000, "avg": 3500},
+        "Sistema DEF": {"min": 1500, "max": 4000, "avg": 2750},
+        "Sistema de lubricación": {"min": 1000, "max": 3000, "avg": 2000},
+        "Sistema de combustible": {"min": 800, "max": 2500, "avg": 1650},
+        "Bomba de aceite / Filtro": {"min": 500, "max": 1500, "avg": 1000},
+        "Intercooler": {"min": 1000, "max": 2500, "avg": 1750},
+        "Eficiencia general": {"min": 0, "max": 500, "avg": 250},
+        "GPS": {"min": 100, "max": 500, "avg": 300},
+        "Voltaje": {"min": 200, "max": 800, "avg": 500},
+        "DTC": {"min": 100, "max": 2000, "avg": 1050},
+    }
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # v1.1.0: PATTERN DETECTION THRESHOLDS
+    # Based on percentage of fleet, not fixed count
+    # ═══════════════════════════════════════════════════════════════════════════════
+    PATTERN_THRESHOLDS = {
+        "fleet_wide_issue_pct": 0.15,  # 15% of fleet with same issue = pattern
+        "min_trucks_for_pattern": 2,  # Minimum trucks to declare pattern
+        "anomaly_threshold": 0.7,  # Anomaly score threshold for flagging
+    }
+
     def __init__(self):
+        # Note: _action_counter kept for backward compatibility but not used for IDs
         self._action_counter = 0
 
     def _generate_action_id(self) -> str:
-        """Generate unique action ID"""
-        self._action_counter += 1
-        return f"ACT-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{self._action_counter:04d}"
+        """
+        Generate unique action ID using UUID for thread safety.
+
+        v1.1.0: Changed from counter-based to UUID-based to prevent
+        race conditions in concurrent environments.
+        """
+        return f"ACT-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+
+    def _get_component_cost(self, component: str) -> Dict[str, int]:
+        """
+        Get cost estimate for a component from the cost database.
+
+        v1.1.0: New method replacing string parsing.
+        """
+        return self.COMPONENT_COSTS.get(
+            component, {"min": 500, "max": 2000, "avg": 1250}
+        )
+
+    def _format_cost_string(self, component: str) -> str:
+        """
+        Format cost as user-friendly string.
+
+        v1.1.0: Uses cost database instead of hardcoded strings.
+        """
+        cost = self._get_component_cost(component)
+        return f"${cost['min']:,} - ${cost['max']:,}"
 
     def _calculate_priority_score(
         self,
         days_to_critical: Optional[float],
         anomaly_score: Optional[float] = None,
         cost_estimate: Optional[str] = None,
+        component: Optional[str] = None,
     ) -> Tuple[Priority, float]:
         """
         Calculate combined priority score from multiple signals.
 
+        v1.1.0 Improvements:
+        - Added component criticality weighting
+        - Uses cost database instead of string parsing
+        - More nuanced scoring formula
+
         Score formula:
         - Base from days_to_critical: 100 - (days * 5), capped at 100
         - Anomaly bonus: anomaly_score * 0.2 (up to +20 points)
-        - Cost multiplier: +5 for high cost estimates
+        - Component criticality multiplier: 1.0 - 3.0x
+        - Cost factor: Based on avg cost from database
 
         Thresholds:
         - 85+: CRITICAL
@@ -381,8 +486,29 @@ class FleetCommandCenter:
         if anomaly_score is not None:
             score += anomaly_score * 0.2
 
-        # High cost items get slight boost
-        if cost_estimate and ("15,000" in cost_estimate or "10,000" in cost_estimate):
+        # v1.1.0: Component criticality multiplier
+        # Apply a weighted boost based on component importance
+        if component:
+            criticality = self.COMPONENT_CRITICALITY.get(component, 1.0)
+            # Scale the score by criticality, but cap the boost to prevent runaway scores
+            # A criticality of 3.0 can boost a 50 score to ~75 (50 * 1.5)
+            # Formula: score + (score * (criticality - 1) * 0.5)
+            criticality_boost = (criticality - 1.0) * 0.5
+            score = score * (1 + criticality_boost)
+
+        # v1.1.0: Cost factor using database instead of string parsing
+        if component:
+            cost_data = self._get_component_cost(component)
+            avg_cost = cost_data.get("avg", 0)
+            # High cost items (>$5000 avg) get +5, very high (>$10000) get +10
+            if avg_cost >= 10000:
+                score += 10
+            elif avg_cost >= 5000:
+                score += 5
+            elif avg_cost >= 3000:
+                score += 2
+        elif cost_estimate and ("15,000" in cost_estimate or "10,000" in cost_estimate):
+            # Fallback to old string parsing for backward compatibility
             score += 5
 
         # Clamp to 0-100
@@ -541,7 +667,7 @@ class FleetCommandCenter:
                     f"🚨 {len(trucks)} camiones requieren atención inmediata"
                 )
 
-        # Component patterns
+        # Component patterns - v1.1.0: Use % of fleet instead of fixed count
         components = [
             item.component
             for item in action_items
@@ -551,9 +677,17 @@ class FleetCommandCenter:
             from collections import Counter
 
             common = Counter(components).most_common(2)
-            if common[0][1] >= 2:
+            # v1.1.0: Calculate threshold based on fleet size
+            fleet_size = len(set(item.truck_id for item in action_items)) or 1
+            pattern_threshold = max(
+                self.PATTERN_THRESHOLDS["min_trucks_for_pattern"],
+                int(fleet_size * self.PATTERN_THRESHOLDS["fleet_wide_issue_pct"]),
+            )
+
+            if common[0][1] >= pattern_threshold:
+                pct = (common[0][1] / fleet_size) * 100 if fleet_size > 0 else 0
                 insights.append(
-                    f"📊 Patrón detectado: {common[0][1]} camiones con problemas en {common[0][0]}"
+                    f"📊 Patrón detectado: {common[0][1]} camiones ({pct:.0f}% de flota) con problemas en {common[0][0]}"
                 )
 
         # Transmission warnings (expensive!)
@@ -659,12 +793,13 @@ class FleetCommandCenter:
 
             # Convert PM predictions to action items
             for item in pm_data.get("critical_items", []):
+                component = item.get("component", "Unknown")
                 priority, score = self._calculate_priority_score(
                     days_to_critical=item.get("days_to_critical"),
                     cost_estimate=item.get("cost_if_fail"),
+                    component=component,
                 )
 
-                component = item.get("component", "Unknown")
                 category = self.COMPONENT_CATEGORIES.get(
                     component, IssueCategory.ENGINE
                 )
@@ -699,14 +834,15 @@ class FleetCommandCenter:
 
             # Also add high priority items
             for item in pm_data.get("high_priority_items", []):
+                component = item.get("component", "Unknown")
                 priority, score = self._calculate_priority_score(
                     days_to_critical=item.get("days_to_critical"),
+                    component=component,
                 )
 
                 if priority == Priority.CRITICAL:
                     continue  # Already added above
 
-                component = item.get("component", "Unknown")
                 category = self.COMPONENT_CATEGORIES.get(
                     component, IssueCategory.ENGINE
                 )
