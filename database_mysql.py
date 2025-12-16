@@ -4976,6 +4976,7 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 v6.2.4: SENSOR HEALTH SUMMARY FOR COMMAND CENTER
 # 🔧 v6.2.5: Fixed voltage threshold to match email alerts (12.2V)
+# 🔧 v6.2.6: Fixed column name: battery_voltage (not pwr_ext)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -4983,6 +4984,7 @@ def get_sensor_health_summary() -> Dict[str, Any]:
     """
     🆕 v6.2.4: Get fleet-wide sensor health summary for Command Center.
     🔧 v6.2.5: Fixed voltage threshold to match email alerts
+    🔧 v6.2.6: Fixed column name to battery_voltage
 
     Returns counts of trucks with various sensor issues:
     - GPS quality problems
@@ -4999,13 +5001,14 @@ def get_sensor_health_summary() -> Dict[str, Any]:
         # 🔧 v6.2.5: Voltage thresholds match voltage_monitor.py
         # LOW: < 12.2V (battery_low threshold)
         # HIGH: > 15.0V (charging_high threshold)
+        # 🔧 v6.2.6: Column is battery_voltage, not pwr_ext
 
         # Query to get sensor health status from latest records
         query = """
             WITH latest_records AS (
                 SELECT 
                     truck_id,
-                    pwr_ext,
+                    battery_voltage,
                     dtc,
                     gps_fix_quality,
                     idle_gph,
@@ -5016,8 +5019,8 @@ def get_sensor_health_summary() -> Dict[str, Any]:
             SELECT 
                 COUNT(DISTINCT truck_id) as total_trucks,
                 SUM(CASE 
-                    WHEN pwr_ext IS NOT NULL AND pwr_ext < 12.2 THEN 1 
-                    WHEN pwr_ext IS NOT NULL AND pwr_ext > 15.0 THEN 1
+                    WHEN battery_voltage IS NOT NULL AND battery_voltage > 0 AND battery_voltage < 12.2 THEN 1 
+                    WHEN battery_voltage IS NOT NULL AND battery_voltage > 15.0 THEN 1
                     ELSE 0 
                 END) as voltage_issues,
                 SUM(CASE WHEN dtc > 0 THEN 1 ELSE 0 END) as dtc_active,
@@ -5029,10 +5032,10 @@ def get_sensor_health_summary() -> Dict[str, Any]:
                     WHEN idle_gph IS NOT NULL AND (idle_gph < 0.3 OR idle_gph > 2.5) THEN 1 
                     ELSE 0 
                 END) as idle_deviation,
-                -- 🔧 v6.2.5: Diagnostic info
-                COUNT(CASE WHEN pwr_ext IS NOT NULL THEN 1 END) as trucks_with_voltage_data,
-                MIN(pwr_ext) as min_voltage,
-                MAX(pwr_ext) as max_voltage
+                -- 🔧 v6.2.6: Diagnostic info
+                COUNT(CASE WHEN battery_voltage IS NOT NULL AND battery_voltage > 0 THEN 1 END) as trucks_with_voltage_data,
+                MIN(CASE WHEN battery_voltage > 0 THEN battery_voltage END) as min_voltage,
+                MAX(battery_voltage) as max_voltage
             FROM latest_records
             WHERE rn = 1
         """
