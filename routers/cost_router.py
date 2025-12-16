@@ -28,6 +28,8 @@ async def get_fleet_cost_per_mile(
         from database import db
         from sqlalchemy import text
 
+        logger.info(f"Starting cost per mile analysis for {days} days")
+        
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
 
@@ -50,28 +52,33 @@ async def get_fleet_cost_per_mile(
             with engine.connect() as conn:
                 result = conn.execute(text(query), {"days": days})
                 rows = result.fetchall()
+                logger.info(f"Query returned {len(rows)} trucks")
 
             # 🔧 v6.2.2: Simplified - 4 columns now (removed gallons from SQL)
             # row[0]=truck_id, row[1]=miles, row[2]=engine_hours, row[3]=avg_mpg
             for row in rows:
-                miles = float(row[1] or 0)
-                engine_hours = float(row[2] or 0)
-                avg_mpg = float(row[3] or 5.5)
-                if avg_mpg < 3:
-                    avg_mpg = 5.5
+                try:
+                    miles = float(row[1] or 0)
+                    engine_hours = float(row[2] or 0)
+                    avg_mpg = float(row[3] if row[3] is not None else 5.5)
+                    if avg_mpg < 3 or avg_mpg > 12:
+                        avg_mpg = 5.5
 
-                # Calculate gallons from miles/mpg
-                gallons = miles / avg_mpg if avg_mpg > 0 else 0
+                    # Calculate gallons from miles/mpg
+                    gallons = miles / avg_mpg if avg_mpg > 0 else 0
 
-                trucks_data.append(
-                    {
-                        "truck_id": row[0],
-                        "miles": miles,
-                        "gallons": gallons,
-                        "engine_hours": engine_hours,
-                        "avg_mpg": avg_mpg,
-                    }
-                )
+                    trucks_data.append(
+                        {
+                            "truck_id": row[0],
+                            "miles": miles,
+                            "gallons": gallons,
+                            "engine_hours": engine_hours,
+                            "avg_mpg": avg_mpg,
+                        }
+                    )
+                except Exception as row_err:
+                    logger.warning(f"Error processing row {row[0]}: {row_err}")
+                    continue
         except Exception as db_err:
             logger.warning(f"DB query failed, using fallback: {db_err}")
 
