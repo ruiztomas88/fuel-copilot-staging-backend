@@ -1244,13 +1244,13 @@ def get_driver_scorecard(days_back: int = 7) -> Dict[str, Any]:
             -- Total Records
             COUNT(*) as total_records,
             
-            -- Distance
+            -- Distance (use odom_delta_mi sum for accurate mileage)
             SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 10 THEN odom_delta_mi ELSE 0 END) as total_miles
             
         FROM fuel_metrics
-        WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
+        WHERE timestamp_utc > UTC_TIMESTAMP() - INTERVAL :days_back DAY
         GROUP BY truck_id
-        HAVING total_records > 10
+        HAVING total_records > 5 AND total_moving_count > 0
     """
     )
 
@@ -1393,19 +1393,18 @@ def get_driver_scorecard(days_back: int = 7) -> Dict[str, Any]:
             for i, driver in enumerate(drivers, 1):
                 driver["rank"] = i
 
+            # 🔧 v6.2.1: Calculate fleet idle % correctly
+            # fleet_idle_avg = sum of all idle_counts
+            # We need to divide by total of all records across all trucks
+            total_fleet_records = sum(int(r[15] or 0) for r in results) if results else 1
+            fleet_idle_pct_correct = (fleet_idle_avg / max(total_fleet_records, 1)) * 100 if results else 0
+
             return {
                 "period_days": days_back,
                 "driver_count": len(drivers),
                 "fleet_avg": {
                     "mpg": round(fleet_mpg_avg, 2),
-                    "idle_pct": round(
-                        (
-                            (fleet_idle_avg / (total_records / len(results))) * 100
-                            if results
-                            else 0
-                        ),
-                        1,
-                    ),
+                    "idle_pct": round(min(fleet_idle_pct_correct, 100), 1),  # Cap at 100%
                     "baseline_mpg": BASELINE_MPG,
                 },
                 "drivers": drivers,

@@ -31,14 +31,18 @@ async def get_fleet_cost_per_mile(
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
 
+        # 🔧 v6.2.1: Fixed query - use SUM(odom_delta_mi) instead of MAX-MIN
+        # MAX-MIN odometer gives wildly inflated values if there are gaps or resets
         query = """
             SELECT 
                 truck_id,
-                (MAX(odometer_mi) - MIN(odometer_mi)) as miles,
-                MAX(engine_hours) - MIN(engine_hours) as engine_hours,
+                SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 100 THEN odom_delta_mi ELSE 0 END) as miles,
+                SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 100 THEN 
+                    odom_delta_mi / NULLIF(mpg_current, 0) ELSE 0 END) as gallons,
+                COUNT(DISTINCT DATE(timestamp_utc)) * 8 as engine_hours,
                 AVG(CASE WHEN mpg_current > 3 AND mpg_current < 12 THEN mpg_current END) as avg_mpg
             FROM fuel_metrics
-            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+            WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :days DAY)
             GROUP BY truck_id
             HAVING miles > 10
         """
