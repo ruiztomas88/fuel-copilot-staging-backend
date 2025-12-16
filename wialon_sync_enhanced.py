@@ -2141,7 +2141,9 @@ def sync_cycle(
                         # Turbo sensors (may be None until Pacific Track enables them)
                         "turbo_temp": getattr(truck_data, "turbo_temp", None),
                         "boost_pressure": getattr(truck_data, "boost_pressure", None),
-                        "intercooler_temp": getattr(truck_data, "intercooler_temp", None),
+                        "intercooler_temp": getattr(
+                            truck_data, "intercooler_temp", None
+                        ),
                         # Transmission
                         "trans_temp": getattr(truck_data, "trans_temp", None),
                         # Fuel system
@@ -2151,7 +2153,9 @@ def sync_cycle(
                         # DEF
                         "def_level": truck_data.def_level,
                         # Brakes
-                        "brake_air_pressure": getattr(truck_data, "brake_app_press", None),
+                        "brake_air_pressure": getattr(
+                            truck_data, "brake_app_press", None
+                        ),
                         # Efficiency (from MPG engine)
                         "mpg": sensor_data.get("mpg"),
                     },

@@ -721,7 +721,7 @@ async def get_truck_maintenance_status(truck_id: str):
     Get predictive maintenance status for a truck.
 
     Uses sensor trend analysis to predict when components will need service.
-    
+
     Example: "Trans temp subiendo +2.1°F/día → llegará a zona crítica en ~5 días"
 
     Sensors analyzed:
@@ -756,7 +756,7 @@ async def get_maintenance_alerts(truck_id: str):
     Get active maintenance alerts for a truck.
 
     Only returns CRITICAL and HIGH priority items that need attention.
-    
+
     Alerts include:
     - Days until component reaches critical threshold
     - Current value and trend
@@ -789,7 +789,7 @@ async def get_fleet_maintenance():
     - Top critical items requiring immediate attention
     - High priority items for this week
     - Fleet-wide recommendations
-    
+
     Example insight:
     "3 camiones con problemas en Transmisión - considerar revisión de flota"
     """
@@ -835,4 +835,3 @@ async def get_sensor_trend(truck_id: str, sensor_name: str):
         )
 
     return trend
-
