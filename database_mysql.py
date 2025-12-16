@@ -4975,16 +4975,18 @@ def get_inefficiency_by_truck(days_back: int = 30, sort_by: str = "total_cost") 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 v6.2.4: SENSOR HEALTH SUMMARY FOR COMMAND CENTER
+# 🔧 v6.2.5: Fixed voltage threshold to match email alerts (12.2V)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 def get_sensor_health_summary() -> Dict[str, Any]:
     """
     🆕 v6.2.4: Get fleet-wide sensor health summary for Command Center.
+    🔧 v6.2.5: Fixed voltage threshold to match email alerts
 
     Returns counts of trucks with various sensor issues:
     - GPS quality problems
-    - Voltage issues (battery/alternator)
+    - Voltage issues (battery/alternator) - threshold: <12.2V or >15.0V
     - Active DTCs
     - Idle calculation deviations
 
@@ -4993,6 +4995,10 @@ def get_sensor_health_summary() -> Dict[str, Any]:
     """
     try:
         engine = get_sqlalchemy_engine()
+
+        # 🔧 v6.2.5: Voltage thresholds match voltage_monitor.py
+        # LOW: < 12.2V (battery_low threshold)
+        # HIGH: > 15.0V (charging_high threshold)
 
         # Query to get sensor health status from latest records
         query = """
@@ -5010,7 +5016,7 @@ def get_sensor_health_summary() -> Dict[str, Any]:
             SELECT 
                 COUNT(DISTINCT truck_id) as total_trucks,
                 SUM(CASE 
-                    WHEN pwr_ext IS NOT NULL AND pwr_ext < 12.4 THEN 1 
+                    WHEN pwr_ext IS NOT NULL AND pwr_ext < 12.2 THEN 1 
                     WHEN pwr_ext IS NOT NULL AND pwr_ext > 15.0 THEN 1
                     ELSE 0 
                 END) as voltage_issues,
@@ -5022,7 +5028,11 @@ def get_sensor_health_summary() -> Dict[str, Any]:
                 SUM(CASE 
                     WHEN idle_gph IS NOT NULL AND (idle_gph < 0.3 OR idle_gph > 2.5) THEN 1 
                     ELSE 0 
-                END) as idle_deviation
+                END) as idle_deviation,
+                -- 🔧 v6.2.5: Diagnostic info
+                COUNT(CASE WHEN pwr_ext IS NOT NULL THEN 1 END) as trucks_with_voltage_data,
+                MIN(pwr_ext) as min_voltage,
+                MAX(pwr_ext) as max_voltage
             FROM latest_records
             WHERE rn = 1
         """
@@ -5032,14 +5042,39 @@ def get_sensor_health_summary() -> Dict[str, Any]:
             row = result.fetchone()
 
         if row:
+            total_trucks = int(row[0] or 0)
+            voltage_issues = int(row[1] or 0)
+            dtc_active = int(row[2] or 0)
+            gps_issues = int(row[3] or 0)
+            idle_deviation = int(row[4] or 0)
+            trucks_with_voltage = int(row[5] or 0)
+            min_voltage = float(row[6]) if row[6] else None
+            max_voltage = float(row[7]) if row[7] else None
+
+            logger.info(
+                f"[SensorHealth] Trucks: {total_trucks}, "
+                f"Voltage issues: {voltage_issues}, "
+                f"Trucks with voltage data: {trucks_with_voltage}, "
+                f"Min V: {min_voltage}, Max V: {max_voltage}"
+            )
+
             return {
-                "total_trucks": int(row[0] or 0),
-                "trucks_with_voltage_issues": int(row[1] or 0),
-                "trucks_with_dtc_active": int(row[2] or 0),
-                "trucks_with_gps_issues": int(row[3] or 0),
-                "trucks_with_idle_deviation": int(row[4] or 0),
+                "total_trucks": total_trucks,
+                "trucks_with_voltage_issues": voltage_issues,
+                "trucks_with_dtc_active": dtc_active,
+                "trucks_with_gps_issues": gps_issues,
+                "trucks_with_idle_deviation": idle_deviation,
+                # 🆕 v6.2.5: Diagnostic info
+                "_debug": {
+                    "trucks_with_voltage_data": trucks_with_voltage,
+                    "min_voltage": min_voltage,
+                    "max_voltage": max_voltage,
+                    "voltage_threshold_low": 12.2,
+                    "voltage_threshold_high": 15.0,
+                },
             }
         else:
+            logger.warning("[SensorHealth] No data returned from query")
             return {
                 "total_trucks": 0,
                 "trucks_with_voltage_issues": 0,
@@ -5049,7 +5084,7 @@ def get_sensor_health_summary() -> Dict[str, Any]:
             }
 
     except Exception as e:
-        logger.error(f"Error in get_sensor_health_summary: {e}")
+        logger.error(f"Error in get_sensor_health_summary: {e}", exc_info=True)
         return {
             "total_trucks": 0,
             "trucks_with_voltage_issues": 0,

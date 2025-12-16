@@ -884,14 +884,23 @@ class DriverBehaviorEngine:
         """
         Get fleet-wide behavior summary.
 
+        🔧 v6.2.5: Now loads from database if no in-memory data available.
+
         Returns breakdown of:
         - Best/worst performers
         - Total fuel waste by category
         - Common issues
         """
-        if not self.truck_states:
-            return {"error": "No truck data available"}
+        # If we have in-memory state, use it
+        if self.truck_states:
+            return self._get_behavior_summary_from_memory()
 
+        # Otherwise, load from database
+        logger.info("[BehaviorEngine] No in-memory state, loading from database...")
+        return self._get_behavior_summary_from_database()
+
+    def _get_behavior_summary_from_memory(self) -> Dict[str, Any]:
+        """Get behavior summary from in-memory truck states"""
         scores = []
         total_waste = {
             "hard_acceleration": 0.0,
@@ -931,7 +940,233 @@ class DriverBehaviorEngine:
             "recommendations": self._generate_fleet_recommendations(
                 scores, total_waste
             ),
+            "data_source": "real-time",
         }
+
+    def _get_behavior_summary_from_database(self) -> Dict[str, Any]:
+        """
+        🆕 v6.2.5: Get behavior summary from database (last 7 days).
+
+        Uses harsh_accel, harsh_brake columns from fuel_metrics table.
+        Calculates scores based on event counts per truck.
+        """
+        try:
+            from sqlalchemy import text
+            from database_mysql import get_sqlalchemy_engine
+
+            engine = get_sqlalchemy_engine()
+
+            # Get behavior events from last 7 days
+            query = """
+                SELECT 
+                    truck_id,
+                    SUM(COALESCE(harsh_accel, 0)) as total_harsh_accel,
+                    SUM(COALESCE(harsh_brake, 0)) as total_harsh_brake,
+                    -- High RPM: count minutes where RPM > 1800
+                    SUM(CASE WHEN rpm > 1800 THEN 0.25 ELSE 0 END) as high_rpm_minutes,
+                    -- Overspeeding: count minutes where speed > 65
+                    SUM(CASE WHEN speed > 65 THEN 0.25 ELSE 0 END) as overspeed_minutes,
+                    -- MPG data for scoring
+                    AVG(CASE WHEN speed > 10 THEN mpg_current END) as avg_mpg,
+                    COUNT(DISTINCT DATE(timestamp_utc)) as active_days
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 7 DAY)
+                GROUP BY truck_id
+                HAVING active_days >= 1
+                ORDER BY total_harsh_accel + total_harsh_brake DESC
+            """
+
+            with engine.connect() as conn:
+                result = conn.execute(text(query))
+                rows = result.fetchall()
+
+            if not rows:
+                return {
+                    "error": "No truck data available in database for the last 7 days"
+                }
+
+            # Calculate scores and waste for each truck
+            truck_data = []
+            total_waste = {
+                "hard_acceleration": 0.0,
+                "hard_braking": 0.0,
+                "high_rpm": 0.0,
+                "wrong_gear": 0.0,
+                "overspeeding": 0.0,
+            }
+
+            for row in rows:
+                truck_id = row[0]
+                harsh_accel = int(row[1] or 0)
+                harsh_brake = int(row[2] or 0)
+                high_rpm_min = float(row[3] or 0)
+                overspeed_min = float(row[4] or 0)
+                avg_mpg = float(row[5]) if row[5] else 6.5  # Default if no MPG data
+                active_days = int(row[6] or 1)
+
+                # Calculate daily averages
+                daily_accel = harsh_accel / active_days
+                daily_brake = harsh_brake / active_days
+
+                # Calculate score (100 = perfect, lower = worse)
+                # Deduct points for each behavior event
+                # Max deductions: 50 points total
+                accel_penalty = min(daily_accel * 2, 15)  # Up to 15 points
+                brake_penalty = min(daily_brake * 1.5, 10)  # Up to 10 points
+                rpm_penalty = min(
+                    high_rpm_min / active_days * 0.5, 10
+                )  # Up to 10 points
+                speed_penalty = min(
+                    overspeed_min / active_days * 0.3, 15
+                )  # Up to 15 points
+
+                score = max(
+                    0, 100 - accel_penalty - brake_penalty - rpm_penalty - speed_penalty
+                )
+
+                # Calculate fuel waste estimates (gallons)
+                waste_accel = harsh_accel * self.config.fuel_waste_hard_accel_gal
+                waste_brake = harsh_brake * self.config.fuel_waste_hard_brake_gal
+                waste_rpm = high_rpm_min * self.config.fuel_waste_high_rpm_gal_per_min
+                waste_speed = (
+                    overspeed_min * self.config.fuel_waste_overspeeding_gal_per_min
+                )
+
+                total_waste["hard_acceleration"] += waste_accel
+                total_waste["hard_braking"] += waste_brake
+                total_waste["high_rpm"] += waste_rpm
+                total_waste["overspeeding"] += waste_speed
+
+                # Determine grade
+                if score >= 90:
+                    grade = "A"
+                elif score >= 80:
+                    grade = "B"
+                elif score >= 70:
+                    grade = "C"
+                elif score >= 60:
+                    grade = "D"
+                else:
+                    grade = "F"
+
+                # Determine trend (simplified - would need more history)
+                trend = "stable"
+
+                truck_data.append(
+                    {
+                        "truck_id": truck_id,
+                        "score": round(score, 1),
+                        "grade": grade,
+                        "trend": trend,
+                        "components": {
+                            "hard_accel_events": harsh_accel,
+                            "hard_brake_events": harsh_brake,
+                            "high_rpm_minutes": round(high_rpm_min, 1),
+                            "overspeed_minutes": round(overspeed_min, 1),
+                            "daily_avg_accel": round(daily_accel, 1),
+                            "daily_avg_brake": round(daily_brake, 1),
+                        },
+                        "fuel_waste": {
+                            "total_gal": round(
+                                waste_accel + waste_brake + waste_rpm + waste_speed, 2
+                            ),
+                            "accel_gal": round(waste_accel, 3),
+                            "brake_gal": round(waste_brake, 3),
+                            "rpm_gal": round(waste_rpm, 3),
+                            "speed_gal": round(waste_speed, 3),
+                        },
+                        "avg_mpg": round(avg_mpg, 1),
+                        "active_days": active_days,
+                    }
+                )
+
+            # Sort by score
+            truck_data.sort(key=lambda x: x["score"])
+
+            # Calculate average score
+            avg_score = (
+                sum(t["score"] for t in truck_data) / len(truck_data)
+                if truck_data
+                else 0
+            )
+
+            # Identify biggest issue
+            biggest_waste = max(total_waste.items(), key=lambda x: x[1])
+
+            # Generate recommendations
+            recommendations = self._generate_fleet_recommendations_from_data(
+                truck_data, total_waste, avg_score
+            )
+
+            return {
+                "fleet_size": len(truck_data),
+                "average_score": round(avg_score, 1),
+                "best_performers": (
+                    truck_data[-3:][::-1] if len(truck_data) >= 3 else truck_data[::-1]
+                ),  # Top 3 (highest scores)
+                "worst_performers": truck_data[:3],  # Bottom 3 (lowest scores)
+                "total_fuel_waste_gal": round(sum(total_waste.values()), 2),
+                "waste_breakdown": {k: round(v, 3) for k, v in total_waste.items()},
+                "biggest_issue": {
+                    "category": biggest_waste[0],
+                    "gallons": round(biggest_waste[1], 2),
+                },
+                "recommendations": recommendations,
+                "data_source": "database",
+                "period_days": 7,
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Error loading behavior summary from database: {e}", exc_info=True
+            )
+            return {"error": f"Failed to load behavior data: {str(e)}"}
+
+    def _generate_fleet_recommendations_from_data(
+        self, truck_data: List[Dict], waste: Dict[str, float], avg_score: float
+    ) -> List[str]:
+        """Generate recommendations based on database data"""
+        recommendations = []
+
+        if avg_score < 70:
+            recommendations.append(
+                "🚨 Fleet average score is below 70 - consider driver training program"
+            )
+        elif avg_score >= 85:
+            recommendations.append(
+                "✅ Fleet is performing well! Focus on maintaining good habits."
+            )
+
+        # Check biggest waste category
+        max_waste_category = max(waste.items(), key=lambda x: x[1])
+
+        if max_waste_category[1] > 0:
+            if max_waste_category[0] == "hard_acceleration":
+                recommendations.append(
+                    "⚡ Hard acceleration is primary fuel waste source - train drivers on smooth acceleration"
+                )
+            elif max_waste_category[0] == "hard_braking":
+                recommendations.append(
+                    "🛑 Frequent hard braking detected - encourage anticipatory driving"
+                )
+            elif max_waste_category[0] == "high_rpm":
+                recommendations.append(
+                    "🔧 High RPM operation is wasting fuel - train drivers on optimal RPM range (1200-1600)"
+                )
+            elif max_waste_category[0] == "overspeeding":
+                recommendations.append(
+                    "🏎️ Overspeeding is wasting fuel - each mph above 65 reduces efficiency by ~0.1 MPG"
+                )
+
+        # Check for outliers
+        outliers = [t for t in truck_data if t["score"] < 50]
+        if outliers:
+            truck_ids = [t["truck_id"] for t in outliers]
+            recommendations.append(
+                f"⚠️ {len(outliers)} trucks need immediate attention: {', '.join(truck_ids[:5])}"
+            )
+
+        return recommendations
 
     def _generate_fleet_recommendations(
         self, scores: List[HeavyFootScore], waste: Dict[str, float]
