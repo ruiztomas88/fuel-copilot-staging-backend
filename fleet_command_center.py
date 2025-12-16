@@ -30,7 +30,7 @@ CHANGELOG v1.1.0:
 import logging
 import uuid
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 import json
@@ -1312,12 +1312,18 @@ def get_command_center() -> FleetCommandCenter:
 # API ROUTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 router = APIRouter(
     prefix="/fuelAnalytics/api/command-center", tags=["Fleet Command Center"]
 )
+
+# v1.1.0: Cache configuration for performance with 45+ trucks
+CACHE_TTL_DASHBOARD = 30  # 30 seconds - balances freshness vs performance
+CACHE_TTL_ACTIONS = 15  # 15 seconds - more real-time for action items
+CACHE_KEY_DASHBOARD = "command_center:dashboard"
+CACHE_KEY_ACTIONS = "command_center:actions"
 
 
 class CommandCenterResponse(BaseModel):
@@ -1326,12 +1332,21 @@ class CommandCenterResponse(BaseModel):
     success: bool
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    cached: bool = False  # v1.1.0: Indicates if response was from cache
 
 
 @router.get("/dashboard")
-async def get_command_center_dashboard():
+async def get_command_center_dashboard(
+    bypass_cache: bool = Query(False, description="Bypass cache and get fresh data")
+):
     """
     Get the unified Fleet Command Center dashboard data.
+
+    v1.1.0: Now with caching support for better performance.
+    Cache TTL: 30 seconds
+
+    Args:
+        bypass_cache: Set to true to force fresh data (ignores cache)
 
     Returns:
         Complete dashboard with:
@@ -1341,13 +1356,48 @@ async def get_command_center_dashboard():
         - Sensor status
         - Cost projections
         - Insights
+        - cached: Whether response was served from cache
     """
     try:
+        # v1.1.0: Try cache first
+        from_cache = False
+        if not bypass_cache:
+            try:
+                from cache_service import get_cache
+
+                cache = await get_cache()
+                cached_data = await cache.get(CACHE_KEY_DASHBOARD)
+                if cached_data:
+                    logger.debug("Command Center dashboard served from cache")
+                    return {
+                        "success": True,
+                        "data": cached_data,
+                        "cached": True,
+                    }
+            except Exception as cache_err:
+                logger.warning(
+                    f"Cache read failed, falling back to fresh data: {cache_err}"
+                )
+
+        # Generate fresh data
         cc = get_command_center()
         data = cc.generate_command_center_data()
+        data_dict = data.to_dict()
+
+        # v1.1.0: Store in cache
+        try:
+            from cache_service import get_cache
+
+            cache = await get_cache()
+            await cache.set(CACHE_KEY_DASHBOARD, data_dict, ttl=CACHE_TTL_DASHBOARD)
+            logger.debug(f"Command Center dashboard cached for {CACHE_TTL_DASHBOARD}s")
+        except Exception as cache_err:
+            logger.warning(f"Cache write failed: {cache_err}")
+
         return {
             "success": True,
-            "data": data.to_dict(),
+            "data": data_dict,
+            "cached": False,
         }
     except Exception as e:
         logger.error(f"Error getting command center data: {e}")
@@ -1468,7 +1518,7 @@ async def command_center_health_check():
         data = cc.generate_command_center_data()
         return {
             "status": "healthy",
-            "version": "1.0.0",
+            "version": cc.VERSION,
             "data_sources": data.data_quality,
             "trucks_analyzed": data.trucks_analyzed,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1479,3 +1529,185 @@ async def command_center_health_check():
             "error": str(e),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.1.0: HISTORICAL TREND TRACKING
+# Track fleet health over time to answer "¿Está mejorando o empeorando?"
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# In-memory trend storage (in production, use Redis or DB)
+_trend_history: List[Dict[str, Any]] = []
+_MAX_TREND_HISTORY = 1000  # Keep last 1000 snapshots
+
+
+def _record_trend_snapshot(data: CommandCenterData) -> None:
+    """Record a snapshot of fleet health for trend analysis."""
+    global _trend_history
+
+    snapshot = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "fleet_health_score": data.fleet_health.score if data.fleet_health else 0,
+        "fleet_health_status": (
+            data.fleet_health.status if data.fleet_health else "Unknown"
+        ),
+        "critical_count": data.urgency_summary.critical if data.urgency_summary else 0,
+        "high_count": data.urgency_summary.high if data.urgency_summary else 0,
+        "medium_count": data.urgency_summary.medium if data.urgency_summary else 0,
+        "low_count": data.urgency_summary.low if data.urgency_summary else 0,
+        "total_issues": (
+            data.urgency_summary.total_issues if data.urgency_summary else 0
+        ),
+        "trucks_analyzed": data.trucks_analyzed,
+    }
+
+    _trend_history.append(snapshot)
+
+    # Keep only last N snapshots
+    if len(_trend_history) > _MAX_TREND_HISTORY:
+        _trend_history = _trend_history[-_MAX_TREND_HISTORY:]
+
+
+def _calculate_trend(values: List[float], window: int = 10) -> str:
+    """
+    Calculate trend direction from recent values.
+
+    Returns: "improving", "stable", "declining"
+    """
+    if len(values) < 2:
+        return "stable"
+
+    recent = values[-min(window, len(values)) :]
+
+    if len(recent) < 2:
+        return "stable"
+
+    # Simple linear trend: compare first half avg to second half avg
+    mid = len(recent) // 2
+    first_half_avg = sum(recent[:mid]) / mid if mid > 0 else recent[0]
+    second_half_avg = sum(recent[mid:]) / (len(recent) - mid)
+
+    change_pct = (
+        ((second_half_avg - first_half_avg) / first_half_avg * 100)
+        if first_half_avg > 0
+        else 0
+    )
+
+    if change_pct > 3:  # 3% improvement threshold
+        return "improving"
+    elif change_pct < -3:  # 3% decline threshold
+        return "declining"
+    else:
+        return "stable"
+
+
+@router.get("/trends")
+async def get_fleet_trends(
+    hours: int = Query(
+        24, ge=1, le=168, description="Hours of history to analyze (1-168)"
+    ),
+):
+    """
+    Get historical trend data for fleet health.
+
+    v1.1.0: New endpoint to answer "Is the fleet improving or declining?"
+
+    Args:
+        hours: Number of hours of history to analyze (default 24, max 168/7 days)
+
+    Returns:
+        - trend: "improving", "stable", or "declining"
+        - health_scores: Array of historical health scores
+        - issue_counts: Array of historical issue counts
+        - summary: Human-readable trend summary
+    """
+    try:
+        if not _trend_history:
+            # If no history, record current state
+            cc = get_command_center()
+            data = cc.generate_command_center_data()
+            _record_trend_snapshot(data)
+
+        # Filter to requested time window
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        recent_history = [
+            h
+            for h in _trend_history
+            if datetime.fromisoformat(h["timestamp"].replace("Z", "+00:00")) > cutoff
+        ]
+
+        if not recent_history:
+            recent_history = _trend_history[-10:] if _trend_history else []
+
+        # Extract time series
+        health_scores = [h["fleet_health_score"] for h in recent_history]
+        issue_counts = [h["total_issues"] for h in recent_history]
+        critical_counts = [h["critical_count"] for h in recent_history]
+
+        # Calculate trends
+        health_trend = _calculate_trend(health_scores)
+        issues_trend = _calculate_trend(issue_counts)
+        # For issues, "improving" means decreasing
+        if issues_trend == "improving":
+            issues_trend = "declining"  # More issues = declining
+        elif issues_trend == "declining":
+            issues_trend = "improving"  # Fewer issues = improving
+
+        # Generate summary
+        current_health = health_scores[-1] if health_scores else 0
+        avg_health = sum(health_scores) / len(health_scores) if health_scores else 0
+
+        if health_trend == "improving":
+            summary = f"✅ La salud de la flota está mejorando. Score actual: {current_health}%, promedio: {avg_health:.0f}%"
+        elif health_trend == "declining":
+            summary = f"⚠️ La salud de la flota está empeorando. Score actual: {current_health}%, promedio: {avg_health:.0f}%"
+        else:
+            summary = f"📊 La salud de la flota está estable. Score actual: {current_health}%, promedio: {avg_health:.0f}%"
+
+        return {
+            "success": True,
+            "period_hours": hours,
+            "data_points": len(recent_history),
+            "trend": {
+                "health": health_trend,
+                "issues": issues_trend,
+            },
+            "current": {
+                "health_score": current_health,
+                "critical_issues": critical_counts[-1] if critical_counts else 0,
+                "total_issues": issue_counts[-1] if issue_counts else 0,
+            },
+            "history": {
+                "health_scores": health_scores[-50:],  # Last 50 points
+                "issue_counts": issue_counts[-50:],
+                "timestamps": [h["timestamp"] for h in recent_history[-50:]],
+            },
+            "summary": summary,
+        }
+    except Exception as e:
+        logger.error(f"Error getting trends: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/trends/record")
+async def record_trend_snapshot():
+    """
+    Manually record a trend snapshot (called periodically by scheduler).
+
+    In production, this should be called every 5-15 minutes by a cron job
+    or background task to build historical data.
+    """
+    try:
+        cc = get_command_center()
+        data = cc.generate_command_center_data()
+        _record_trend_snapshot(data)
+
+        return {
+            "success": True,
+            "message": "Trend snapshot recorded",
+            "total_snapshots": len(_trend_history),
+            "current_health": data.fleet_health.score if data.fleet_health else 0,
+        }
+    except Exception as e:
+        logger.error(f"Error recording trend: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

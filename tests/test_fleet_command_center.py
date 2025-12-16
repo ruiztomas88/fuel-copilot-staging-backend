@@ -6,6 +6,8 @@ Tests the algorithmic improvements:
 - UUID-based action IDs for thread safety
 - Cost database
 - Pattern detection thresholds
+- Caching with TTL
+- Historical trend tracking
 """
 
 import pytest
@@ -21,6 +23,8 @@ from fleet_command_center import (
     FleetHealthScore,
     UrgencySummary,
     CommandCenterData,
+    _calculate_trend,
+    _trend_history,
 )
 
 
@@ -395,6 +399,67 @@ class TestEnums:
         assert IssueCategory.ENGINE.value == "Motor"
         assert IssueCategory.TRANSMISSION.value == "Transmisión"
         assert IssueCategory.BRAKES.value == "Frenos"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.1.0: HISTORICAL TREND TRACKING TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestHistoricalTrends:
+    """Tests for historical trend tracking"""
+
+    def test_calculate_trend_improving(self):
+        """Increasing values should return 'improving'"""
+        values = [50, 52, 55, 58, 60, 62, 65, 68, 70, 72]
+        assert _calculate_trend(values) == "improving"
+
+    def test_calculate_trend_declining(self):
+        """Decreasing values should return 'declining'"""
+        values = [80, 78, 75, 72, 70, 68, 65, 62, 60, 58]
+        assert _calculate_trend(values) == "declining"
+
+    def test_calculate_trend_stable(self):
+        """Flat values should return 'stable'"""
+        values = [70, 71, 70, 69, 70, 71, 70, 69, 70, 71]
+        assert _calculate_trend(values) == "stable"
+
+    def test_calculate_trend_single_value(self):
+        """Single value should return 'stable'"""
+        assert _calculate_trend([50]) == "stable"
+
+    def test_calculate_trend_empty(self):
+        """Empty list should return 'stable'"""
+        assert _calculate_trend([]) == "stable"
+
+    def test_calculate_trend_two_values(self):
+        """Two values should work"""
+        assert _calculate_trend([50, 60]) == "improving"
+        assert _calculate_trend([60, 50]) == "declining"
+
+    def test_calculate_trend_small_change_is_stable(self):
+        """Changes under 3% should be 'stable'"""
+        # 2% increase: should be stable
+        values = [100, 100, 101, 101, 102, 102]
+        assert _calculate_trend(values) == "stable"
+
+
+class TestCacheConfiguration:
+    """Tests for cache configuration"""
+
+    def test_cache_ttl_constants_exist(self):
+        """Cache TTL constants should be defined"""
+        from fleet_command_center import CACHE_TTL_DASHBOARD, CACHE_TTL_ACTIONS
+
+        assert CACHE_TTL_DASHBOARD == 30
+        assert CACHE_TTL_ACTIONS == 15
+
+    def test_cache_key_constants_exist(self):
+        """Cache key constants should be defined"""
+        from fleet_command_center import CACHE_KEY_DASHBOARD, CACHE_KEY_ACTIONS
+
+        assert "command_center" in CACHE_KEY_DASHBOARD
+        assert "command_center" in CACHE_KEY_ACTIONS
 
 
 if __name__ == "__main__":
