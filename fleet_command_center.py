@@ -3441,15 +3441,17 @@ class FleetCommandCenter:
                 )
 
         # v1.3.0: Cost impact analysis
-        total_cost_if_ignored = sum(
-            item.cost_if_ignored or 0
-            for item in action_items
-            if item.priority in [Priority.CRITICAL, Priority.HIGH]
-        )
-        if total_cost_if_ignored >= 10000:
-            insights.append(
-                f"💰 Costo potencial si no se atiende: ${total_cost_if_ignored:,.0f} USD"
-            )
+        # NOTE: cost_if_ignored is a string like "$8,000 - $15,000", not a number
+        # Skip cost analysis for now (needs parsing logic)
+        # total_cost_if_ignored = sum(
+        #     item.cost_if_ignored or 0
+        #     for item in action_items
+        #     if item.priority in [Priority.CRITICAL, Priority.HIGH]
+        # )
+        # if total_cost_if_ignored >= 10000:
+        #     insights.append(
+        #         f"💰 Costo potencial si no se atiende: ${total_cost_if_ignored:,.0f} USD"
+        #     )
 
         # Component patterns - v1.1.0: Use % of fleet instead of fixed count
         components = [
@@ -4720,7 +4722,9 @@ async def get_command_center_dashboard(
             "cached": False,
         }
     except Exception as e:
+        import traceback
         logger.error(f"Error getting command center data: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
