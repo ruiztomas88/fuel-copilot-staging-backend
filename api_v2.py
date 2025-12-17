@@ -440,14 +440,16 @@ async def get_truck_sensors(truck_id: str):
     """
     import mysql.connector
     import yaml
+    import os
     from pathlib import Path
     
-    # Wialon DB connection config
+    # Wialon DB connection config from environment variables
     WIALON_CONFIG = {
-        "host": "20.127.200.135",
-        "database": "wialon_collect",
-        "user": "fuelread",
-        "password": "d9K$vL2#mP8qR4nX",
+        "host": os.getenv("WIALON_DB_HOST", "20.127.200.135"),
+        "port": int(os.getenv("WIALON_DB_PORT", "3306")),
+        "database": os.getenv("WIALON_DB_NAME", "wialon_collect"),
+        "user": os.getenv("WIALON_DB_USER", "tomas"),
+        "password": os.getenv("WIALON_DB_PASS", "Tomas2025"),
         "connect_timeout": 30,
     }
     
