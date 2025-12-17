@@ -1,0 +1,857 @@
+"""
+DTW (Dynamic Time Warping) Pattern Analyzer for Fleet Analytics
+================================================================
+Version: 1.0.0
+Created: December 2025
+
+Uses Dynamic Time Warping algorithm to compare time series patterns
+between trucks, detecting anomalies and identifying similar behavior.
+
+Key Features:
+- Compare fuel consumption patterns between trucks
+- Detect anomalous behavior vs fleet baseline
+- Identify trucks with similar operating patterns
+- Pattern matching for predictive maintenance
+- Cluster analysis for fleet segmentation
+
+DTW Benefits:
+- Works with time series of different lengths
+- Handles time shifts and warping
+- Robust to speed variations
+- Intuitive similarity measure
+
+Applications:
+- Find trucks with unusual fuel consumption patterns
+- Group trucks by operating behavior
+- Detect degradation by comparing to historical baseline
+- Identify efficient vs inefficient driving patterns
+"""
+
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+import statistics
+import math
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TimeSeriesData:
+    """Time series data for a single truck"""
+
+    truck_id: str
+    unit_id: int
+    metric_name: str  # e.g., 'fuel_consumption', 'oil_pressure', 'coolant_temp'
+    timestamps: List[datetime] = field(default_factory=list)
+    values: List[float] = field(default_factory=list)
+
+    def __len__(self):
+        return len(self.values)
+
+    def normalize(self) -> "TimeSeriesData":
+        """Return z-score normalized copy"""
+        if not self.values:
+            return self
+
+        mean = statistics.mean(self.values)
+        std = statistics.stdev(self.values) if len(self.values) > 1 else 1.0
+
+        if std == 0:
+            std = 1.0
+
+        normalized_values = [(v - mean) / std for v in self.values]
+
+        return TimeSeriesData(
+            truck_id=self.truck_id,
+            unit_id=self.unit_id,
+            metric_name=f"{self.metric_name}_normalized",
+            timestamps=self.timestamps.copy(),
+            values=normalized_values,
+        )
+
+
+@dataclass
+class DTWResult:
+    """Result of DTW comparison between two time series"""
+
+    truck_id_1: str
+    truck_id_2: str
+    metric_name: str
+    dtw_distance: float
+    normalized_distance: float  # Distance normalized by path length
+    similarity_percent: float  # 0-100% similarity
+    path_length: int
+    series_length_1: int
+    series_length_2: int
+    warping_path: Optional[List[Tuple[int, int]]] = None
+
+
+@dataclass
+class AnomalyResult:
+    """Result of anomaly detection for a truck"""
+
+    truck_id: str
+    unit_id: int
+    metric_name: str
+    is_anomaly: bool
+    anomaly_score: float  # 0-100, higher = more anomalous
+    avg_distance_to_fleet: float
+    min_distance_to_fleet: float
+    max_distance_to_fleet: float
+    most_similar_truck: str
+    least_similar_truck: str
+    percentile_rank: float  # Where this truck falls in fleet distribution
+    description: str
+
+
+@dataclass
+class ClusterResult:
+    """Result of clustering trucks by pattern similarity"""
+
+    cluster_id: int
+    cluster_name: str
+    truck_ids: List[str]
+    centroid_truck: str  # Most representative truck
+    avg_intra_cluster_distance: float
+    pattern_description: str
+
+
+class DTWAnalyzer:
+    """
+    Dynamic Time Warping analyzer for fleet pattern comparison.
+
+    Compares time series patterns between trucks to detect anomalies,
+    find similar trucks, and cluster the fleet by behavior.
+    """
+
+    # Anomaly threshold (distance above this percentile is anomalous)
+    ANOMALY_PERCENTILE = 90
+
+    # Maximum series length for performance
+    MAX_SERIES_LENGTH = 1000
+
+    def __init__(self, db_connection=None):
+        self.db = db_connection
+        self.series_cache: Dict[str, Dict[str, TimeSeriesData]] = (
+            {}
+        )  # truck_id -> metric -> series
+        self._distance_cache: Dict[str, float] = {}  # Cache for DTW distances
+        self._truck_mapping: Dict[int, str] = {}
+
+    def load_truck_mapping(self, tanks_config: Dict[str, Any]) -> None:
+        """Load truck ID mapping from tanks.yaml config"""
+        trucks = tanks_config.get("trucks", {})
+        for truck_id, config in trucks.items():
+            unit_id = config.get("unit_id")
+            if unit_id:
+                self._truck_mapping[unit_id] = truck_id
+
+    def get_truck_id(self, unit_id: int) -> str:
+        """Get truck ID from unit ID"""
+        return self._truck_mapping.get(unit_id, f"UNIT_{unit_id}")
+
+    def load_time_series_from_wialon(
+        self, metric: str, days: int = 30, resample_interval_minutes: int = 60
+    ) -> int:
+        """
+        Load time series data from Wialon database.
+
+        Args:
+            metric: Sensor metric to load (e.g., 'fuel_lvl', 'oil_press', 'cool_temp')
+            days: Number of days of history
+            resample_interval_minutes: Resample to this interval for consistent comparison
+
+        Returns:
+            Number of trucks with data
+        """
+        if not self.db:
+            logger.warning("No database connection for time series loading")
+            return 0
+
+        try:
+            cursor = self.db.cursor()
+
+            query = f"""
+                SELECT 
+                    unit_id,
+                    timestamp,
+                    {metric}
+                FROM sensor_data
+                WHERE {metric} IS NOT NULL
+                  AND timestamp >= NOW() - INTERVAL %s DAY
+                ORDER BY unit_id, timestamp
+            """
+
+            cursor.execute(query, (days,))
+            rows = cursor.fetchall()
+
+            # Group by unit_id
+            truck_data: Dict[int, List[Tuple[datetime, float]]] = {}
+
+            for unit_id, ts, value in rows:
+                if unit_id not in truck_data:
+                    truck_data[unit_id] = []
+                truck_data[unit_id].append((ts, float(value)))
+
+            # Convert to TimeSeriesData with resampling
+            for unit_id, data in truck_data.items():
+                truck_id = self.get_truck_id(unit_id)
+
+                # Resample to regular intervals
+                resampled = self._resample_time_series(data, resample_interval_minutes)
+
+                if len(resampled) >= 10:  # Minimum data requirement
+                    series = TimeSeriesData(
+                        truck_id=truck_id,
+                        unit_id=unit_id,
+                        metric_name=metric,
+                        timestamps=[r[0] for r in resampled],
+                        values=[r[1] for r in resampled],
+                    )
+
+                    if truck_id not in self.series_cache:
+                        self.series_cache[truck_id] = {}
+                    self.series_cache[truck_id][metric] = series
+
+            cursor.close()
+
+            loaded_count = len([t for t in self.series_cache.values() if metric in t])
+            logger.info(f"Loaded {metric} time series for {loaded_count} trucks")
+
+            return loaded_count
+
+        except Exception as e:
+            logger.error(f"Error loading time series from Wialon: {e}")
+            return 0
+
+    def _resample_time_series(
+        self, data: List[Tuple[datetime, float]], interval_minutes: int
+    ) -> List[Tuple[datetime, float]]:
+        """Resample time series to regular intervals"""
+        if not data:
+            return []
+
+        # Sort by timestamp
+        data = sorted(data, key=lambda x: x[0])
+
+        # Get time range
+        start_time = data[0][0]
+        end_time = data[-1][0]
+
+        interval = timedelta(minutes=interval_minutes)
+        resampled = []
+
+        current_time = start_time
+        data_idx = 0
+
+        while current_time <= end_time:
+            # Find values within this interval
+            interval_values = []
+
+            while data_idx < len(data) and data[data_idx][0] < current_time + interval:
+                if data[data_idx][0] >= current_time:
+                    interval_values.append(data[data_idx][1])
+                data_idx += 1
+
+            if interval_values:
+                # Use mean of values in interval
+                avg_value = statistics.mean(interval_values)
+                resampled.append((current_time, avg_value))
+
+            current_time += interval
+
+        return resampled
+
+    def add_time_series(self, series: TimeSeriesData) -> None:
+        """Add a time series to the analyzer"""
+        if series.truck_id not in self.series_cache:
+            self.series_cache[series.truck_id] = {}
+        self.series_cache[series.truck_id][series.metric_name] = series
+
+    def dtw_distance(
+        self, series1: List[float], series2: List[float], window: Optional[int] = None
+    ) -> Tuple[float, List[Tuple[int, int]]]:
+        """
+        Calculate DTW distance between two time series.
+
+        Uses Sakoe-Chiba band constraint for efficiency.
+
+        Args:
+            series1: First time series
+            series2: Second time series
+            window: Window size for Sakoe-Chiba band (None = no constraint)
+
+        Returns:
+            Tuple of (distance, warping_path)
+        """
+        n, m = len(series1), len(series2)
+
+        # Truncate if too long
+        if n > self.MAX_SERIES_LENGTH:
+            series1 = series1[: self.MAX_SERIES_LENGTH]
+            n = self.MAX_SERIES_LENGTH
+        if m > self.MAX_SERIES_LENGTH:
+            series2 = series2[: self.MAX_SERIES_LENGTH]
+            m = self.MAX_SERIES_LENGTH
+
+        # Default window
+        if window is None:
+            window = max(n, m)
+
+        # Initialize cost matrix with infinity
+        DTW = [[float("inf")] * (m + 1) for _ in range(n + 1)]
+        DTW[0][0] = 0
+
+        # Fill the cost matrix
+        for i in range(1, n + 1):
+            for j in range(max(1, i - window), min(m + 1, i + window + 1)):
+                cost = (series1[i - 1] - series2[j - 1]) ** 2
+                DTW[i][j] = cost + min(
+                    DTW[i - 1][j],  # insertion
+                    DTW[i][j - 1],  # deletion
+                    DTW[i - 1][j - 1],  # match
+                )
+
+        # Backtrack to find path
+        path = []
+        i, j = n, m
+        while i > 0 and j > 0:
+            path.append((i - 1, j - 1))
+
+            if i == 1:
+                j -= 1
+            elif j == 1:
+                i -= 1
+            else:
+                costs = [DTW[i - 1][j - 1], DTW[i - 1][j], DTW[i][j - 1]]
+                min_idx = costs.index(min(costs))
+
+                if min_idx == 0:
+                    i, j = i - 1, j - 1
+                elif min_idx == 1:
+                    i -= 1
+                else:
+                    j -= 1
+
+        path.reverse()
+
+        distance = math.sqrt(DTW[n][m])
+        return distance, path
+
+    def compare_trucks(
+        self, truck_id_1: str, truck_id_2: str, metric: str, normalize: bool = True
+    ) -> Optional[DTWResult]:
+        """
+        Compare two trucks' patterns for a specific metric.
+
+        Args:
+            truck_id_1: First truck ID
+            truck_id_2: Second truck ID
+            metric: Metric to compare
+            normalize: Whether to z-score normalize before comparison
+
+        Returns:
+            DTWResult with distance and similarity metrics
+        """
+        # Check cache key
+        cache_key = f"{truck_id_1}_{truck_id_2}_{metric}"
+        reverse_key = f"{truck_id_2}_{truck_id_1}_{metric}"
+
+        if cache_key in self._distance_cache:
+            # Return cached result (we'd need to store full result for this)
+            pass
+
+        # Get series
+        series1 = self.series_cache.get(truck_id_1, {}).get(metric)
+        series2 = self.series_cache.get(truck_id_2, {}).get(metric)
+
+        if not series1 or not series2:
+            return None
+
+        # Normalize if requested
+        if normalize:
+            series1 = series1.normalize()
+            series2 = series2.normalize()
+
+        # Calculate DTW
+        distance, path = self.dtw_distance(series1.values, series2.values)
+
+        # Calculate normalized distance
+        path_length = len(path)
+        normalized_distance = distance / path_length if path_length > 0 else distance
+
+        # Calculate similarity percentage (inverse of distance)
+        # Using exponential decay for better interpretability
+        similarity = 100 * math.exp(-normalized_distance)
+
+        # Cache the distance
+        self._distance_cache[cache_key] = distance
+        self._distance_cache[reverse_key] = distance
+
+        return DTWResult(
+            truck_id_1=truck_id_1,
+            truck_id_2=truck_id_2,
+            metric_name=metric,
+            dtw_distance=distance,
+            normalized_distance=normalized_distance,
+            similarity_percent=similarity,
+            path_length=path_length,
+            series_length_1=len(series1),
+            series_length_2=len(series2),
+            warping_path=path,
+        )
+
+    def find_most_similar(
+        self, truck_id: str, metric: str, top_n: int = 5
+    ) -> List[DTWResult]:
+        """
+        Find trucks with most similar patterns to the given truck.
+
+        Args:
+            truck_id: Reference truck ID
+            metric: Metric to compare
+            top_n: Number of results to return
+
+        Returns:
+            List of DTWResult sorted by similarity (most similar first)
+        """
+        results = []
+
+        for other_id in self.series_cache.keys():
+            if other_id == truck_id:
+                continue
+
+            if metric not in self.series_cache.get(other_id, {}):
+                continue
+
+            result = self.compare_trucks(truck_id, other_id, metric)
+            if result:
+                results.append(result)
+
+        # Sort by similarity (highest first)
+        results.sort(key=lambda r: r.similarity_percent, reverse=True)
+
+        return results[:top_n]
+
+    def detect_anomalies(self, metric: str) -> List[AnomalyResult]:
+        """
+        Detect trucks with anomalous patterns compared to fleet baseline.
+
+        Uses average DTW distance to all other trucks to identify outliers.
+
+        Args:
+            metric: Metric to analyze
+
+        Returns:
+            List of AnomalyResult for each truck
+        """
+        truck_ids = [
+            tid
+            for tid in self.series_cache.keys()
+            if metric in self.series_cache.get(tid, {})
+        ]
+
+        if len(truck_ids) < 3:
+            logger.warning(
+                f"Need at least 3 trucks for anomaly detection, have {len(truck_ids)}"
+            )
+            return []
+
+        # Calculate pairwise distances
+        truck_distances: Dict[str, List[float]] = {tid: [] for tid in truck_ids}
+
+        for i, tid1 in enumerate(truck_ids):
+            for tid2 in truck_ids[i + 1 :]:
+                result = self.compare_trucks(tid1, tid2, metric)
+                if result:
+                    truck_distances[tid1].append(result.normalized_distance)
+                    truck_distances[tid2].append(result.normalized_distance)
+
+        # Calculate average distance for each truck
+        avg_distances = {}
+        for tid, distances in truck_distances.items():
+            if distances:
+                avg_distances[tid] = statistics.mean(distances)
+
+        if not avg_distances:
+            return []
+
+        # Calculate percentile threshold
+        all_avg = list(avg_distances.values())
+        threshold = sorted(all_avg)[int(len(all_avg) * self.ANOMALY_PERCENTILE / 100)]
+
+        # Generate results
+        results = []
+
+        for tid in truck_ids:
+            distances = truck_distances.get(tid, [])
+            if not distances:
+                continue
+
+            avg_dist = statistics.mean(distances)
+            min_dist = min(distances)
+            max_dist = max(distances)
+
+            # Find most/least similar
+            similarities = self.find_most_similar(tid, metric, top_n=len(truck_ids))
+            most_similar = similarities[0].truck_id_2 if similarities else "N/A"
+            least_similar = similarities[-1].truck_id_2 if similarities else "N/A"
+
+            # Calculate percentile rank
+            rank = sum(1 for d in all_avg if d < avg_dist) / len(all_avg) * 100
+
+            # Determine if anomaly
+            is_anomaly = avg_dist > threshold
+
+            # Calculate anomaly score (0-100)
+            if is_anomaly:
+                # How far above threshold
+                anomaly_score = min(100, 50 + 50 * (avg_dist - threshold) / threshold)
+            else:
+                anomaly_score = rank / 2  # Scale to 0-50
+
+            # Generate description
+            description = self._generate_anomaly_description(
+                tid, metric, avg_dist, rank, is_anomaly
+            )
+
+            unit_id = self.series_cache.get(tid, {}).get(metric)
+            unit_id = unit_id.unit_id if unit_id else 0
+
+            results.append(
+                AnomalyResult(
+                    truck_id=tid,
+                    unit_id=unit_id,
+                    metric_name=metric,
+                    is_anomaly=is_anomaly,
+                    anomaly_score=anomaly_score,
+                    avg_distance_to_fleet=avg_dist,
+                    min_distance_to_fleet=min_dist,
+                    max_distance_to_fleet=max_dist,
+                    most_similar_truck=most_similar,
+                    least_similar_truck=least_similar,
+                    percentile_rank=rank,
+                    description=description,
+                )
+            )
+
+        # Sort by anomaly score (highest first)
+        results.sort(key=lambda r: r.anomaly_score, reverse=True)
+
+        return results
+
+    def _generate_anomaly_description(
+        self,
+        truck_id: str,
+        metric: str,
+        avg_distance: float,
+        percentile: float,
+        is_anomaly: bool,
+    ) -> str:
+        """Generate human-readable anomaly description"""
+        metric_names = {
+            "fuel_lvl": "consumo de combustible",
+            "oil_press": "presión de aceite",
+            "cool_temp": "temperatura del refrigerante",
+            "oil_temp": "temperatura del aceite",
+            "def_level": "consumo de DEF",
+        }
+
+        metric_es = metric_names.get(metric, metric)
+
+        if is_anomaly:
+            return (
+                f"⚠️ {truck_id} muestra patrón de {metric_es} ANÓMALO. "
+                f"Está en el percentil {percentile:.0f}% (más diferente que {percentile:.0f}% de la flota). "
+                f"Investigar posibles problemas mecánicos o de operación."
+            )
+        elif percentile > 75:
+            return (
+                f"🟡 {truck_id} tiene patrón de {metric_es} ligeramente diferente. "
+                f"Percentil {percentile:.0f}%. Monitorear."
+            )
+        else:
+            return (
+                f"✅ {truck_id} tiene patrón de {metric_es} normal. "
+                f"Percentil {percentile:.0f}%."
+            )
+
+    def cluster_fleet(self, metric: str, n_clusters: int = 3) -> List[ClusterResult]:
+        """
+        Cluster fleet into groups based on pattern similarity.
+
+        Uses simple k-medoids approach based on DTW distances.
+
+        Args:
+            metric: Metric to cluster by
+            n_clusters: Number of clusters
+
+        Returns:
+            List of ClusterResult
+        """
+        truck_ids = [
+            tid
+            for tid in self.series_cache.keys()
+            if metric in self.series_cache.get(tid, {})
+        ]
+
+        if len(truck_ids) < n_clusters:
+            logger.warning(
+                f"Not enough trucks ({len(truck_ids)}) for {n_clusters} clusters"
+            )
+            n_clusters = max(1, len(truck_ids))
+
+        # Build distance matrix
+        n = len(truck_ids)
+        distance_matrix = [[0.0] * n for _ in range(n)]
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                result = self.compare_trucks(truck_ids[i], truck_ids[j], metric)
+                if result:
+                    distance_matrix[i][j] = result.normalized_distance
+                    distance_matrix[j][i] = result.normalized_distance
+
+        # Simple k-medoids clustering
+        clusters = self._k_medoids(truck_ids, distance_matrix, n_clusters)
+
+        # Build results
+        results = []
+        cluster_names = {
+            0: "Eficientes",
+            1: "Promedio",
+            2: "Alto Consumo",
+            3: "Grupo A",
+            4: "Grupo B",
+        }
+
+        for cluster_id, (medoid_idx, members) in enumerate(clusters.items()):
+            member_ids = [truck_ids[i] for i in members]
+            medoid_id = truck_ids[medoid_idx]
+
+            # Calculate intra-cluster distance
+            intra_distances = []
+            for i in members:
+                for j in members:
+                    if i != j:
+                        intra_distances.append(distance_matrix[i][j])
+
+            avg_intra = statistics.mean(intra_distances) if intra_distances else 0.0
+
+            # Generate description
+            description = self._generate_cluster_description(
+                cluster_id, member_ids, metric, avg_intra
+            )
+
+            results.append(
+                ClusterResult(
+                    cluster_id=cluster_id,
+                    cluster_name=cluster_names.get(cluster_id, f"Cluster {cluster_id}"),
+                    truck_ids=member_ids,
+                    centroid_truck=medoid_id,
+                    avg_intra_cluster_distance=avg_intra,
+                    pattern_description=description,
+                )
+            )
+
+        return results
+
+    def _k_medoids(
+        self,
+        truck_ids: List[str],
+        distance_matrix: List[List[float]],
+        k: int,
+        max_iterations: int = 100,
+    ) -> Dict[int, List[int]]:
+        """Simple k-medoids clustering algorithm"""
+        n = len(truck_ids)
+
+        # Initialize medoids randomly (using first k for reproducibility)
+        medoids = list(range(k))
+
+        for _ in range(max_iterations):
+            # Assign points to nearest medoid
+            clusters: Dict[int, List[int]] = {m: [] for m in medoids}
+
+            for i in range(n):
+                nearest = min(medoids, key=lambda m: distance_matrix[i][m])
+                clusters[nearest].append(i)
+
+            # Update medoids
+            new_medoids = []
+            for medoid in medoids:
+                cluster_members = clusters[medoid]
+                if not cluster_members:
+                    new_medoids.append(medoid)
+                    continue
+
+                # Find member with minimum total distance to others
+                best_member = medoid
+                best_cost = float("inf")
+
+                for member in cluster_members:
+                    cost = sum(
+                        distance_matrix[member][other] for other in cluster_members
+                    )
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_member = member
+
+                new_medoids.append(best_member)
+
+            # Check convergence
+            if set(new_medoids) == set(medoids):
+                break
+
+            medoids = new_medoids
+
+        # Final assignment
+        clusters = {m: [] for m in medoids}
+        for i in range(n):
+            nearest = min(medoids, key=lambda m: distance_matrix[i][m])
+            clusters[nearest].append(i)
+
+        return clusters
+
+    def _generate_cluster_description(
+        self, cluster_id: int, members: List[str], metric: str, avg_distance: float
+    ) -> str:
+        """Generate cluster description"""
+        metric_names = {
+            "fuel_lvl": "consumo de combustible",
+            "oil_press": "presión de aceite",
+            "cool_temp": "temperatura del refrigerante",
+        }
+
+        metric_es = metric_names.get(metric, metric)
+
+        # Calculate average values for this cluster
+        avg_values = []
+        for tid in members:
+            series = self.series_cache.get(tid, {}).get(metric)
+            if series and series.values:
+                avg_values.append(statistics.mean(series.values))
+
+        overall_avg = statistics.mean(avg_values) if avg_values else 0
+
+        return (
+            f"Grupo {cluster_id + 1}: {len(members)} camiones con patrones similares de {metric_es}. "
+            f"Valor promedio: {overall_avg:.1f}. "
+            f"Cohesión interna: {100 * math.exp(-avg_distance):.0f}%."
+        )
+
+    def get_fleet_pattern_summary(self, metric: str) -> Dict[str, Any]:
+        """Get summary of fleet patterns for a metric"""
+        anomalies = self.detect_anomalies(metric)
+        clusters = self.cluster_fleet(metric, n_clusters=3)
+
+        anomaly_count = sum(1 for a in anomalies if a.is_anomaly)
+
+        return {
+            "metric": metric,
+            "trucks_analyzed": len(anomalies),
+            "anomaly_summary": {
+                "total_anomalies": anomaly_count,
+                "anomaly_rate_percent": (
+                    (anomaly_count / len(anomalies) * 100) if anomalies else 0
+                ),
+                "top_anomalies": [
+                    {
+                        "truck_id": a.truck_id,
+                        "anomaly_score": round(a.anomaly_score, 1),
+                        "description": a.description,
+                    }
+                    for a in anomalies[:5]
+                    if a.is_anomaly
+                ],
+            },
+            "cluster_summary": [
+                {
+                    "cluster_name": c.cluster_name,
+                    "truck_count": len(c.truck_ids),
+                    "trucks": c.truck_ids,
+                    "representative_truck": c.centroid_truck,
+                    "cohesion_percent": round(
+                        100 * math.exp(-c.avg_intra_cluster_distance), 1
+                    ),
+                }
+                for c in clusters
+            ],
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def to_dict(self, result: DTWResult) -> Dict[str, Any]:
+        """Convert DTWResult to dictionary"""
+        return {
+            "truck_1": result.truck_id_1,
+            "truck_2": result.truck_id_2,
+            "metric": result.metric_name,
+            "dtw_distance": round(result.dtw_distance, 4),
+            "normalized_distance": round(result.normalized_distance, 4),
+            "similarity_percent": round(result.similarity_percent, 1),
+            "path_length": result.path_length,
+            "series_lengths": {
+                "truck_1": result.series_length_1,
+                "truck_2": result.series_length_2,
+            },
+        }
+
+
+# Example usage
+if __name__ == "__main__":
+    import random
+
+    # Demo with synthetic data
+    analyzer = DTWAnalyzer()
+
+    # Create synthetic fuel consumption patterns for 5 trucks
+    base_pattern = [50 + 5 * math.sin(i / 10) for i in range(100)]
+
+    trucks_data = {
+        "VD3579": [v + random.gauss(0, 1) for v in base_pattern],  # Normal
+        "JC1282": [v + random.gauss(0, 1) for v in base_pattern],  # Normal
+        "NQ6975": [v + random.gauss(0, 1) for v in base_pattern],  # Normal
+        "GP9677": [
+            v * 1.2 + random.gauss(0, 2) for v in base_pattern
+        ],  # Higher consumption
+        "ANOMALY": [
+            v + 20 * math.sin(i / 5) + random.gauss(0, 5)
+            for i, v in enumerate(base_pattern)
+        ],  # Anomalous
+    }
+
+    # Add to analyzer
+    base_time = datetime.now() - timedelta(hours=100)
+
+    for truck_id, values in trucks_data.items():
+        series = TimeSeriesData(
+            truck_id=truck_id,
+            unit_id=hash(truck_id) % 1000000,
+            metric_name="fuel_lvl",
+            timestamps=[base_time + timedelta(hours=i) for i in range(len(values))],
+            values=values,
+        )
+        analyzer.add_time_series(series)
+
+    # Compare two trucks
+    print("\n📊 DTW Comparison: VD3579 vs JC1282")
+    result = analyzer.compare_trucks("VD3579", "JC1282", "fuel_lvl")
+    if result:
+        print(f"   Similarity: {result.similarity_percent:.1f}%")
+        print(f"   DTW Distance: {result.dtw_distance:.2f}")
+
+    # Find anomalies
+    print("\n🔍 Anomaly Detection:")
+    anomalies = analyzer.detect_anomalies("fuel_lvl")
+    for a in anomalies:
+        status = "⚠️ ANOMALY" if a.is_anomaly else "✅ Normal"
+        print(f"   {a.truck_id}: {status} (score: {a.anomaly_score:.0f})")
+
+    # Cluster fleet
+    print("\n📦 Fleet Clustering:")
+    clusters = analyzer.cluster_fleet("fuel_lvl", n_clusters=2)
+    for c in clusters:
+        print(f"   {c.cluster_name}: {c.truck_ids}")

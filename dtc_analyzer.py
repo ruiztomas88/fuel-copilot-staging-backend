@@ -1,15 +1,35 @@
 """
-DTC (Diagnostic Trouble Code) Analyzer
-v3.12.28 - December 2024
+DTC (Diagnostic Trouble Code) Analyzer v4.0.0
+═══════════════════════════════════════════════════════════════════════════════
 
-Monitors and alerts on engine diagnostic trouble codes.
-High ROI feature - can prevent $2,000-$5,000 breakdowns per incident.
+Analyzes J1939 DTC codes from truck ECU data to:
+- Parse and decode DTC codes (SPN.FMI format)
+- Categorize by severity (Critical/Warning/Info)
+- Generate actionable alerts with Spanish descriptions
+- Track active codes across fleet
+- Provide maintenance recommendations
 
 DTC codes follow SAE J1939 standard for heavy-duty trucks:
 - SPN (Suspect Parameter Number): Identifies component/signal
 - FMI (Failure Mode Identifier): Describes failure type (0-31)
 
+CHANGELOG:
+-----------
+v4.0.0 (Dec 2025):
+  - Integrated with dtc_database.py v5.8.0 (112 SPNs, 23 FMIs)
+  - Enhanced descriptions from official J1939/MondoTracking documentation
+  - Bilingual support (Spanish/English)
+  - System categorization (ENGINE, AFTERTREATMENT, COOLING, etc.)
+  - Severity from both SPN and FMI combined
+  - Added get_dtc_analysis_report() for comprehensive truck reports
+
+v3.12.28 (Dec 2024):
+  - Basic SPN/FMI parsing with hardcoded dictionaries
+
 Format in Wialon: "SPN.FMI" or "SPN.FMI,SPN.FMI" (comma-separated)
+
+Author: Fuel Analytics Team
+Version: 4.0.0
 """
 
 import logging
@@ -17,6 +37,24 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
+
+# Import comprehensive DTC database v5.8.0
+try:
+    from dtc_database import (
+        get_spn_info,
+        get_fmi_info,
+        get_dtc_description,
+        get_critical_spns,
+        get_database_stats,
+        DTCSeverity as DBSeverity,
+        DTCSystem,
+    )
+
+    DTC_DATABASE_AVAILABLE = True
+except ImportError:
+    DTC_DATABASE_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("dtc_database.py not found, using fallback descriptions")
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +227,10 @@ class DTCAnalyzer:
                 # Determine severity
                 severity = self._determine_severity(spn, fmi)
 
-                # Get description
+                # Get description and system classification
                 description = self._get_spn_description(spn)
                 action = self._get_recommended_action(spn, fmi, severity)
+                system = self._get_system_classification(spn)
 
                 codes.append(
                     DTCCode(
@@ -201,6 +240,7 @@ class DTCAnalyzer:
                         severity=severity,
                         description=description,
                         recommended_action=action,
+                        system=system,
                     )
                 )
 
@@ -211,8 +251,21 @@ class DTCAnalyzer:
         return codes
 
     def _determine_severity(self, spn: int, fmi: int) -> DTCSeverity:
-        """Determine severity based on SPN and FMI"""
-        # Critical if SPN is critical OR FMI is critical failure mode
+        """
+        Determine severity based on SPN and FMI using dtc_database.py v5.8.0
+        Falls back to hardcoded values if database unavailable.
+        """
+        if DTC_DATABASE_AVAILABLE:
+            # Use comprehensive database for severity
+            dtc_info = get_dtc_description(spn, fmi)
+            severity_str = dtc_info.get("severity", "info").lower()
+            if severity_str == "critical":
+                return DTCSeverity.CRITICAL
+            elif severity_str == "warning":
+                return DTCSeverity.WARNING
+            return DTCSeverity.INFO
+
+        # Fallback to hardcoded dictionaries
         if spn in CRITICAL_SPNS:
             return DTCSeverity.CRITICAL
         if fmi in CRITICAL_FMIS:
@@ -221,35 +274,152 @@ class DTCAnalyzer:
             return DTCSeverity.WARNING
         return DTCSeverity.INFO
 
-    def _get_spn_description(self, spn: int) -> str:
-        """Get human-readable description for SPN"""
+    def _get_spn_description(self, spn: int, language: str = "es") -> str:
+        """
+        Get human-readable description for SPN.
+        Uses dtc_database.py for comprehensive Spanish/English descriptions.
+        """
+        if DTC_DATABASE_AVAILABLE:
+            spn_info = get_spn_info(spn)
+            if spn_info:
+                return spn_info.name_es if language == "es" else spn_info.name_en
+
+        # Fallback to hardcoded
         if spn in CRITICAL_SPNS:
             return CRITICAL_SPNS[spn]
         if spn in WARNING_SPNS:
             return WARNING_SPNS[spn]
-        return f"Unknown component (SPN {spn})"
+        return f"Componente desconocido (SPN {spn})"
+
+    def _get_system_classification(self, spn: int) -> str:
+        """Get vehicle system classification for SPN"""
+        if DTC_DATABASE_AVAILABLE:
+            spn_info = get_spn_info(spn)
+            if spn_info:
+                return spn_info.system.value
+        return "UNKNOWN"
 
     def _get_recommended_action(self, spn: int, fmi: int, severity: DTCSeverity) -> str:
-        """Get recommended action based on DTC"""
+        """
+        Get recommended action based on DTC.
+        Uses dtc_database.py for Spanish recommendations.
+        """
+        if DTC_DATABASE_AVAILABLE:
+            spn_info = get_spn_info(spn)
+            if spn_info:
+                return spn_info.action_es
+
+        # Fallback to hardcoded recommendations
         if severity == DTCSeverity.CRITICAL:
             if spn == 100:  # Oil pressure
-                return "⛔ STOP immediately. Check oil level. Do not run engine if oil pressure is low."
+                return "⛔ PARAR inmediatamente. Revisar nivel de aceite. No arrancar si la presión está baja."
             if spn == 110:  # Coolant temp
-                return "⛔ STOP and let engine cool. Check coolant level. Risk of engine damage."
+                return "⛔ PARAR y dejar enfriar el motor. Revisar nivel de refrigerante. Riesgo de daño al motor."
             if spn in [1761, 3031, 3216, 4364]:  # DEF system
-                return "⚠️ DEF system issue. Engine may derate to 5 MPH. Service within 24 hours."
+                return "⚠️ Problema con sistema DEF. Motor puede limitar a 8 km/h. Servicio en 24 horas."
             if spn == 157:  # Fuel rail pressure
-                return "⛔ Fuel system issue. May cause engine shutdown. Schedule immediate service."
-            return "⛔ Critical issue detected. Schedule service ASAP to prevent breakdown."
+                return "⛔ Problema en sistema de combustible. Puede causar apagado. Servicio inmediato."
+            return "⛔ Problema crítico detectado. Programar servicio ASAP para prevenir avería."
 
         if severity == DTCSeverity.WARNING:
             if spn in [3242, 3246, 3251]:  # DPF issues
-                return "🔧 DPF attention needed. May need forced regen. Schedule service within 48 hours."
+                return "🔧 Atención DPF necesaria. Puede requerir regeneración forzada. Servicio en 48 horas."
             if spn in [158, 167, 168]:  # Battery/alternator
-                return "🔋 Electrical system issue. Check battery and alternator. May cause starting issues."
-            return "🔧 Schedule service within 24-48 hours."
+                return "🔋 Problema eléctrico. Revisar batería y alternador. Puede causar problemas de arranque."
+            return "🔧 Programar servicio en 24-48 horas."
 
-        return "📋 Monitor during next scheduled maintenance."
+        return "📋 Monitorear en próximo mantenimiento programado."
+
+    def get_dtc_analysis_report(
+        self, truck_id: str, dtc_string: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        🆕 v4.0.0: Get comprehensive DTC analysis report for a truck.
+
+        Returns detailed information using dtc_database.py v5.8.0:
+        - All active codes with Spanish descriptions
+        - System breakdown (ENGINE, AFTERTREATMENT, etc.)
+        - Severity summary
+        - Recommended actions
+
+        Args:
+            truck_id: Truck identifier
+            dtc_string: Raw DTC string from Wialon
+
+        Returns:
+            Dict with comprehensive DTC analysis
+        """
+        codes = self.parse_dtc_string(dtc_string)
+
+        if not codes:
+            return {
+                "truck_id": truck_id,
+                "status": "ok",
+                "message": "Sin códigos de falla activos",
+                "codes": [],
+                "summary": {"total": 0, "critical": 0, "warning": 0, "info": 0},
+                "systems_affected": [],
+            }
+
+        # Build detailed code analysis
+        code_details = []
+        systems_affected = set()
+        severity_counts = {"critical": 0, "warning": 0, "info": 0}
+
+        for code in codes:
+            system = self._get_system_classification(code.spn)
+            systems_affected.add(system)
+            severity_counts[code.severity.value] += 1
+
+            # Get full description from database
+            if DTC_DATABASE_AVAILABLE:
+                dtc_info = get_dtc_description(code.spn, code.fmi)
+                fmi_info = get_fmi_info(code.fmi)
+            else:
+                dtc_info = {
+                    "component": code.description,
+                    "failure_mode": f"FMI {code.fmi}",
+                    "description": "",
+                    "action": code.recommended_action,
+                }
+                fmi_info = {"es": f"Modo de falla {code.fmi}"}
+
+            code_details.append(
+                {
+                    "code": code.code,
+                    "spn": code.spn,
+                    "fmi": code.fmi,
+                    "severity": code.severity.value,
+                    "component": dtc_info.get("component", code.description),
+                    "failure_mode": fmi_info.get(
+                        "es", dtc_info.get("failure_mode", "")
+                    ),
+                    "description": dtc_info.get("description", ""),
+                    "action": dtc_info.get("action", code.recommended_action),
+                    "system": system,
+                }
+            )
+
+        # Determine overall status
+        if severity_counts["critical"] > 0:
+            status = "critical"
+            message = f"⛔ {severity_counts['critical']} código(s) CRÍTICO(s) - Acción inmediata requerida"
+        elif severity_counts["warning"] > 0:
+            status = "warning"
+            message = f"⚠️ {severity_counts['warning']} código(s) de advertencia - Servicio en 24-48h"
+        else:
+            status = "info"
+            message = f"ℹ️ {severity_counts['info']} código(s) informativos - Monitorear"
+
+        return {
+            "truck_id": truck_id,
+            "status": status,
+            "message": message,
+            "codes": code_details,
+            "summary": {"total": len(codes), **severity_counts},
+            "systems_affected": list(systems_affected),
+            "database_version": "5.8.0" if DTC_DATABASE_AVAILABLE else "fallback",
+        }
 
     def process_truck_dtc(
         self, truck_id: str, dtc_string: Optional[str], timestamp: datetime

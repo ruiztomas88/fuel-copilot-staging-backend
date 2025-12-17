@@ -1,6 +1,6 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                    🎯 FLEET COMMAND CENTER v1.6.0                              ║
+║                    🎯 FLEET COMMAND CENTER v1.8.0                              ║
 ║                                                                                ║
 ║       The UNIFIED source of truth for fleet health and maintenance            ║
 ║                                                                                ║
@@ -9,21 +9,48 @@
 ║  ✓ Predictive Maintenance (trend-based days-to-failure)                       ║
 ║  ✓ ML Anomaly Detection (isolation forest outlier scores)                     ║
 ║  ✓ Sensor Health (GPS, Voltage, DTC, Idle)                                    ║
-║  ✓ Driver Performance (clustering & coaching)                                 ║
+║  ✓ Driver Performance (scoring, speeding, idle)                               ║
+║  ✓ Component Health (turbo, oil, coolant predictors)                          ║
+║  ✓ DTC Analysis (J1939 SPN/FMI with 112 SPNs)                                 ║
+║  ✓ DEF Predictor (depletion forecast, derating prevention)                    ║
+║  ✓ DTW Pattern Analysis (anomaly detection, fleet clustering)                 ║
 ║  ✓ Cost Impact Analysis                                                       ║
 ║  ✓ Real-Time Predictive Engine (TRUE predictive maintenance)                  ║
 ║  ✓ EWMA/CUSUM Trend Detection (Phase 4)                                       ║
 ║  ✓ Truck Risk Scoring (Phase 4)                                               ║
 ║  ✓ Automatic Failure Correlation (Phase 5)                                    ║
 ║  ✓ MySQL Persistence for ML (Phase 5.6)                                       ║
+║  ✓ Wialon Data Loader Service (centralized data loading)                      ║
 ║                                                                                ║
 ║  OUTPUT: Single prioritized action list with combined intelligence            ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 Author: Fuel Copilot Team
-Version: 1.6.0 - MySQL Persistence for ML Training
+Version: 1.8.0 - DEF Predictor & DTW Pattern Analysis
 Created: December 2025
-Updated: January 2025
+Updated: December 2025
+
+CHANGELOG v1.8.0 (DEF PREDICTOR & DTW ANALYSIS):
+- 🆕 NEW: DEF Predictor Engine - Predicts DEF depletion to prevent EPA derating
+- 🆕 NEW: DTW Pattern Analyzer - Compares truck patterns for anomaly detection
+- 🆕 NEW: Wialon Data Loader Service - Centralized data loading with caching
+- 📊 51,589+ DEF readings from Wialon integrated
+- 🔍 Pattern comparison using Dynamic Time Warping algorithm
+- 📦 Fleet clustering by behavior patterns
+- 🚨 DEF alerts: good/low/warning/critical/emergency levels
+- 📈 Consumption rate calculation (gallons/mile, gallons/hour)
+- 🎯 Depletion prediction (miles, hours, days until empty)
+- 🔗 New router: /api/v2/def/* and /api/v2/patterns/*
+
+CHANGELOG v1.7.0 (INTEGRATED HEALTH DASHBOARD):
+- 🆕 NEW: /truck/{truck_id}/comprehensive endpoint
+- 📊 Combines: Predictive + Driver Scoring + Component Health + DTC
+- 🎯 Unified Health Score (weighted: 30% predictive, 20% driver, 30% components, 20% DTC)
+- 🔧 Integrates driver_scoring_engine.py for driver behavior
+- 🌀 Integrates component_health_predictors.py for turbo/oil/coolant
+- 📋 Integrates dtc_analyzer.py v4.0 with dtc_database.py v5.8.0 (112 SPNs)
+- 🚨 Prioritized recommendations from all sources
+- 📈 Status levels: healthy/attention/warning/critical
 
 CHANGELOG v1.6.0 (FASE 5.6 - ML DATA PERSISTENCE):
 - 💾 NEW: MySQL persistence for all calculated data (ML training ready)
@@ -510,9 +537,12 @@ class FleetCommandCenter:
     - Real DEF prediction
     - External decision tables
     - MySQL persistence for ML training
+    - DEF Predictor Engine (v1.8.0)
+    - DTW Pattern Analyzer (v1.8.0)
+    - Wialon Data Loader Service (v1.8.0)
     """
 
-    VERSION = "1.6.0"
+    VERSION = "1.8.0"
 
     # Component to category mapping
     COMPONENT_CATEGORIES = {
@@ -4723,6 +4753,7 @@ async def get_command_center_dashboard(
         }
     except Exception as e:
         import traceback
+
         logger.error(f"Error getting command center data: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -5262,4 +5293,230 @@ async def get_command_center_config():
         }
     except Exception as e:
         logger.error(f"Error getting config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.7.0: INTEGRATED TRUCK HEALTH ENDPOINT
+# Combines all data sources: Fleet Command Center + Driver Scoring + Component Health + DTC
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/truck/{truck_id}/comprehensive")
+async def get_comprehensive_truck_health(
+    truck_id: str,
+    dtc_string: Optional[str] = Query(
+        default=None, description="Current DTC codes (SPN.FMI)"
+    ),
+):
+    """
+    v1.7.0: Get comprehensive truck health combining ALL data sources.
+
+    Integrates:
+    1. Fleet Command Center predictive maintenance
+    2. Driver behavior scoring (speeding, idle)
+    3. Component health (turbo, oil, coolant)
+    4. DTC analysis (J1939 codes)
+
+    Returns unified health score with prioritized recommendations.
+    """
+    try:
+        cc = get_command_center()
+
+        # Get base Fleet Command Center data
+        # Find truck in current data
+        truck_actions = [a for a in cc.recent_actions if a.truck_id == truck_id]
+
+        # Calculate base risk score
+        try:
+            risk_data = cc.calculate_truck_risk_score(truck_id, cc.current_data)
+            base_risk = risk_data.get("risk_score", 50)
+        except Exception:
+            base_risk = 50
+
+        # Get Driver Scoring
+        driver_data = {"score": 100, "grade": "A", "tips": []}
+        try:
+            from driver_scoring_engine import get_scoring_engine
+
+            scoring_engine = get_scoring_engine()
+            driver_score = scoring_engine.calculate_score(truck_id, period_days=30)
+            tips = scoring_engine.get_improvement_tips(truck_id)
+            driver_data = {
+                "score": driver_score.score,
+                "grade": driver_score.grade,
+                "tips": tips[:3],
+                "events": len(driver_score.events),
+                "speedings": len(driver_score.speeding_events),
+            }
+        except ImportError:
+            logger.debug("Driver scoring engine not available")
+        except Exception as e:
+            logger.debug(f"Could not get driver score: {e}")
+
+        # Get Component Health
+        component_data = {"turbo": {}, "oil": {}, "coolant": {}, "avg_score": 100}
+        try:
+            from component_health_predictors import (
+                get_turbo_predictor,
+                get_oil_tracker,
+                get_coolant_detector,
+            )
+
+            turbo = get_turbo_predictor().predict(truck_id)
+            oil = get_oil_tracker().predict(truck_id)
+            coolant = get_coolant_detector().predict(truck_id)
+
+            component_data = {
+                "turbo": {
+                    "score": turbo.score,
+                    "status": turbo.status.value,
+                    "alerts": turbo.alerts[:2],
+                },
+                "oil": {
+                    "score": oil.score,
+                    "status": oil.status.value,
+                    "alerts": oil.alerts[:2],
+                },
+                "coolant": {
+                    "score": coolant.score,
+                    "status": coolant.status.value,
+                    "alerts": coolant.alerts[:2],
+                },
+                "avg_score": round((turbo.score + oil.score + coolant.score) / 3, 1),
+            }
+        except ImportError:
+            logger.debug("Component health predictors not available")
+        except Exception as e:
+            logger.debug(f"Could not get component health: {e}")
+
+        # Get DTC Analysis
+        dtc_data = {"status": "ok", "codes": [], "systems": []}
+        try:
+            from dtc_analyzer import get_dtc_analyzer
+
+            analyzer = get_dtc_analyzer()
+            dtc_report = analyzer.get_dtc_analysis_report(truck_id, dtc_string)
+            dtc_data = {
+                "status": dtc_report["status"],
+                "codes_count": dtc_report["summary"]["total"],
+                "critical_count": dtc_report["summary"]["critical"],
+                "systems_affected": dtc_report.get("systems_affected", []),
+                "codes": dtc_report["codes"][:3],  # Top 3 codes
+            }
+        except ImportError:
+            logger.debug("DTC analyzer not available")
+        except Exception as e:
+            logger.debug(f"Could not get DTC analysis: {e}")
+
+        # Calculate Unified Health Score
+        # Weighted: Predictive=30%, Driver=20%, Components=30%, DTC=20%
+        dtc_score = (
+            100
+            if dtc_data["status"] == "ok"
+            else (50 if dtc_data["status"] == "warning" else 25)
+        )
+        predictive_score = 100 - base_risk  # Risk is inverse of health
+
+        unified_score = round(
+            predictive_score * 0.30
+            + driver_data["score"] * 0.20
+            + component_data["avg_score"] * 0.30
+            + dtc_score * 0.20,
+            1,
+        )
+
+        # Determine overall status
+        if unified_score >= 80:
+            status = "healthy"
+            status_emoji = "✅"
+        elif unified_score >= 60:
+            status = "attention"
+            status_emoji = "⚠️"
+        elif unified_score >= 40:
+            status = "warning"
+            status_emoji = "🔶"
+        else:
+            status = "critical"
+            status_emoji = "🔴"
+
+        # Collect ALL critical recommendations
+        recommendations = []
+
+        # From DTC
+        for code in dtc_data.get("codes", []):
+            if code.get("severity") == "critical":
+                recommendations.append(
+                    {
+                        "priority": "critical",
+                        "source": "DTC",
+                        "action": code.get("action", "Revisar código DTC"),
+                    }
+                )
+
+        # From Component Health
+        for comp_name, comp in [
+            ("Turbo", component_data.get("turbo", {})),
+            ("Aceite", component_data.get("oil", {})),
+            ("Refrigerante", component_data.get("coolant", {})),
+        ]:
+            for alert in comp.get("alerts", []):
+                if "⛔" in alert:
+                    recommendations.append(
+                        {"priority": "critical", "source": comp_name, "action": alert}
+                    )
+                elif "⚠️" in alert:
+                    recommendations.append(
+                        {"priority": "warning", "source": comp_name, "action": alert}
+                    )
+
+        # From Driver
+        for tip in driver_data.get("tips", []):
+            if tip.get("priority") == "high":
+                recommendations.append(
+                    {
+                        "priority": "warning",
+                        "source": "Conductor",
+                        "action": tip.get("tip", ""),
+                    }
+                )
+
+        # From Fleet Command Center actions
+        for action in truck_actions[:3]:
+            if action.priority == "CRITICO":
+                recommendations.append(
+                    {
+                        "priority": "critical",
+                        "source": "Predictivo",
+                        "action": action.accion,
+                    }
+                )
+
+        # Sort by priority
+        priority_order = {"critical": 0, "warning": 1, "info": 2}
+        recommendations.sort(key=lambda x: priority_order.get(x["priority"], 99))
+
+        return {
+            "success": True,
+            "truck_id": truck_id,
+            "unified_health_score": unified_score,
+            "status": status,
+            "status_emoji": status_emoji,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "breakdown": {
+                "predictive_maintenance": {
+                    "score": predictive_score,
+                    "risk_level": base_risk,
+                    "active_issues": len(truck_actions),
+                },
+                "driver_behavior": driver_data,
+                "component_health": component_data,
+                "dtc_analysis": dtc_data,
+            },
+            "recommendations": recommendations[:10],  # Top 10
+            "version": "1.7.0",
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting comprehensive health for {truck_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

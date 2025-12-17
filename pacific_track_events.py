@@ -1,0 +1,776 @@
+"""
+Pacific Track / MondoTracking Event ID Database
+═══════════════════════════════════════════════════════════════════════════════
+
+Official Event Identifier codes from Pacific Track/Beyond/MondoTracking devices.
+Used to identify what caused the device to send a frame to the server.
+
+Source: MondoTracking Solutions LLC Documentation (2017-2025)
+Version: 1.0.0
+"""
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+
+
+class EventCategory(Enum):
+    """Category of Pacific Track events"""
+
+    IGNITION = "ignition"
+    ENGINE = "engine"
+    MOTION = "motion"
+    PERIODIC = "periodic"
+    INPUT = "input"
+    HARSH_DRIVING = "harsh_driving"
+    GPS = "gps"
+    POWER = "power"
+    GEOFENCE = "geofence"
+    SYSTEM = "system"
+    BLUETOOTH = "bluetooth"
+    FUEL = "fuel"
+    DRIVER = "driver"
+
+
+class EventSeverity(Enum):
+    """Severity level for driver behavior scoring"""
+
+    CRITICAL = "critical"  # Safety critical - immediate attention
+    WARNING = "warning"  # Affects score significantly
+    INFO = "info"  # Informational only
+    NEUTRAL = "neutral"  # No impact on scoring
+
+
+@dataclass
+class PacificTrackEvent:
+    """Pacific Track Event Information"""
+
+    event_id: int
+    hex_code: str
+    name_en: str
+    name_es: str
+    category: EventCategory
+    severity: EventSeverity
+    description_es: str
+    score_impact: int  # Points to deduct from driver score (0-100)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PACIFIC TRACK EVENT DATABASE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PACIFIC_TRACK_EVENTS = {
+    # ─────────────────────────────────────────────────────────────────────────
+    # IGNITION EVENTS (0x10-0x11)
+    # ─────────────────────────────────────────────────────────────────────────
+    16: PacificTrackEvent(
+        event_id=16,
+        hex_code="0x10",
+        name_en="Ignition (hardwired) OFF",
+        name_es="Ignición (cableado) APAGADA",
+        category=EventCategory.IGNITION,
+        severity=EventSeverity.INFO,
+        description_es="El interruptor de ignición cableado se apagó.",
+        score_impact=0,
+    ),
+    17: PacificTrackEvent(
+        event_id=17,
+        hex_code="0x11",
+        name_en="Ignition (hardwired) ON",
+        name_es="Ignición (cableado) ENCENDIDA",
+        category=EventCategory.IGNITION,
+        severity=EventSeverity.INFO,
+        description_es="El interruptor de ignición cableado se encendió.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # ENGINE EVENTS (0x12-0x18)
+    # ─────────────────────────────────────────────────────────────────────────
+    18: PacificTrackEvent(
+        event_id=18,
+        hex_code="0x12",
+        name_en="Engine (based on ECM) OFF",
+        name_es="Motor (basado en ECM) APAGADO",
+        category=EventCategory.ENGINE,
+        severity=EventSeverity.INFO,
+        description_es="El motor se apagó según el módulo de control del motor (ECM).",
+        score_impact=0,
+    ),
+    19: PacificTrackEvent(
+        event_id=19,
+        hex_code="0x13",
+        name_en="Engine (based on ECM) ON",
+        name_es="Motor (basado en ECM) ENCENDIDO",
+        category=EventCategory.ENGINE,
+        severity=EventSeverity.INFO,
+        description_es="El motor se encendió según el módulo de control del motor (ECM).",
+        score_impact=0,
+    ),
+    20: PacificTrackEvent(
+        event_id=20,
+        hex_code="0x14",
+        name_en="Engine Long Idle",
+        name_es="Ralentí Prolongado del Motor",
+        category=EventCategory.ENGINE,
+        severity=EventSeverity.WARNING,
+        description_es="El motor ha estado en ralentí por un período prolongado. Desperdicia combustible y genera desgaste.",
+        score_impact=5,
+    ),
+    21: PacificTrackEvent(
+        event_id=21,
+        hex_code="0x15",
+        name_en="Engine Running Periodic",
+        name_es="Motor en Marcha Periódico",
+        category=EventCategory.ENGINE,
+        severity=EventSeverity.INFO,
+        description_es="Reporte periódico mientras el motor está en marcha.",
+        score_impact=0,
+    ),
+    24: PacificTrackEvent(
+        event_id=24,
+        hex_code="0x18",
+        name_en="Engine DTC Change Event",
+        name_es="Cambio de Código de Falla (DTC)",
+        category=EventCategory.ENGINE,
+        severity=EventSeverity.WARNING,
+        description_es="Se detectó un cambio en los códigos de diagnóstico del motor. Revisar DTCs activos.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # MOTION EVENTS (0x20-0x3A)
+    # ─────────────────────────────────────────────────────────────────────────
+    32: PacificTrackEvent(
+        event_id=32,
+        hex_code="0x20",
+        name_en="Motion STOP",
+        name_es="Movimiento DETENIDO",
+        category=EventCategory.MOTION,
+        severity=EventSeverity.INFO,
+        description_es="El vehículo se detuvo según la configuración del dispositivo.",
+        score_impact=0,
+    ),
+    33: PacificTrackEvent(
+        event_id=33,
+        hex_code="0x21",
+        name_en="Motion START",
+        name_es="Movimiento INICIADO",
+        category=EventCategory.MOTION,
+        severity=EventSeverity.INFO,
+        description_es="El vehículo comenzó a moverse según la configuración del dispositivo.",
+        score_impact=0,
+    ),
+    34: PacificTrackEvent(
+        event_id=34,
+        hex_code="0x22",
+        name_en="Long STOP",
+        name_es="Parada Prolongada",
+        category=EventCategory.MOTION,
+        severity=EventSeverity.INFO,
+        description_es="El vehículo ha estado detenido por un tiempo prolongado definido en la configuración.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # PERIODIC EVENTS (0x30-0x35)
+    # ─────────────────────────────────────────────────────────────────────────
+    48: PacificTrackEvent(
+        event_id=48,
+        hex_code="0x30",
+        name_en="Heartbeat",
+        name_es="Latido (Heartbeat)",
+        category=EventCategory.PERIODIC,
+        severity=EventSeverity.NEUTRAL,
+        description_es="Señal periódica enviada independientemente del estado del dispositivo.",
+        score_impact=0,
+    ),
+    49: PacificTrackEvent(
+        event_id=49,
+        hex_code="0x31",
+        name_en="Static Periodic",
+        name_es="Periódico Estático",
+        category=EventCategory.PERIODIC,
+        severity=EventSeverity.NEUTRAL,
+        description_es="Señal enviada periódicamente cuando el vehículo no está en movimiento.",
+        score_impact=0,
+    ),
+    50: PacificTrackEvent(
+        event_id=50,
+        hex_code="0x32",
+        name_en="Motion Periodic",
+        name_es="Periódico en Movimiento",
+        category=EventCategory.PERIODIC,
+        severity=EventSeverity.NEUTRAL,
+        description_es="Señal de breadcrumb para rastrear movimientos del vehículo.",
+        score_impact=0,
+    ),
+    51: PacificTrackEvent(
+        event_id=51,
+        hex_code="0x33",
+        name_en="Motion Heading Change",
+        name_es="Cambio de Dirección",
+        category=EventCategory.MOTION,
+        severity=EventSeverity.INFO,
+        description_es="Se detectó un cambio de dirección debounced.",
+        score_impact=0,
+    ),
+    52: PacificTrackEvent(
+        event_id=52,
+        hex_code="0x34",
+        name_en="Motion Distance",
+        name_es="Distancia Recorrida",
+        category=EventCategory.MOTION,
+        severity=EventSeverity.INFO,
+        description_es="Se recorrió una distancia predefinida.",
+        score_impact=0,
+    ),
+    53: PacificTrackEvent(
+        event_id=53,
+        hex_code="0x35",
+        name_en="Periodic on Battery",
+        name_es="Periódico en Batería",
+        category=EventCategory.PERIODIC,
+        severity=EventSeverity.WARNING,
+        description_es="El dispositivo está funcionando con batería de respaldo.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # SPEED EVENTS (0x36-0x37)
+    # ─────────────────────────────────────────────────────────────────────────
+    54: PacificTrackEvent(
+        event_id=54,
+        hex_code="0x36",
+        name_en="Motion Over Speed",
+        name_es="EXCESO DE VELOCIDAD",
+        category=EventCategory.HARSH_DRIVING,
+        severity=EventSeverity.CRITICAL,
+        description_es="⚠️ El vehículo viaja a velocidad superior al umbral configurado. Riesgo de seguridad.",
+        score_impact=15,
+    ),
+    55: PacificTrackEvent(
+        event_id=55,
+        hex_code="0x37",
+        name_en="Motion Over Speed Restored",
+        name_es="Velocidad Normalizada",
+        category=EventCategory.HARSH_DRIVING,
+        severity=EventSeverity.INFO,
+        description_es="El vehículo volvió a velocidad normal después de exceso.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # TOWING EVENTS (0x38-0x3A)
+    # ─────────────────────────────────────────────────────────────────────────
+    56: PacificTrackEvent(
+        event_id=56,
+        hex_code="0x38",
+        name_en="Motion Towing Event",
+        name_es="⚠️ EVENTO DE REMOLQUE",
+        category=EventCategory.MOTION,
+        severity=EventSeverity.CRITICAL,
+        description_es="¡ALERTA! Vehículo en movimiento con motor/ignición apagados. Posible remolque no autorizado.",
+        score_impact=0,
+    ),
+    57: PacificTrackEvent(
+        event_id=57,
+        hex_code="0x39",
+        name_en="Motion Towing Periodic",
+        name_es="Remolque en Progreso",
+        category=EventCategory.MOTION,
+        severity=EventSeverity.CRITICAL,
+        description_es="El vehículo continúa siendo remolcado.",
+        score_impact=0,
+    ),
+    58: PacificTrackEvent(
+        event_id=58,
+        hex_code="0x3A",
+        name_en="Motion Towing End",
+        name_es="Fin de Remolque",
+        category=EventCategory.MOTION,
+        severity=EventSeverity.INFO,
+        description_es="El evento de remolque ha terminado.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # HARSH DRIVING EVENTS (0x70-0x78) - CRITICAL FOR DRIVER SCORING
+    # ─────────────────────────────────────────────────────────────────────────
+    112: PacificTrackEvent(
+        event_id=112,
+        hex_code="0x70",
+        name_en="Harsh Acceleration",
+        name_es="⚠️ ACELERACIÓN BRUSCA",
+        category=EventCategory.HARSH_DRIVING,
+        severity=EventSeverity.CRITICAL,
+        description_es="Aceleración brusca detectada. Aumenta consumo de combustible y desgaste. Umbral configurable.",
+        score_impact=10,
+    ),
+    113: PacificTrackEvent(
+        event_id=113,
+        hex_code="0x71",
+        name_en="Harsh Braking",
+        name_es="⚠️ FRENADO BRUSCO",
+        category=EventCategory.HARSH_DRIVING,
+        severity=EventSeverity.CRITICAL,
+        description_es="Frenado brusco detectado. Riesgo de colisión y desgaste de frenos. Umbral configurable.",
+        score_impact=10,
+    ),
+    114: PacificTrackEvent(
+        event_id=114,
+        hex_code="0x72",
+        name_en="Harsh Cornering / Swerving",
+        name_es="⚠️ GIRO/VIRAJE BRUSCO",
+        category=EventCategory.HARSH_DRIVING,
+        severity=EventSeverity.CRITICAL,
+        description_es="Giro o viraje brusco detectado. Riesgo de volcadura. Umbral configurable.",
+        score_impact=10,
+    ),
+    120: PacificTrackEvent(
+        event_id=120,
+        hex_code="0x78",
+        name_en="Rollover Detected",
+        name_es="⛔ VOLCADURA DETECTADA",
+        category=EventCategory.HARSH_DRIVING,
+        severity=EventSeverity.CRITICAL,
+        description_es="¡EMERGENCIA! Volcadura detectada - dispositivo inclinado más de 45° de su posición calibrada.",
+        score_impact=50,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # GPS EVENTS (0x80-0x82)
+    # ─────────────────────────────────────────────────────────────────────────
+    128: PacificTrackEvent(
+        event_id=128,
+        hex_code="0x80",
+        name_en="GPS Off",
+        name_es="GPS Apagado",
+        category=EventCategory.GPS,
+        severity=EventSeverity.INFO,
+        description_es="El GPS se apagó.",
+        score_impact=0,
+    ),
+    129: PacificTrackEvent(
+        event_id=129,
+        hex_code="0x81",
+        name_en="GPS Unlock",
+        name_es="GPS Sin Señal",
+        category=EventCategory.GPS,
+        severity=EventSeverity.WARNING,
+        description_es="El GPS perdió la señal satelital.",
+        score_impact=0,
+    ),
+    130: PacificTrackEvent(
+        event_id=130,
+        hex_code="0x82",
+        name_en="GPS Lock",
+        name_es="GPS Con Señal",
+        category=EventCategory.GPS,
+        severity=EventSeverity.INFO,
+        description_es="El GPS obtuvo señal satelital.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # POWER EVENTS (0x90-0x95)
+    # ─────────────────────────────────────────────────────────────────────────
+    144: PacificTrackEvent(
+        event_id=144,
+        hex_code="0x90",
+        name_en="Power Loss",
+        name_es="⚠️ PÉRDIDA DE ENERGÍA",
+        category=EventCategory.POWER,
+        severity=EventSeverity.CRITICAL,
+        description_es="Energía principal desconectada. Dispositivo en batería de respaldo. Posible manipulación.",
+        score_impact=0,
+    ),
+    145: PacificTrackEvent(
+        event_id=145,
+        hex_code="0x91",
+        name_en="Power Restored",
+        name_es="Energía Restaurada",
+        category=EventCategory.POWER,
+        severity=EventSeverity.INFO,
+        description_es="La energía principal fue restaurada.",
+        score_impact=0,
+    ),
+    146: PacificTrackEvent(
+        event_id=146,
+        hex_code="0x92",
+        name_en="Power Low",
+        name_es="Voltaje Bajo",
+        category=EventCategory.POWER,
+        severity=EventSeverity.WARNING,
+        description_es="El voltaje principal está por debajo del umbral configurado.",
+        score_impact=0,
+    ),
+    147: PacificTrackEvent(
+        event_id=147,
+        hex_code="0x93",
+        name_en="Power High",
+        name_es="Voltaje Alto",
+        category=EventCategory.POWER,
+        severity=EventSeverity.WARNING,
+        description_es="El voltaje principal está por encima del umbral configurado.",
+        score_impact=0,
+    ),
+    148: PacificTrackEvent(
+        event_id=148,
+        hex_code="0x94",
+        name_en="Battery Low",
+        name_es="⚠️ BATERÍA BAJA",
+        category=EventCategory.POWER,
+        severity=EventSeverity.CRITICAL,
+        description_es="Batería de respaldo baja. El dispositivo puede apagarse pronto.",
+        score_impact=0,
+    ),
+    149: PacificTrackEvent(
+        event_id=149,
+        hex_code="0x95",
+        name_en="Battery High",
+        name_es="Batería Alta",
+        category=EventCategory.POWER,
+        severity=EventSeverity.WARNING,
+        description_es="Voltaje de batería por encima del umbral.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # SYSTEM EVENTS (0x150-0x153)
+    # ─────────────────────────────────────────────────────────────────────────
+    320: PacificTrackEvent(
+        event_id=320,
+        hex_code="0x140",
+        name_en="Command Line",
+        name_es="Línea de Comando",
+        category=EventCategory.SYSTEM,
+        severity=EventSeverity.INFO,
+        description_es="Evento enviado desde línea de comando.",
+        score_impact=0,
+    ),
+    336: PacificTrackEvent(
+        event_id=336,
+        hex_code="0x150",
+        name_en="Power-up w/ GPS",
+        name_es="Encendido con GPS",
+        category=EventCategory.SYSTEM,
+        severity=EventSeverity.INFO,
+        description_es="El dispositivo se encendió y GPS obtuvo señal o timeout.",
+        score_impact=0,
+    ),
+    337: PacificTrackEvent(
+        event_id=337,
+        hex_code="0x151",
+        name_en="Boot power-on",
+        name_es="Reinicio por Encendido",
+        category=EventCategory.SYSTEM,
+        severity=EventSeverity.INFO,
+        description_es="El dispositivo se reinició por encendido.",
+        score_impact=0,
+    ),
+    338: PacificTrackEvent(
+        event_id=338,
+        hex_code="0x152",
+        name_en="Boot software reset",
+        name_es="Reinicio por Software",
+        category=EventCategory.SYSTEM,
+        severity=EventSeverity.INFO,
+        description_es="El dispositivo se reinició por comando de software.",
+        score_impact=0,
+    ),
+    339: PacificTrackEvent(
+        event_id=339,
+        hex_code="0x153",
+        name_en="Boot watchdog",
+        name_es="Reinicio por Watchdog",
+        category=EventCategory.SYSTEM,
+        severity=EventSeverity.WARNING,
+        description_es="El dispositivo se reinició por evento watchdog (posible error).",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # BLUETOOTH EVENTS (0x158-0x15A)
+    # ─────────────────────────────────────────────────────────────────────────
+    344: PacificTrackEvent(
+        event_id=344,
+        hex_code="0x158",
+        name_en="Bluetooth OFF",
+        name_es="Bluetooth Apagado",
+        category=EventCategory.BLUETOOTH,
+        severity=EventSeverity.INFO,
+        description_es="El subsistema Bluetooth se apagó o no está disponible.",
+        score_impact=0,
+    ),
+    345: PacificTrackEvent(
+        event_id=345,
+        hex_code="0x159",
+        name_en="Bluetooth Disconnected",
+        name_es="Bluetooth Desconectado",
+        category=EventCategory.BLUETOOTH,
+        severity=EventSeverity.INFO,
+        description_es="El Bluetooth está encendido pero desconectado.",
+        score_impact=0,
+    ),
+    346: PacificTrackEvent(
+        event_id=346,
+        hex_code="0x15A",
+        name_en="Bluetooth Connected",
+        name_es="Bluetooth Conectado",
+        category=EventCategory.BLUETOOTH,
+        severity=EventSeverity.INFO,
+        description_es="El Bluetooth se conectó a un dispositivo.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # DRIVER EVENTS (0x160)
+    # ─────────────────────────────────────────────────────────────────────────
+    352: PacificTrackEvent(
+        event_id=352,
+        hex_code="0x160",
+        name_en="iButton™ inserted",
+        name_es="iButton Insertado",
+        category=EventCategory.DRIVER,
+        severity=EventSeverity.INFO,
+        description_es="Un dispositivo iButton fue insertado en el lector (identificación de conductor).",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # SERVER/MAINTENANCE EVENTS (0x170-0x180)
+    # ─────────────────────────────────────────────────────────────────────────
+    368: PacificTrackEvent(
+        event_id=368,
+        hex_code="0x170",
+        name_en="Server Request",
+        name_es="Solicitud del Servidor",
+        category=EventCategory.SYSTEM,
+        severity=EventSeverity.INFO,
+        description_es="Solicitud enviada por el servidor al dispositivo.",
+        score_impact=0,
+    ),
+    384: PacificTrackEvent(
+        event_id=384,
+        hex_code="0x180",
+        name_en="Maintenance report",
+        name_es="Reporte de Mantenimiento",
+        category=EventCategory.SYSTEM,
+        severity=EventSeverity.INFO,
+        description_es="Reporte enviado al servidor de mantenimiento.",
+        score_impact=0,
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # FUEL EVENTS (0x200-0x201)
+    # ─────────────────────────────────────────────────────────────────────────
+    512: PacificTrackEvent(
+        event_id=512,
+        hex_code="0x200",
+        name_en="Fuel Loss / Theft",
+        name_es="⛔ PÉRDIDA/ROBO DE COMBUSTIBLE",
+        category=EventCategory.FUEL,
+        severity=EventSeverity.CRITICAL,
+        description_es="¡ALERTA! Se detectó una caída súbita en el nivel de combustible. Posible robo.",
+        score_impact=0,
+    ),
+    513: PacificTrackEvent(
+        event_id=513,
+        hex_code="0x201",
+        name_en="Refuel",
+        name_es="Recarga de Combustible",
+        category=EventCategory.FUEL,
+        severity=EventSeverity.INFO,
+        description_es="Se detectó un aumento en el nivel de combustible (recarga).",
+        score_impact=0,
+    ),
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INPUT EVENTS (Dynamic range 0x40-0x5F)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Generate Input Low events (64-79)
+for i in range(16):
+    event_id = 64 + i
+    PACIFIC_TRACK_EVENTS[event_id] = PacificTrackEvent(
+        event_id=event_id,
+        hex_code=f"0x{event_id:02X}",
+        name_en=f"Input {i+1} Low",
+        name_es=f"Entrada {i+1} Baja",
+        category=EventCategory.INPUT,
+        severity=EventSeverity.INFO,
+        description_es=f"La entrada {i+1} cambió de Alto a Bajo.",
+        score_impact=0,
+    )
+
+# Generate Input High events (80-95)
+for i in range(16):
+    event_id = 80 + i
+    PACIFIC_TRACK_EVENTS[event_id] = PacificTrackEvent(
+        event_id=event_id,
+        hex_code=f"0x{event_id:02X}",
+        name_en=f"Input {i+1} High",
+        name_es=f"Entrada {i+1} Alta",
+        category=EventCategory.INPUT,
+        severity=EventSeverity.INFO,
+        description_es=f"La entrada {i+1} cambió de Bajo a Alto.",
+        score_impact=0,
+    )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GEOFENCE EVENTS (Dynamic range 0x100-0x13F)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Generate Geofence Exit events (256-287)
+for i in range(32):
+    event_id = 256 + i
+    PACIFIC_TRACK_EVENTS[event_id] = PacificTrackEvent(
+        event_id=event_id,
+        hex_code=f"0x{event_id:03X}",
+        name_en=f"Geofence {i+1} Exit",
+        name_es=f"Salida de Geocerca {i+1}",
+        category=EventCategory.GEOFENCE,
+        severity=EventSeverity.WARNING,
+        description_es=f"El vehículo salió de la geocerca #{i+1}.",
+        score_impact=0,
+    )
+
+# Generate Geofence Enter events (288-319)
+for i in range(32):
+    event_id = 288 + i
+    PACIFIC_TRACK_EVENTS[event_id] = PacificTrackEvent(
+        event_id=event_id,
+        hex_code=f"0x{event_id:03X}",
+        name_en=f"Geofence {i+1} Enter",
+        name_es=f"Entrada a Geocerca {i+1}",
+        category=EventCategory.GEOFENCE,
+        severity=EventSeverity.INFO,
+        description_es=f"El vehículo entró a la geocerca #{i+1}.",
+        score_impact=0,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOOKUP FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def get_event_info(event_id: int) -> Optional[PacificTrackEvent]:
+    """Get information for a Pacific Track event ID."""
+    return PACIFIC_TRACK_EVENTS.get(event_id)
+
+
+def get_event_description(event_id: int, language: str = "es") -> dict:
+    """
+    Get a user-friendly description of an event.
+
+    Args:
+        event_id: The Pacific Track event ID
+        language: "en" or "es"
+
+    Returns:
+        Dict with event details
+    """
+    event = PACIFIC_TRACK_EVENTS.get(event_id)
+
+    if event:
+        return {
+            "event_id": event_id,
+            "hex": event.hex_code,
+            "name": event.name_es if language == "es" else event.name_en,
+            "category": event.category.value,
+            "severity": event.severity.value,
+            "description": event.description_es,
+            "score_impact": event.score_impact,
+        }
+    else:
+        return {
+            "event_id": event_id,
+            "hex": f"0x{event_id:X}",
+            "name": (
+                f"Evento Desconocido ({event_id})"
+                if language == "es"
+                else f"Unknown Event ({event_id})"
+            ),
+            "category": "unknown",
+            "severity": "info",
+            "description": "No hay información disponible para este evento.",
+            "score_impact": 0,
+        }
+
+
+def get_harsh_driving_events() -> list[int]:
+    """Get list of all harsh driving event IDs for driver scoring."""
+    return [
+        event_id
+        for event_id, event in PACIFIC_TRACK_EVENTS.items()
+        if event.category == EventCategory.HARSH_DRIVING
+    ]
+
+
+def get_events_by_category(category: EventCategory) -> list[PacificTrackEvent]:
+    """Get all events of a specific category."""
+    return [
+        event for event in PACIFIC_TRACK_EVENTS.values() if event.category == category
+    ]
+
+
+def calculate_driver_score_impact(events: list[int]) -> dict:
+    """
+    Calculate total driver score impact from a list of events.
+
+    Args:
+        events: List of event IDs
+
+    Returns:
+        Dict with breakdown and total deduction
+    """
+    breakdown = {}
+    total_deduction = 0
+
+    for event_id in events:
+        event = PACIFIC_TRACK_EVENTS.get(event_id)
+        if event and event.score_impact > 0:
+            name = event.name_es
+            if name not in breakdown:
+                breakdown[name] = {
+                    "count": 0,
+                    "impact_each": event.score_impact,
+                    "total": 0,
+                }
+            breakdown[name]["count"] += 1
+            breakdown[name]["total"] += event.score_impact
+            total_deduction += event.score_impact
+
+    return {
+        "base_score": 100,
+        "total_deduction": min(total_deduction, 100),  # Cap at 100
+        "final_score": max(100 - total_deduction, 0),  # Min 0
+        "breakdown": breakdown,
+    }
+
+
+def get_database_stats() -> dict:
+    """Get statistics about the event database."""
+    categories = {}
+    severities = {}
+
+    for event in PACIFIC_TRACK_EVENTS.values():
+        cat = event.category.value
+        sev = event.severity.value
+        categories[cat] = categories.get(cat, 0) + 1
+        severities[sev] = severities.get(sev, 0) + 1
+
+    return {
+        "total_events": len(PACIFIC_TRACK_EVENTS),
+        "by_category": categories,
+        "by_severity": severities,
+        "harsh_driving_events": len(get_harsh_driving_events()),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONVENIENCE CONSTANTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Event IDs for quick reference
+EVENT_HARSH_ACCEL = 112
+EVENT_HARSH_BRAKE = 113
+EVENT_HARSH_CORNER = 114
+EVENT_OVERSPEED = 54
+EVENT_ROLLOVER = 120
+EVENT_LONG_IDLE = 20
+EVENT_FUEL_THEFT = 512
+EVENT_REFUEL = 513
+EVENT_TOWING = 56
+EVENT_DTC_CHANGE = 24
+EVENT_POWER_LOSS = 144

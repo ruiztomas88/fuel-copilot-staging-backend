@@ -1,5 +1,5 @@
 """
-J1939 DTC Database - Catálogo Expandido v5.7.6
+J1939 DTC Database - Catálogo Expandido v5.8.0
 ═══════════════════════════════════════════════════════════════════════════════
 
 Comprehensive J1939 DTC (Diagnostic Trouble Code) database for Class 8 trucks.
@@ -11,11 +11,13 @@ Structure:
 
 Sources:
 - SAE J1939-73 (Application Layer - Diagnostics)
+- Official MondoTracking/Pacific Track Documentation
 - Cummins, Detroit Diesel, Paccar manufacturer codes
 - Real-world fleet data from Fuel Analytics operations
 
 Author: Fuel Analytics Team
-Version: 5.7.6
+Version: 5.8.0
+Updated: December 2025 - Full SPN/FMI from official documentation
 """
 
 from dataclasses import dataclass
@@ -642,6 +644,822 @@ HVAC_SPNS = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SPN DATABASE - WIALON DETECTED SPNs (Added from real fleet data)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+WIALON_DETECTED_SPNS = {
+    # SPN 597 - Brake Switch
+    597: SPNInfo(
+        spn=597,
+        name_en="Brake Switch",
+        name_es="Interruptor del Pedal de Freno",
+        system=DTCSystem.BRAKES,
+        severity=DTCSeverity.WARNING,
+        description_es="Sensor que detecta cuando se presiona el pedal de freno. Importante para luces de freno y control de crucero.",
+        action_es="🔧 Verificar interruptor del pedal de freno. Puede afectar luces de freno y funciones de seguridad.",
+    ),
+    # SPN 829 - J1939 Network
+    829: SPNInfo(
+        spn=829,
+        name_en="J1939 Network #1",
+        name_es="Red J1939 #1",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.WARNING,
+        description_es="Estado de comunicación del bus de datos J1939. Red de comunicación entre módulos del vehículo.",
+        action_es="🔧 Error de comunicación en red CAN/J1939. Verificar conectores y cableado. Puede causar lecturas erráticas.",
+    ),
+    # SPN 1089 - Engine Torque Mode
+    1089: SPNInfo(
+        spn=1089,
+        name_en="Engine Torque Mode",
+        name_es="Modo de Torque del Motor",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.WARNING,
+        description_es="Estado del modo de control de torque del motor. Define cómo la ECU controla la potencia.",
+        action_es="🔧 El motor puede estar en modo de protección o limitado. Verificar otros códigos activos.",
+    ),
+    # SPN 1322 - Engine Protection System
+    1322: SPNInfo(
+        spn=1322,
+        name_en="Engine Protection System Timer State",
+        name_es="Estado del Timer de Protección del Motor",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Sistema de protección del motor activado. Indica que el motor está en modo de protección por una condición crítica.",
+        action_es="⛔ SISTEMA DE PROTECCIÓN ACTIVO. El motor puede apagarse automáticamente. Revisar otros DTCs inmediatamente.",
+    ),
+    # SPN 1548 - Malfunction Indicator Lamp (MIL)
+    1548: SPNInfo(
+        spn=1548,
+        name_en="Malfunction Indicator Lamp Command",
+        name_es="Comando de Luz de Falla (Check Engine)",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.WARNING,
+        description_es="Control de la luz de 'Check Engine'. Indica que hay una falla activa que requiere atención.",
+        action_es="⚠️ LUZ CHECK ENGINE ACTIVA. Indica falla que requiere diagnóstico. Revisar todos los DTCs activos.",
+    ),
+    # SPN 1592 - Engine Protection System Config
+    1592: SPNInfo(
+        spn=1592,
+        name_en="Engine Protection System Config",
+        name_es="Configuración del Sistema de Protección",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.WARNING,
+        description_es="Parámetros de configuración del sistema de protección del motor.",
+        action_es="🔧 Error en configuración de protección del motor. Puede requerir reprogramación de ECU.",
+    ),
+    # SPN 1636 - SCR Catalyst System
+    1636: SPNInfo(
+        spn=1636,
+        name_en="SCR Catalyst Conversion Efficiency",
+        name_es="Eficiencia del Catalizador SCR",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Eficiencia del sistema de reducción catalítica selectiva (SCR/DEF). Controla emisiones de NOx.",
+        action_es="⛔ SISTEMA SCR CON BAJA EFICIENCIA. Puede causar DERATING (reducción de potencia). Verificar DEF y catalizador.",
+    ),
+    # SPN 2023 - DEF Actual Dose
+    2023: SPNInfo(
+        spn=2023,
+        name_en="DEF Actual Dosing Quantity",
+        name_es="Cantidad Real de Dosificación DEF",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.WARNING,
+        description_es="Cantidad real de DEF siendo inyectada vs cantidad esperada.",
+        action_es="🔧 Dosificación de DEF incorrecta. Verificar bomba de DEF, líneas e inyector. Puede causar falla SCR.",
+    ),
+    # SPN 2791 - EGR Cooler Efficiency
+    2791: SPNInfo(
+        spn=2791,
+        name_en="EGR Cooler Efficiency",
+        name_es="Eficiencia del Enfriador EGR",
+        system=DTCSystem.EXHAUST,
+        severity=DTCSeverity.WARNING,
+        description_es="Eficiencia del enfriador de gases de escape recirculados (EGR).",
+        action_es="🔧 Enfriador EGR con baja eficiencia. Puede causar altas temperaturas y daño al motor. Programar servicio.",
+    ),
+    # SPN 3510 - DEF Tank Temperature
+    3510: SPNInfo(
+        spn=3510,
+        name_en="DEF Tank Temperature",
+        name_es="Temperatura del Tanque de DEF",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura del líquido DEF en el tanque. DEF se congela a -11°C y degrada sobre 30°C.",
+        action_es="🔧 Temperatura DEF fuera de rango. Si está congelado, esperar que caliente. Si está caliente, estacionar a la sombra.",
+    ),
+    # SPN 5571 - Engine Protection Torque Derate
+    5571: SPNInfo(
+        spn=5571,
+        name_en="Engine Protection Torque Derate",
+        name_es="Reducción de Torque por Protección",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Motor está reduciendo torque/potencia como medida de protección. Indica condición crítica.",
+        action_es="⛔ MOTOR EN DERATING. Potencia reducida por protección. El camión puede quedarse en velocidad baja. ATENCIÓN URGENTE.",
+    ),
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SPN DATABASE - ADDITIONAL J1939 OFFICIAL CODES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+ADDITIONAL_SPNS = {
+    # ─────────────────────────────────────────────────────────────────────────
+    # FUEL SYSTEM SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    16: SPNInfo(
+        spn=16,
+        name_en="Engine Fuel Filter Differential Pressure",
+        name_es="Presión Diferencial del Filtro de Combustible",
+        system=DTCSystem.FUEL,
+        severity=DTCSeverity.WARNING,
+        description_es="Diferencia de presión entre entrada y salida del filtro de combustible.",
+        action_es="🔧 Filtro de combustible posiblemente obstruido. Reemplazar en próximo servicio.",
+    ),
+    38: SPNInfo(
+        spn=38,
+        name_en="Second Fuel Level",
+        name_es="Nivel de Combustible Secundario",
+        system=DTCSystem.FUEL,
+        severity=DTCSeverity.INFO,
+        description_es="Nivel de combustible en tanque secundario.",
+        action_es="📋 Informativo. Monitorear nivel de combustible.",
+    ),
+    95: SPNInfo(
+        spn=95,
+        name_en="Engine Fuel Filter Differential Pressure",
+        name_es="Presión Diferencial Filtro Combustible",
+        system=DTCSystem.FUEL,
+        severity=DTCSeverity.WARNING,
+        description_es="Presión diferencial del filtro de combustible del motor.",
+        action_es="🔧 Filtro de combustible requiere atención. Programar reemplazo.",
+    ),
+    97: SPNInfo(
+        spn=97,
+        name_en="Water in Fuel Indicator",
+        name_es="⚠️ Indicador de Agua en Combustible",
+        system=DTCSystem.FUEL,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Se detectó agua en el sistema de combustible.",
+        action_es="⛔ DRENAR SEPARADOR DE AGUA inmediatamente. Agua puede dañar inyectores.",
+    ),
+    174: SPNInfo(
+        spn=174,
+        name_en="Engine Fuel Temperature",
+        name_es="Temperatura del Combustible",
+        system=DTCSystem.FUEL,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura del combustible del motor.",
+        action_es="🔧 Combustible caliente puede afectar rendimiento. Verificar sistema de enfriamiento.",
+    ),
+    183: SPNInfo(
+        spn=183,
+        name_en="Engine Fuel Rate",
+        name_es="Tasa de Consumo de Combustible",
+        system=DTCSystem.FUEL,
+        severity=DTCSeverity.INFO,
+        description_es="Tasa de consumo de combustible instantánea del motor.",
+        action_es="📋 Informativo. Usar para monitorear eficiencia de combustible.",
+    ),
+    250: SPNInfo(
+        spn=250,
+        name_en="Engine Total Fuel Used",
+        name_es="Combustible Total Usado",
+        system=DTCSystem.FUEL,
+        severity=DTCSeverity.INFO,
+        description_es="Total de combustible usado por el motor desde fábrica.",
+        action_es="📋 Informativo. Usar para análisis de consumo histórico.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # ENGINE CORE SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    21: SPNInfo(
+        spn=21,
+        name_en="Engine ECU Temperature",
+        name_es="Temperatura de ECU del Motor",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura de la unidad de control del motor (ECU).",
+        action_es="🔧 ECU con temperatura anormal. Verificar ventilación del compartimento.",
+    ),
+    51: SPNInfo(
+        spn=51,
+        name_en="Engine Throttle Position",
+        name_es="Posición del Acelerador",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Posición del acelerador del motor.",
+        action_es="⛔ Problema de acelerador. Puede causar pérdida de control de potencia.",
+    ),
+    92: SPNInfo(
+        spn=92,
+        name_en="Engine Percent Load at Current Speed",
+        name_es="Porcentaje de Carga del Motor",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Porcentaje de carga actual del motor a la velocidad actual.",
+        action_es="📋 Informativo. Útil para análisis de operación.",
+    ),
+    98: SPNInfo(
+        spn=98,
+        name_en="Engine Oil Level",
+        name_es="Nivel de Aceite del Motor",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Nivel de aceite en el cárter del motor.",
+        action_es="⛔ VERIFICAR NIVEL DE ACEITE inmediatamente. Puede causar daño al motor.",
+    ),
+    99: SPNInfo(
+        spn=99,
+        name_en="Engine Oil Filter Differential Pressure",
+        name_es="Presión Diferencial Filtro de Aceite",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.WARNING,
+        description_es="Diferencia de presión en el filtro de aceite.",
+        action_es="🔧 Filtro de aceite posiblemente obstruido. Programar cambio.",
+    ),
+    101: SPNInfo(
+        spn=101,
+        name_en="Engine Crankcase Pressure",
+        name_es="Presión del Cárter",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.WARNING,
+        description_es="Presión de gases en el cárter del motor.",
+        action_es="🔧 Presión del cárter anormal. Verificar sistema de ventilación y posible blow-by.",
+    ),
+    164: SPNInfo(
+        spn=164,
+        name_en="Engine Injection Control Pressure",
+        name_es="Presión de Control de Inyección",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Presión de control del sistema de inyección.",
+        action_es="⛔ Problema de presión de inyección. Puede causar mal funcionamiento del motor.",
+    ),
+    235: SPNInfo(
+        spn=235,
+        name_en="Engine Total Idle Hours",
+        name_es="Horas Totales de Ralentí",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Total de horas que el motor ha estado en ralentí.",
+        action_es="📋 Informativo. Usar para análisis de idle time.",
+    ),
+    236: SPNInfo(
+        spn=236,
+        name_en="Engine Total Idle Fuel Used",
+        name_es="Combustible Total Usado en Ralentí",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Total de combustible usado durante ralentí.",
+        action_es="📋 Informativo. Útil para calcular costos de idle.",
+    ),
+    247: SPNInfo(
+        spn=247,
+        name_en="Engine Total Hours of Operation",
+        name_es="Horas Totales de Operación",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Total de horas de operación del motor.",
+        action_es="📋 Informativo. Usar para programar mantenimiento.",
+    ),
+    512: SPNInfo(
+        spn=512,
+        name_en="Driver's Demand Engine Percent Torque",
+        name_es="Torque Demandado por Conductor",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Porcentaje de torque que el conductor está demandando.",
+        action_es="📋 Informativo. Usado para análisis de estilo de manejo.",
+    ),
+    513: SPNInfo(
+        spn=513,
+        name_en="Actual Engine Percent Torque",
+        name_es="Torque Real del Motor",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Porcentaje de torque actual que el motor está produciendo.",
+        action_es="📋 Informativo. Si difiere mucho del demandado, puede indicar problema.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # TURBO/AIR INTAKE SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    52: SPNInfo(
+        spn=52,
+        name_en="Engine Intercooler Temperature",
+        name_es="Temperatura del Intercooler",
+        system=DTCSystem.AIR_INTAKE,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura del aire después del intercooler.",
+        action_es="🔧 Intercooler posiblemente obstruido o con fuga. Verificar.",
+    ),
+    103: SPNInfo(
+        spn=103,
+        name_en="Engine Turbocharger 1 Speed",
+        name_es="Velocidad del Turbo 1",
+        system=DTCSystem.AIR_INTAKE,
+        severity=DTCSeverity.WARNING,
+        description_es="Velocidad de rotación del turbocompresor.",
+        action_es="🔧 Velocidad del turbo fuera de rango. Verificar estado del turbo.",
+    ),
+    104: SPNInfo(
+        spn=104,
+        name_en="Turbocharger Lube Oil Pressure",
+        name_es="Presión de Aceite del Turbo",
+        system=DTCSystem.AIR_INTAKE,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Presión de aceite de lubricación del turbocompresor.",
+        action_es="⛔ Presión de aceite del turbo baja. Riesgo de daño al turbo. Parar motor.",
+    ),
+    107: SPNInfo(
+        spn=107,
+        name_en="Engine Air Filter Differential Pressure",
+        name_es="Presión Diferencial Filtro de Aire",
+        system=DTCSystem.AIR_INTAKE,
+        severity=DTCSeverity.WARNING,
+        description_es="Diferencia de presión en el filtro de aire.",
+        action_es="🔧 Filtro de aire obstruido. Reemplazar pronto para evitar pérdida de potencia.",
+    ),
+    132: SPNInfo(
+        spn=132,
+        name_en="Engine Inlet Air Mass Flow Rate",
+        name_es="Flujo Másico de Aire de Admisión",
+        system=DTCSystem.AIR_INTAKE,
+        severity=DTCSeverity.WARNING,
+        description_es="Cantidad de aire entrando al motor.",
+        action_es="🔧 Flujo de aire anormal. Verificar filtros y sistema de admisión.",
+    ),
+    172: SPNInfo(
+        spn=172,
+        name_en="Engine Air Inlet Temperature",
+        name_es="Temperatura de Aire de Entrada",
+        system=DTCSystem.AIR_INTAKE,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura del aire entrando al motor.",
+        action_es="🔧 Temperatura de aire de admisión anormal. Verificar intercooler.",
+    ),
+    641: SPNInfo(
+        spn=641,
+        name_en="Engine Turbocharger Variable Geometry Actuator #1",
+        name_es="Actuador VGT del Turbo #1",
+        system=DTCSystem.AIR_INTAKE,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Control del turbo de geometría variable.",
+        action_es="⛔ Turbo VGT con falla. Pérdida de potencia. Servicio urgente.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # COOLING SYSTEM SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    109: SPNInfo(
+        spn=109,
+        name_en="Engine Coolant Pressure",
+        name_es="Presión del Refrigerante",
+        system=DTCSystem.COOLING,
+        severity=DTCSeverity.WARNING,
+        description_es="Presión del sistema de refrigeración.",
+        action_es="🔧 Presión del refrigerante fuera de rango. Verificar tapa y mangueras.",
+    ),
+    176: SPNInfo(
+        spn=176,
+        name_en="Turbocharger Oil Temperature",
+        name_es="Temperatura de Aceite del Turbo",
+        system=DTCSystem.COOLING,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura del aceite de lubricación del turbo.",
+        action_es="🔧 Aceite del turbo caliente. Verificar flujo de aceite y enfriamiento.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # TRANSMISSION SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    124: SPNInfo(
+        spn=124,
+        name_en="Transmission Oil Level",
+        name_es="Nivel de Aceite de Transmisión",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Nivel de aceite en la transmisión.",
+        action_es="⛔ Verificar nivel de aceite de transmisión. Puede causar daño.",
+    ),
+    126: SPNInfo(
+        spn=126,
+        name_en="Transmission Filter Differential Pressure",
+        name_es="Presión Diferencial Filtro Transmisión",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.WARNING,
+        description_es="Presión diferencial del filtro de transmisión.",
+        action_es="🔧 Filtro de transmisión obstruido. Programar cambio.",
+    ),
+    127: SPNInfo(
+        spn=127,
+        name_en="Transmission Oil Pressure",
+        name_es="Presión de Aceite de Transmisión",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Presión de aceite en la transmisión.",
+        action_es="⛔ Presión de aceite de transmisión baja. Parar y verificar.",
+    ),
+    160: SPNInfo(
+        spn=160,
+        name_en="Main Shaft Speed",
+        name_es="Velocidad del Eje Principal",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.INFO,
+        description_es="Velocidad del eje principal de transmisión.",
+        action_es="📋 Informativo. Usado para diagnóstico de transmisión.",
+    ),
+    161: SPNInfo(
+        spn=161,
+        name_en="Transmission Input Shaft Speed",
+        name_es="Velocidad del Eje de Entrada",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.INFO,
+        description_es="Velocidad del eje de entrada de la transmisión.",
+        action_es="📋 Informativo. Usado para diagnóstico.",
+    ),
+    163: SPNInfo(
+        spn=163,
+        name_en="Transmission Current Range",
+        name_es="Marcha Actual de Transmisión",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.INFO,
+        description_es="Marcha actualmente seleccionada.",
+        action_es="📋 Informativo.",
+    ),
+    177: SPNInfo(
+        spn=177,
+        name_en="Transmission Oil Temperature",
+        name_es="Temperatura de Aceite de Transmisión",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura del aceite de transmisión.",
+        action_es="🔧 Aceite de transmisión caliente. Reducir carga y verificar nivel.",
+    ),
+    191: SPNInfo(
+        spn=191,
+        name_en="Transmission Output Shaft Speed",
+        name_es="Velocidad del Eje de Salida",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.INFO,
+        description_es="Velocidad del eje de salida de transmisión.",
+        action_es="📋 Informativo. Usado para cálculo de velocidad.",
+    ),
+    523: SPNInfo(
+        spn=523,
+        name_en="Transmission Current Gear",
+        name_es="Marcha Actual",
+        system=DTCSystem.TRANSMISSION,
+        severity=DTCSeverity.INFO,
+        description_es="Marcha actualmente enganchada.",
+        action_es="📋 Informativo.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # BRAKES SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    70: SPNInfo(
+        spn=70,
+        name_en="Parking Brake Switch",
+        name_es="Interruptor Freno de Estacionamiento",
+        system=DTCSystem.BRAKES,
+        severity=DTCSeverity.WARNING,
+        description_es="Estado del interruptor del freno de estacionamiento.",
+        action_es="🔧 Verificar freno de estacionamiento.",
+    ),
+    116: SPNInfo(
+        spn=116,
+        name_en="Brake Application Pressure",
+        name_es="Presión de Aplicación de Frenos",
+        system=DTCSystem.BRAKES,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Presión del sistema de frenos al aplicarlos.",
+        action_es="⛔ PROBLEMA DE FRENOS. Verificar inmediatamente.",
+    ),
+    117: SPNInfo(
+        spn=117,
+        name_en="Brake Primary Pressure",
+        name_es="Presión Primaria de Frenos",
+        system=DTCSystem.BRAKES,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Presión del circuito primario de frenos.",
+        action_es="⛔ Presión primaria de frenos baja. NO OPERAR hasta reparar.",
+    ),
+    118: SPNInfo(
+        spn=118,
+        name_en="Brake Secondary Pressure",
+        name_es="Presión Secundaria de Frenos",
+        system=DTCSystem.BRAKES,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Presión del circuito secundario de frenos.",
+        action_es="⛔ Presión secundaria de frenos baja. Verificar sistema.",
+    ),
+    521: SPNInfo(
+        spn=521,
+        name_en="Brake Pedal Position",
+        name_es="Posición del Pedal de Freno",
+        system=DTCSystem.BRAKES,
+        severity=DTCSeverity.WARNING,
+        description_es="Posición actual del pedal de freno.",
+        action_es="🔧 Sensor de pedal de freno con falla. Verificar sensor.",
+    ),
+    563: SPNInfo(
+        spn=563,
+        name_en="Anti-Lock Braking (ABS) Active",
+        name_es="Sistema ABS Activo",
+        system=DTCSystem.BRAKES,
+        severity=DTCSeverity.INFO,
+        description_es="Estado de activación del sistema ABS.",
+        action_es="📋 Informativo. ABS funcionando normalmente.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # ELECTRICAL SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    114: SPNInfo(
+        spn=114,
+        name_en="Net Battery Current",
+        name_es="Corriente Neta de Batería",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.WARNING,
+        description_es="Corriente neta de la batería (carga/descarga).",
+        action_es="🔧 Corriente de batería anormal. Verificar alternador y batería.",
+    ),
+    115: SPNInfo(
+        spn=115,
+        name_en="Alternator Current",
+        name_es="Corriente del Alternador",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.WARNING,
+        description_es="Corriente de salida del alternador.",
+        action_es="🔧 Alternador con salida anormal. Verificar estado.",
+    ),
+    158: SPNInfo(
+        spn=158,
+        name_en="Keyswitch Battery Potential",
+        name_es="Voltaje de Batería en Switch",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.WARNING,
+        description_es="Voltaje de batería en el interruptor de encendido.",
+        action_es="🔧 Voltaje bajo. Verificar batería y conexiones.",
+    ),
+    167: SPNInfo(
+        spn=167,
+        name_en="Charging System Potential",
+        name_es="Voltaje del Sistema de Carga",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.WARNING,
+        description_es="Voltaje del sistema de carga (alternador).",
+        action_es="🔧 Sistema de carga con voltaje anormal. Verificar alternador.",
+    ),
+    168: SPNInfo(
+        spn=168,
+        name_en="Battery Potential / Power Input #1",
+        name_es="Voltaje de Batería",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.WARNING,
+        description_es="Voltaje de la batería principal.",
+        action_es="🔧 Voltaje de batería bajo o alto. Verificar sistema eléctrico.",
+    ),
+    620: SPNInfo(
+        spn=620,
+        name_en="5 Volts DC Supply",
+        name_es="Suministro de 5V DC",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Suministro de 5 voltios para sensores.",
+        action_es="⛔ Falla de voltaje de referencia. Múltiples sensores pueden fallar.",
+    ),
+    627: SPNInfo(
+        spn=627,
+        name_en="Power Supply",
+        name_es="Suministro de Energía",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Estado del suministro principal de energía.",
+        action_es="⛔ Problema de suministro eléctrico. Verificar cableado.",
+    ),
+    629: SPNInfo(
+        spn=629,
+        name_en="Controller #1",
+        name_es="Controlador #1 (ECU)",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Falla interna del módulo de control del motor.",
+        action_es="⛔ ECU con falla interna. Puede requerir reprogramación o reemplazo.",
+    ),
+    639: SPNInfo(
+        spn=639,
+        name_en="J1939 Network #1",
+        name_es="Red J1939 #1",
+        system=DTCSystem.ELECTRICAL,
+        severity=DTCSeverity.WARNING,
+        description_es="Estado de la red de comunicación J1939.",
+        action_es="🔧 Error de comunicación en red CAN. Verificar cableado y conectores.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # EXHAUST/EGR SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    27: SPNInfo(
+        spn=27,
+        name_en="EGR Valve Position",
+        name_es="Posición de Válvula EGR",
+        system=DTCSystem.EXHAUST,
+        severity=DTCSeverity.WARNING,
+        description_es="Posición de la válvula de recirculación de gases de escape.",
+        action_es="🔧 Válvula EGR posiblemente atascada. Programar limpieza/servicio.",
+    ),
+    131: SPNInfo(
+        spn=131,
+        name_en="Engine Exhaust Back Pressure",
+        name_es="Contrapresión de Escape",
+        system=DTCSystem.EXHAUST,
+        severity=DTCSeverity.WARNING,
+        description_es="Presión en el sistema de escape.",
+        action_es="🔧 Contrapresión alta. Posible obstrucción en escape o DPF.",
+    ),
+    173: SPNInfo(
+        spn=173,
+        name_en="Engine Exhaust Gas Temperature",
+        name_es="Temperatura de Gases de Escape",
+        system=DTCSystem.EXHAUST,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura de los gases de escape del motor.",
+        action_es="🔧 Temperatura de escape fuera de rango. Verificar sistema de escape.",
+    ),
+    411: SPNInfo(
+        spn=411,
+        name_en="EGR Differential Pressure",
+        name_es="Presión Diferencial EGR",
+        system=DTCSystem.EXHAUST,
+        severity=DTCSeverity.WARNING,
+        description_es="Diferencia de presión en el sistema EGR.",
+        action_es="🔧 Sistema EGR con flujo anormal. Verificar válvula y enfriador.",
+    ),
+    412: SPNInfo(
+        spn=412,
+        name_en="EGR Temperature",
+        name_es="Temperatura EGR",
+        system=DTCSystem.EXHAUST,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura de los gases EGR.",
+        action_es="🔧 Temperatura EGR fuera de rango. Verificar enfriador EGR.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # AFTERTREATMENT SPNs (DPF/SCR/DEF)
+    # ─────────────────────────────────────────────────────────────────────────
+    3216: SPNInfo(
+        spn=3216,
+        name_en="Aftertreatment #1 Intake NOx",
+        name_es="NOx de Entrada Postratamiento",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.WARNING,
+        description_es="Nivel de NOx entrando al sistema de postratamiento.",
+        action_es="🔧 Niveles de NOx anormales. Verificar sistema de combustión.",
+    ),
+    3224: SPNInfo(
+        spn=3224,
+        name_en="Aftertreatment #1 Intake NOx Sensor",
+        name_es="Sensor NOx de Entrada",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Sensor de NOx antes del catalizador SCR.",
+        action_es="⛔ Sensor NOx con falla. Puede causar derating. Reemplazar.",
+    ),
+    3226: SPNInfo(
+        spn=3226,
+        name_en="Aftertreatment #1 Outlet NOx",
+        name_es="NOx de Salida Postratamiento",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.WARNING,
+        description_es="Nivel de NOx saliendo del sistema de postratamiento.",
+        action_es="🔧 NOx alto en salida. Sistema SCR no está limpiando bien.",
+    ),
+    3234: SPNInfo(
+        spn=3234,
+        name_en="Aftertreatment #1 Outlet NOx Sensor",
+        name_es="Sensor NOx de Salida",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Sensor de NOx después del catalizador SCR.",
+        action_es="⛔ Sensor NOx de salida con falla. Reemplazo urgente.",
+    ),
+    3242: SPNInfo(
+        spn=3242,
+        name_en="DPF Intake Gas Temperature",
+        name_es="Temperatura de Entrada al DPF",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura de gases entrando al filtro de partículas.",
+        action_es="🔧 Temperatura de entrada al DPF fuera de rango.",
+    ),
+    3244: SPNInfo(
+        spn=3244,
+        name_en="DPF Outlet Gas Temperature",
+        name_es="Temperatura de Salida del DPF",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.WARNING,
+        description_es="Temperatura de gases saliendo del filtro de partículas.",
+        action_es="🔧 Temperatura de salida del DPF fuera de rango.",
+    ),
+    3251: SPNInfo(
+        spn=3251,
+        name_en="DPF Differential Pressure",
+        name_es="Presión Diferencial del DPF",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Diferencia de presión a través del filtro de partículas (DPF).",
+        action_es="⛔ DPF posiblemente obstruido. Requiere regeneración o limpieza. Puede causar derating.",
+    ),
+    3360: SPNInfo(
+        spn=3360,
+        name_en="DEF Controller",
+        name_es="Controlador de DEF",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Unidad de control del sistema de dosificación DEF.",
+        action_es="⛔ Controlador DEF con falla. Sistema SCR no funcionará. Derating inminente.",
+    ),
+    3361: SPNInfo(
+        spn=3361,
+        name_en="DEF Dosing Unit",
+        name_es="Unidad de Dosificación DEF",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Bomba e inyector de DEF.",
+        action_es="⛔ Unidad de dosificación DEF con falla. No inyecta DEF correctamente.",
+    ),
+    3364: SPNInfo(
+        spn=3364,
+        name_en="DEF Tank Quality",
+        name_es="Calidad del DEF en Tanque",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Calidad/concentración del líquido DEF en el tanque.",
+        action_es="⛔ DEF contaminado o diluido. Drenar y rellenar con DEF certificado.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # VEHICLE SPEED/DISTANCE SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    84: SPNInfo(
+        spn=84,
+        name_en="Wheel-Based Vehicle Speed",
+        name_es="Velocidad del Vehículo (Ruedas)",
+        system=DTCSystem.CHASSIS,
+        severity=DTCSeverity.INFO,
+        description_es="Velocidad del vehículo basada en sensores de rueda.",
+        action_es="📋 Informativo. Error puede indicar problema de sensor.",
+    ),
+    244: SPNInfo(
+        spn=244,
+        name_en="Trip Distance",
+        name_es="Distancia del Viaje",
+        system=DTCSystem.CHASSIS,
+        severity=DTCSeverity.INFO,
+        description_es="Distancia recorrida en el viaje actual.",
+        action_es="📋 Informativo.",
+    ),
+    245: SPNInfo(
+        spn=245,
+        name_en="Total Vehicle Distance",
+        name_es="Distancia Total del Vehículo",
+        system=DTCSystem.CHASSIS,
+        severity=DTCSeverity.INFO,
+        description_es="Odómetro total del vehículo.",
+        action_es="📋 Informativo. Usar para programar mantenimiento.",
+    ),
+    # ─────────────────────────────────────────────────────────────────────────
+    # CRUISE CONTROL SPNs
+    # ─────────────────────────────────────────────────────────────────────────
+    86: SPNInfo(
+        spn=86,
+        name_en="Cruise Control Set Speed",
+        name_es="Velocidad de Crucero Establecida",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Velocidad establecida en el control de crucero.",
+        action_es="📋 Informativo.",
+    ),
+    595: SPNInfo(
+        spn=595,
+        name_en="Cruise Control Active",
+        name_es="Control de Crucero Activo",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Estado de activación del control de crucero.",
+        action_es="📋 Informativo.",
+    ),
+    596: SPNInfo(
+        spn=596,
+        name_en="Cruise Control Enable Switch",
+        name_es="Interruptor de Control de Crucero",
+        system=DTCSystem.ENGINE,
+        severity=DTCSeverity.INFO,
+        description_es="Estado del interruptor de habilitación del crucero.",
+        action_es="📋 Error puede indicar problema de switch.",
+    ),
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # COMBINED DATABASE
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -654,6 +1472,8 @@ SPN_DATABASE: dict[int, SPNInfo] = {
     **TRANSMISSION_SPNS,
     **BRAKES_SPNS,
     **HVAC_SPNS,
+    **WIALON_DETECTED_SPNS,
+    **ADDITIONAL_SPNS,
 }
 
 

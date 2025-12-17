@@ -1090,7 +1090,9 @@ class TestV13EnhancedInsights:
         # The test now just verifies insights are generated without errors
         assert isinstance(insights, list), "Should generate insights list"
         # Should have at least the critical attention insight
-        assert len(insights) >= 1, f"Should generate at least one insight. Got: {insights}"
+        assert (
+            len(insights) >= 1
+        ), f"Should generate at least one insight. Got: {insights}"
 
     def test_escalation_warning_insight(self, fcc):
         """Should warn about issues escalating to critical soon"""
@@ -5793,7 +5795,9 @@ class TestActionsEndpointFilters:
             )
             mock_gc.return_value = mock_cc
 
-            response = client.get("/fuelAnalytics/api/command-center/actions?category=Motor")
+            response = client.get(
+                "/fuelAnalytics/api/command-center/actions?category=Motor"
+            )
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is True
@@ -5826,7 +5830,9 @@ class TestActionsEndpointFilters:
             )
             mock_gc.return_value = mock_cc
 
-            response = client.get("/fuelAnalytics/api/command-center/actions?category=Transmisión")
+            response = client.get(
+                "/fuelAnalytics/api/command-center/actions?category=Transmisión"
+            )
             assert response.status_code == 200
             data = response.json()
             assert len(data["items"]) == 1

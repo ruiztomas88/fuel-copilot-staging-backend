@@ -68,6 +68,17 @@ def register_v3_12_21_routers(app: FastAPI) -> None:
     except ImportError as e:
         logger.warning(f"⚠️ Could not import mpg_baseline_router: {e}")
 
+    # 🆕 v5.8.0: Driver Alerts Router (Driver Scoring + DTC + Component Health)
+    try:
+        from routers.driver_alerts_router import router as driver_alerts_router
+
+        app.include_router(driver_alerts_router, tags=["Driver Alerts"])
+        logger.info(
+            "✅ Registered driver_alerts_router at /fuelAnalytics/api/driver-alerts"
+        )
+    except ImportError as e:
+        logger.warning(f"⚠️ Could not import driver_alerts_router: {e}")
+
     logger.info("🚀 v3.12.21 routers registration complete")
 
 
