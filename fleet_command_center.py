@@ -1,6 +1,6 @@
 """
 ╔═══════════════════════════════════════════════════════════════════════════════╗
-║                    🎯 FLEET COMMAND CENTER v1.5.0                              ║
+║                    🎯 FLEET COMMAND CENTER v1.6.0                              ║
 ║                                                                                ║
 ║       The UNIFIED source of truth for fleet health and maintenance            ║
 ║                                                                                ║
@@ -15,14 +15,29 @@
 ║  ✓ EWMA/CUSUM Trend Detection (Phase 4)                                       ║
 ║  ✓ Truck Risk Scoring (Phase 4)                                               ║
 ║  ✓ Automatic Failure Correlation (Phase 5)                                    ║
+║  ✓ MySQL Persistence for ML (Phase 5.6)                                       ║
 ║                                                                                ║
 ║  OUTPUT: Single prioritized action list with combined intelligence            ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 Author: Fuel Copilot Team
-Version: 1.5.0 - Complete Phases 4 & 5
+Version: 1.6.0 - MySQL Persistence for ML Training
 Created: December 2025
 Updated: January 2025
+
+CHANGELOG v1.6.0 (FASE 5.6 - ML DATA PERSISTENCE):
+- 💾 NEW: MySQL persistence for all calculated data (ML training ready)
+- 📊 persist_risk_score(): Saves truck risk scores to cc_risk_history
+- 🚨 persist_anomaly(): Saves EWMA/CUSUM anomalies to cc_anomaly_history
+- 🔧 persist_algorithm_state(): Saves EWMA/CUSUM state to cc_algorithm_state
+- 🔗 persist_correlation_event(): Saves failure patterns to cc_correlation_events
+- ⛽ persist_def_reading(): Saves DEF consumption to cc_def_history
+- 🔄 load_algorithm_state(): Restores algorithm state after restart
+- 📦 batch_persist_risk_scores(): Efficient bulk insert for snapshots
+- 🗃️ New migration: add_command_center_history_v1_5_0.sql with 6 tables
+- ⚡ Auto-persist on: get_top_risk_trucks, detect_trend_with_ewma_cusum,
+    detect_failure_correlations, predict_def_depletion
+- 🧹 Stored procedure sp_cleanup_command_center_history() for data retention
 
 CHANGELOG v1.5.0 (FASE 4 & 5):
 - 🕐 Temporal persistence: 2-3 readings before STOP decision (avoid sensor glitches)
@@ -494,9 +509,10 @@ class FleetCommandCenter:
     - J1939 SPN normalization
     - Real DEF prediction
     - External decision tables
+    - MySQL persistence for ML training
     """
 
-    VERSION = "1.5.0"
+    VERSION = "1.6.0"
 
     # Component to category mapping
     COMPONENT_CATEGORIES = {
@@ -1121,7 +1137,7 @@ class FleetCommandCenter:
     def _load_db_config(self) -> None:
         """
         v1.5.0 FASE 4.5b: Load configuration from MySQL database.
-        
+
         Reads from `command_center_config` table if it exists.
         This overrides YAML config for values stored in DB.
         Falls back gracefully if table doesn't exist or DB is unavailable.
@@ -1129,40 +1145,46 @@ class FleetCommandCenter:
         try:
             from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
-            
+
             engine = get_sqlalchemy_engine()
-            
+
             # Check if table exists first
             with engine.connect() as conn:
-                check_query = text("""
+                check_query = text(
+                    """
                     SELECT COUNT(*) as cnt 
                     FROM information_schema.tables 
                     WHERE table_schema = DATABASE() 
                     AND table_name = 'command_center_config'
-                """)
+                """
+                )
                 result = conn.execute(check_query).fetchone()
                 if not result or result[0] == 0:
-                    logger.debug("📝 command_center_config table not found - using defaults")
+                    logger.debug(
+                        "📝 command_center_config table not found - using defaults"
+                    )
                     return
-                
+
                 # Load active configuration
-                config_query = text("""
+                config_query = text(
+                    """
                     SELECT config_key, config_value, category 
                     FROM command_center_config 
                     WHERE is_active = TRUE
-                """)
+                """
+                )
                 rows = conn.execute(config_query).fetchall()
-                
+
                 if not rows:
                     logger.debug("📝 No active config in DB - using defaults")
                     return
-                
+
                 config_loaded = 0
                 for row in rows:
                     config_key = row[0]
                     config_value = row[1]
                     category = row[2]
-                    
+
                     # Parse JSON value
                     try:
                         if isinstance(config_value, str):
@@ -1172,7 +1194,7 @@ class FleetCommandCenter:
                     except json.JSONDecodeError:
                         logger.warning(f"⚠️ Invalid JSON in config {config_key}")
                         continue
-                    
+
                     # Apply config based on key pattern
                     if config_key.startswith("sensor_range_"):
                         sensor_name = config_key.replace("sensor_range_", "")
@@ -1197,10 +1219,12 @@ class FleetCommandCenter:
                         pattern_name = config_key.replace("correlation_", "")
                         self.FAILURE_CORRELATIONS[pattern_name] = value
                         config_loaded += 1
-                
+
                 if config_loaded > 0:
-                    logger.info(f"✅ Loaded {config_loaded} config values from database")
-                    
+                    logger.info(
+                        f"✅ Loaded {config_loaded} config values from database"
+                    )
+
         except ImportError:
             logger.debug("📝 database_mysql not available - skipping DB config")
         except Exception as e:
@@ -1224,6 +1248,508 @@ class FleetCommandCenter:
         except Exception as e:
             logger.warning(f"⚠️ Redis connection failed: {e}. Using in-memory storage.")
             self._redis_client = None
+
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # v1.5.0 FASE 5.6: MYSQL PERSISTENCE FOR ML (Risk, Anomalies, Algorithm State)
+    # ═══════════════════════════════════════════════════════════════════════════════
+
+    def persist_risk_score(self, risk: "TruckRiskScore") -> bool:
+        """
+        Persist a truck risk score to MySQL for ML training data.
+
+        v1.5.0 FASE 5.6: Every risk score calculation is saved for future ML.
+
+        Args:
+            risk: TruckRiskScore to persist
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+
+            # Map risk level to ENUM
+            risk_level_map = {
+                "critical": "CRITICAL",
+                "high": "HIGH",
+                "medium": "MEDIUM",
+                "low": "LOW",
+                "healthy": "LOW",
+            }
+
+            with engine.connect() as conn:
+                query = text(
+                    """
+                    INSERT INTO cc_risk_history (
+                        truck_id, risk_score, risk_level,
+                        active_issues_count, days_since_maintenance,
+                        timestamp
+                    ) VALUES (
+                        :truck_id, :risk_score, :risk_level,
+                        :active_issues, :days_since_maint,
+                        NOW()
+                    )
+                """
+                )
+                conn.execute(
+                    query,
+                    {
+                        "truck_id": risk.truck_id,
+                        "risk_score": risk.risk_score,
+                        "risk_level": risk_level_map.get(risk.risk_level, "LOW"),
+                        "active_issues": risk.active_issues_count,
+                        "days_since_maint": risk.days_since_last_maintenance,
+                    },
+                )
+                conn.commit()
+            return True
+        except ImportError:
+            logger.debug("📝 database_mysql not available - skipping risk persistence")
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ Could not persist risk score: {e}")
+            return False
+
+    def persist_anomaly(
+        self,
+        truck_id: str,
+        sensor_name: str,
+        anomaly_type: str,
+        severity: str,
+        sensor_value: float,
+        ewma_value: Optional[float] = None,
+        cusum_value: Optional[float] = None,
+        threshold: Optional[float] = None,
+        z_score: Optional[float] = None,
+    ) -> bool:
+        """
+        Persist an anomaly detection event to MySQL for ML training.
+
+        v1.5.0 FASE 5.6: Records every detected anomaly for pattern learning.
+
+        Args:
+            truck_id: Truck identifier
+            sensor_name: Name of sensor that triggered anomaly
+            anomaly_type: One of 'EWMA', 'CUSUM', 'THRESHOLD', 'CORRELATION'
+            severity: One of 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'
+            sensor_value: Current sensor value
+            ewma_value: EWMA value at detection time
+            cusum_value: CUSUM value at detection time
+            threshold: Threshold that was exceeded
+            z_score: Z-score if applicable
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+
+            with engine.connect() as conn:
+                query = text(
+                    """
+                    INSERT INTO cc_anomaly_history (
+                        truck_id, sensor_name, anomaly_type, severity,
+                        sensor_value, ewma_value, cusum_value, 
+                        threshold_used, z_score, detected_at
+                    ) VALUES (
+                        :truck_id, :sensor_name, :anomaly_type, :severity,
+                        :sensor_value, :ewma_value, :cusum_value,
+                        :threshold, :z_score, NOW()
+                    )
+                """
+                )
+                conn.execute(
+                    query,
+                    {
+                        "truck_id": truck_id,
+                        "sensor_name": sensor_name,
+                        "anomaly_type": anomaly_type.upper(),
+                        "severity": severity.upper(),
+                        "sensor_value": sensor_value,
+                        "ewma_value": ewma_value,
+                        "cusum_value": cusum_value,
+                        "threshold": threshold,
+                        "z_score": z_score,
+                    },
+                )
+                conn.commit()
+            return True
+        except ImportError:
+            logger.debug(
+                "📝 database_mysql not available - skipping anomaly persistence"
+            )
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ Could not persist anomaly: {e}")
+            return False
+
+    def persist_algorithm_state(
+        self,
+        truck_id: str,
+        sensor_name: str,
+        ewma_value: Optional[float] = None,
+        ewma_variance: Optional[float] = None,
+        cusum_high: float = 0.0,
+        cusum_low: float = 0.0,
+        baseline_mean: Optional[float] = None,
+        baseline_std: Optional[float] = None,
+        samples_count: int = 0,
+        trend_direction: str = "STABLE",
+        trend_slope: Optional[float] = None,
+    ) -> bool:
+        """
+        Persist EWMA/CUSUM algorithm state for service restart resilience.
+
+        v1.5.0 FASE 5.6: Saves algorithm state so it survives restarts.
+
+        Args:
+            truck_id: Truck identifier
+            sensor_name: Sensor name
+            ewma_value: Current EWMA value
+            ewma_variance: Current EWMA variance
+            cusum_high: Current CUSUM high value
+            cusum_low: Current CUSUM low value
+            baseline_mean: Baseline mean for comparison
+            baseline_std: Baseline standard deviation
+            samples_count: Number of samples processed
+            trend_direction: One of 'UP', 'DOWN', 'STABLE'
+            trend_slope: Calculated slope of trend
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+
+            with engine.connect() as conn:
+                # UPSERT - insert or update on duplicate key
+                query = text(
+                    """
+                    INSERT INTO cc_algorithm_state (
+                        truck_id, sensor_name,
+                        ewma_value, ewma_variance,
+                        cusum_high, cusum_low,
+                        baseline_mean, baseline_std, samples_count,
+                        trend_direction, trend_slope,
+                        updated_at
+                    ) VALUES (
+                        :truck_id, :sensor_name,
+                        :ewma_value, :ewma_variance,
+                        :cusum_high, :cusum_low,
+                        :baseline_mean, :baseline_std, :samples_count,
+                        :trend_direction, :trend_slope,
+                        NOW()
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        ewma_value = VALUES(ewma_value),
+                        ewma_variance = VALUES(ewma_variance),
+                        cusum_high = VALUES(cusum_high),
+                        cusum_low = VALUES(cusum_low),
+                        baseline_mean = VALUES(baseline_mean),
+                        baseline_std = VALUES(baseline_std),
+                        samples_count = VALUES(samples_count),
+                        trend_direction = VALUES(trend_direction),
+                        trend_slope = VALUES(trend_slope),
+                        updated_at = NOW()
+                """
+                )
+                conn.execute(
+                    query,
+                    {
+                        "truck_id": truck_id,
+                        "sensor_name": sensor_name,
+                        "ewma_value": ewma_value,
+                        "ewma_variance": ewma_variance,
+                        "cusum_high": cusum_high,
+                        "cusum_low": cusum_low,
+                        "baseline_mean": baseline_mean,
+                        "baseline_std": baseline_std,
+                        "samples_count": samples_count,
+                        "trend_direction": trend_direction.upper(),
+                        "trend_slope": trend_slope,
+                    },
+                )
+                conn.commit()
+            return True
+        except ImportError:
+            logger.debug("📝 database_mysql not available - skipping state persistence")
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ Could not persist algorithm state: {e}")
+            return False
+
+    def persist_correlation_event(
+        self,
+        truck_id: str,
+        pattern_name: str,
+        pattern_description: str,
+        confidence: float,
+        sensors_involved: List[str],
+        sensor_values: Dict[str, float],
+        predicted_component: Optional[str] = None,
+        predicted_failure_days: Optional[int] = None,
+        recommended_action: Optional[str] = None,
+    ) -> bool:
+        """
+        Persist a multi-sensor correlation event for ML training.
+
+        v1.5.0 FASE 5.6: Saves detected failure patterns.
+
+        Args:
+            truck_id: Truck identifier
+            pattern_name: Name of detected pattern (e.g., 'engine_overheat')
+            pattern_description: Human-readable description
+            confidence: Confidence score (0-1)
+            sensors_involved: List of sensor names in pattern
+            sensor_values: Dict of sensor_name → value at detection time
+            predicted_component: Component predicted to fail
+            predicted_failure_days: Estimated days until failure
+            recommended_action: Recommended maintenance action
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+
+            with engine.connect() as conn:
+                query = text(
+                    """
+                    INSERT INTO cc_correlation_events (
+                        truck_id, pattern_name, pattern_description, confidence,
+                        sensors_involved, sensor_values,
+                        predicted_component, predicted_failure_days, recommended_action,
+                        detected_at
+                    ) VALUES (
+                        :truck_id, :pattern_name, :pattern_desc, :confidence,
+                        :sensors_json, :values_json,
+                        :pred_component, :pred_days, :rec_action,
+                        NOW()
+                    )
+                """
+                )
+                conn.execute(
+                    query,
+                    {
+                        "truck_id": truck_id,
+                        "pattern_name": pattern_name,
+                        "pattern_desc": pattern_description,
+                        "confidence": confidence,
+                        "sensors_json": json.dumps(sensors_involved),
+                        "values_json": json.dumps(sensor_values),
+                        "pred_component": predicted_component,
+                        "pred_days": predicted_failure_days,
+                        "rec_action": recommended_action,
+                    },
+                )
+                conn.commit()
+            return True
+        except ImportError:
+            logger.debug(
+                "📝 database_mysql not available - skipping correlation persistence"
+            )
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ Could not persist correlation event: {e}")
+            return False
+
+    def persist_def_reading(
+        self,
+        truck_id: str,
+        def_level: float,
+        fuel_used: Optional[float] = None,
+        estimated_def_used: Optional[float] = None,
+        consumption_rate: Optional[float] = None,
+        is_refill: bool = False,
+    ) -> bool:
+        """
+        Persist DEF level reading for ML consumption prediction.
+
+        v1.5.0 FASE 5.6: Saves DEF data for consumption model training.
+
+        Args:
+            truck_id: Truck identifier
+            def_level: Current DEF level (%)
+            fuel_used: Fuel used since last refill (gallons)
+            estimated_def_used: Estimated DEF consumed (gallons)
+            consumption_rate: DEF gallons per 100 gallons diesel
+            is_refill: True if this is a refill event
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+
+            with engine.connect() as conn:
+                query = text(
+                    """
+                    INSERT INTO cc_def_history (
+                        truck_id, def_level, fuel_used_since_refill,
+                        estimated_def_used, consumption_rate,
+                        is_refill_event, timestamp
+                    ) VALUES (
+                        :truck_id, :def_level, :fuel_used,
+                        :def_used, :consumption_rate,
+                        :is_refill, NOW()
+                    )
+                """
+                )
+                conn.execute(
+                    query,
+                    {
+                        "truck_id": truck_id,
+                        "def_level": def_level,
+                        "fuel_used": fuel_used,
+                        "def_used": estimated_def_used,
+                        "consumption_rate": consumption_rate,
+                        "is_refill": is_refill,
+                    },
+                )
+                conn.commit()
+            return True
+        except ImportError:
+            logger.debug("📝 database_mysql not available - skipping DEF persistence")
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ Could not persist DEF reading: {e}")
+            return False
+
+    def load_algorithm_state(self, truck_id: str, sensor_name: str) -> Optional[Dict]:
+        """
+        Load persisted algorithm state from MySQL on service startup.
+
+        v1.5.0 FASE 5.6: Restores EWMA/CUSUM state after restart.
+
+        Args:
+            truck_id: Truck identifier
+            sensor_name: Sensor name
+
+        Returns:
+            Dict with algorithm state or None if not found
+        """
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+
+            with engine.connect() as conn:
+                query = text(
+                    """
+                    SELECT 
+                        ewma_value, ewma_variance,
+                        cusum_high, cusum_low,
+                        baseline_mean, baseline_std, samples_count,
+                        trend_direction, trend_slope, updated_at
+                    FROM cc_algorithm_state
+                    WHERE truck_id = :truck_id AND sensor_name = :sensor_name
+                """
+                )
+                result = conn.execute(
+                    query, {"truck_id": truck_id, "sensor_name": sensor_name}
+                ).fetchone()
+
+                if result:
+                    return {
+                        "ewma_value": result[0],
+                        "ewma_variance": result[1],
+                        "cusum_high": result[2],
+                        "cusum_low": result[3],
+                        "baseline_mean": result[4],
+                        "baseline_std": result[5],
+                        "samples_count": result[6],
+                        "trend_direction": result[7],
+                        "trend_slope": result[8],
+                        "updated_at": result[9],
+                    }
+                return None
+        except ImportError:
+            return None
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load algorithm state: {e}")
+            return None
+
+    def batch_persist_risk_scores(self, risks: List["TruckRiskScore"]) -> int:
+        """
+        Batch persist multiple risk scores for efficiency.
+
+        v1.5.0 FASE 5.6: Efficient bulk insert for periodic snapshots.
+
+        Args:
+            risks: List of TruckRiskScore to persist
+
+        Returns:
+            Number of successfully persisted records
+        """
+        if not risks:
+            return 0
+
+        try:
+            from database_mysql import get_sqlalchemy_engine
+            from sqlalchemy import text
+
+            engine = get_sqlalchemy_engine()
+
+            risk_level_map = {
+                "critical": "CRITICAL",
+                "high": "HIGH",
+                "medium": "MEDIUM",
+                "low": "LOW",
+                "healthy": "LOW",
+            }
+
+            values = []
+            for risk in risks:
+                values.append(
+                    {
+                        "truck_id": risk.truck_id,
+                        "risk_score": risk.risk_score,
+                        "risk_level": risk_level_map.get(risk.risk_level, "LOW"),
+                        "active_issues": risk.active_issues_count,
+                        "days_since_maint": risk.days_since_last_maintenance,
+                    }
+                )
+
+            with engine.connect() as conn:
+                query = text(
+                    """
+                    INSERT INTO cc_risk_history (
+                        truck_id, risk_score, risk_level,
+                        active_issues_count, days_since_maintenance,
+                        timestamp
+                    ) VALUES (
+                        :truck_id, :risk_score, :risk_level,
+                        :active_issues, :days_since_maint,
+                        NOW()
+                    )
+                """
+                )
+                for v in values:
+                    conn.execute(query, v)
+                conn.commit()
+            return len(values)
+        except ImportError:
+            logger.debug("📝 database_mysql not available - skipping batch persistence")
+            return 0
+        except Exception as e:
+            logger.warning(f"⚠️ Could not batch persist risk scores: {e}")
+            return 0
 
     # ═══════════════════════════════════════════════════════════════════════════════
     # v1.5.0 FASE 4.1: TEMPORAL PERSISTENCE (Avoid glitch-triggered STOP)
@@ -1388,6 +1914,7 @@ class FleetCommandCenter:
         sensor_name: str,
         values: List[float],
         baseline: Optional[float] = None,
+        persist: bool = True,
     ) -> Dict[str, Any]:
         """
         Analyze a series of values using EWMA and CUSUM combined.
@@ -1396,11 +1923,14 @@ class FleetCommandCenter:
         - EWMA: Current smoothed trend
         - CUSUM: Change-point detection
 
+        v1.5.0 FASE 5.6: Now persists anomalies and algorithm state to MySQL.
+
         Args:
             truck_id: Truck identifier
             sensor_name: Sensor name
             values: List of recent values
             baseline: Optional baseline value. If None, uses first value.
+            persist: Whether to persist to MySQL (default True)
 
         Returns:
             Dict with trend analysis results
@@ -1418,10 +1948,14 @@ class FleetCommandCenter:
         # Process all values through EWMA and CUSUM
         ewma_value = None
         cusum_alert = False
+        cusum_high = 0.0
+        cusum_low = 0.0
 
         for value in values:
             ewma_value = self._calculate_ewma(truck_id, sensor_name, value)
-            _, _, alert = self._calculate_cusum(truck_id, sensor_name, value, baseline)
+            cusum_high, cusum_low, alert = self._calculate_cusum(
+                truck_id, sensor_name, value, baseline
+            )
             if alert:
                 cusum_alert = True
 
@@ -1439,6 +1973,48 @@ class FleetCommandCenter:
                 trend = "stable"
         else:
             trend = "stable"
+            pct_change = 0
+
+        # v1.5.0 FASE 5.6: Persist to MySQL for ML
+        if persist and values:
+            # Calculate std for baseline
+            if len(values) > 1:
+                mean_val = sum(values) / len(values)
+                variance = sum((x - mean_val) ** 2 for x in values) / len(values)
+                std_val = variance**0.5
+            else:
+                std_val = None
+
+            # Persist algorithm state
+            self.persist_algorithm_state(
+                truck_id=truck_id,
+                sensor_name=sensor_name,
+                ewma_value=ewma_value,
+                cusum_high=cusum_high,
+                cusum_low=cusum_low,
+                baseline_mean=baseline,
+                baseline_std=std_val,
+                samples_count=len(values),
+                trend_direction=(
+                    trend.upper() if trend in ("increasing", "decreasing") else "STABLE"
+                ),
+                trend_slope=pct_change if pct_change else None,
+            )
+
+            # Persist anomaly if CUSUM detected change
+            if cusum_alert:
+                severity = "HIGH" if abs(pct_change) > 15 else "MEDIUM"
+                self.persist_anomaly(
+                    truck_id=truck_id,
+                    sensor_name=sensor_name,
+                    anomaly_type="CUSUM",
+                    severity=severity,
+                    sensor_value=values[-1] if values else 0,
+                    ewma_value=ewma_value,
+                    cusum_value=max(cusum_high, abs(cusum_low)),
+                    threshold=5.0,
+                    z_score=pct_change / 100 if pct_change else None,
+                )
 
         return {
             "trend": trend,
@@ -1446,7 +2022,7 @@ class FleetCommandCenter:
             "baseline": round(baseline, 2) if baseline else None,
             "cusum_alert": cusum_alert,
             "change_detected": cusum_alert,
-            "pct_change": round(pct_change, 1) if "pct_change" in locals() else 0,
+            "pct_change": round(pct_change, 1) if pct_change else 0,
         }
 
     # ═══════════════════════════════════════════════════════════════════════════════
@@ -1568,16 +2144,18 @@ class FleetCommandCenter:
         )
 
     def get_top_risk_trucks(
-        self, action_items: List[ActionItem], top_n: int = 10
+        self, action_items: List[ActionItem], top_n: int = 10, persist: bool = True
     ) -> List[TruckRiskScore]:
         """
         Get the top N at-risk trucks based on risk scores.
 
         v1.5.0 FASE 4.4: Allows fleet manager to focus on most critical trucks.
+        v1.5.0 FASE 5.6: Now persists all risk scores to MySQL for ML training.
 
         Args:
             action_items: All action items for the fleet
             top_n: Number of top risk trucks to return (default 10)
+            persist: Whether to persist risk scores to MySQL (default True)
 
         Returns:
             List of TruckRiskScore sorted by risk score descending
@@ -1590,6 +2168,12 @@ class FleetCommandCenter:
         for truck_id in truck_ids:
             risk = self.calculate_truck_risk_score(truck_id, action_items)
             risk_scores.append(risk)
+
+        # v1.5.0 FASE 5.6: Persist all risk scores for ML
+        if persist and risk_scores:
+            persisted = self.batch_persist_risk_scores(risk_scores)
+            if persisted > 0:
+                logger.debug(f"💾 Persisted {persisted} risk scores to MySQL")
 
         # Sort by risk score descending
         risk_scores.sort(key=lambda x: x.risk_score, reverse=True)
@@ -1690,6 +2274,7 @@ class FleetCommandCenter:
         self,
         action_items: List[ActionItem],
         sensor_data: Optional[Dict[str, Dict[str, float]]] = None,
+        persist: bool = True,
     ) -> List[FailureCorrelation]:
         """
         Detect correlated failures that indicate systemic issues.
@@ -1697,9 +2282,12 @@ class FleetCommandCenter:
         v1.5.0 FASE 5.1: Uses predefined correlation patterns (e.g., coolant↑ + oil_temp↑)
         to identify underlying causes.
 
+        v1.5.0 FASE 5.6: Now persists detected correlations to MySQL for ML.
+
         Args:
             action_items: Current action items
             sensor_data: Optional dict of truck_id → {sensor_name: value}
+            persist: Whether to persist to MySQL (default True)
 
         Returns:
             List of FailureCorrelation objects
@@ -1744,21 +2332,44 @@ class FleetCommandCenter:
 
             # If we have affected trucks, create a correlation finding
             if affected_trucks:
-                correlations.append(
-                    FailureCorrelation(
-                        correlation_id=f"CORR-{pattern_id.upper()}-{uuid.uuid4().hex[:6]}",
-                        primary_sensor=primary,
-                        correlated_sensors=correlated,
-                        correlation_strength=(
-                            len(affected_trucks) / len(truck_issues)
-                            if truck_issues
-                            else 0
-                        ),
-                        probable_cause=pattern["cause"],
-                        recommended_action=pattern["action"],
-                        affected_trucks=affected_trucks,
-                    )
+                correlation = FailureCorrelation(
+                    correlation_id=f"CORR-{pattern_id.upper()}-{uuid.uuid4().hex[:6]}",
+                    primary_sensor=primary,
+                    correlated_sensors=correlated,
+                    correlation_strength=(
+                        len(affected_trucks) / len(truck_issues) if truck_issues else 0
+                    ),
+                    probable_cause=pattern["cause"],
+                    recommended_action=pattern["action"],
+                    affected_trucks=affected_trucks,
                 )
+                correlations.append(correlation)
+
+                # v1.5.0 FASE 5.6: Persist to MySQL for ML
+                if persist:
+                    for truck_id in affected_trucks:
+                        # Get sensor values if available
+                        sensor_values = {}
+                        if sensor_data and truck_id in sensor_data:
+                            for sensor in [primary] + correlated:
+                                if sensor in sensor_data[truck_id]:
+                                    sensor_values[sensor] = sensor_data[truck_id][
+                                        sensor
+                                    ]
+
+                        self.persist_correlation_event(
+                            truck_id=truck_id,
+                            pattern_name=pattern_id,
+                            pattern_description=pattern.get(
+                                "cause", "Unknown correlation"
+                            ),
+                            confidence=correlation.correlation_strength,
+                            sensors_involved=[primary] + correlated,
+                            sensor_values=sensor_values,
+                            predicted_component=pattern.get("component"),
+                            predicted_failure_days=pattern.get("days_to_failure"),
+                            recommended_action=pattern.get("action"),
+                        )
 
         return correlations
 
@@ -1804,11 +2415,13 @@ class FleetCommandCenter:
         current_level_pct: float,
         daily_miles: Optional[float] = None,
         avg_mpg: Optional[float] = None,
+        persist: bool = True,
     ) -> DEFPrediction:
         """
         Predict when DEF will run out based on consumption patterns.
 
         v1.5.0 FASE 5.3: Real DEF prediction using liters/consumption = days.
+        v1.5.0 FASE 5.6: Now persists DEF readings to MySQL for ML.
 
         DEF consumption is typically 2-3% of diesel consumption for Class 8 trucks.
 
@@ -1817,6 +2430,7 @@ class FleetCommandCenter:
             current_level_pct: Current DEF level (0-100%)
             daily_miles: Average daily miles (optional)
             avg_mpg: Average MPG (optional)
+            persist: Whether to persist to MySQL (default True)
 
         Returns:
             DEFPrediction with days until empty and derate
@@ -1849,6 +2463,19 @@ class FleetCommandCenter:
         derate_level_liters = (config["derate_threshold_pct"] / 100) * tank_capacity
         liters_until_derate = current_liters - derate_level_liters
         days_until_derate = max(0, liters_until_derate / daily_def_liters)
+
+        # v1.5.0 FASE 5.6: Persist DEF reading for ML
+        if persist:
+            # Convert to gallons for consistency
+            consumption_rate = def_pct_diesel * 100  # % of diesel consumption
+            self.persist_def_reading(
+                truck_id=truck_id,
+                def_level=current_level_pct,
+                fuel_used=daily_miles / avg_mpg if (daily_miles and avg_mpg) else None,
+                estimated_def_used=daily_def_liters / 3.785,  # Convert to gallons
+                consumption_rate=consumption_rate,
+                is_refill=False,
+            )
 
         return DEFPrediction(
             truck_id=truck_id,

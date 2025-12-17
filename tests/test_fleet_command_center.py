@@ -79,7 +79,7 @@ class TestFleetCommandCenterV11:
 
     def test_version_is_1_5_0(self, fcc):
         """Verify we're testing v1.5.0"""
-        assert fcc.VERSION == "1.5.0"
+        assert fcc.VERSION == "1.6.0"
 
     # ═══════════════════════════════════════════════════════════════════════════════
     # UUID ACTION ID TESTS
@@ -774,7 +774,7 @@ class TestVersionV15:
     def test_version_is_1_5_0(self):
         """Verify version is 1.5.0"""
         fcc = FleetCommandCenter()
-        assert fcc.VERSION == "1.5.0"
+        assert fcc.VERSION == "1.6.0"
 
 
 class TestV13ExponentialDecay:
