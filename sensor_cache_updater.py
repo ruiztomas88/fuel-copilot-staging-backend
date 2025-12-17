@@ -179,33 +179,30 @@ def update_sensor_cache():
                 INSERT INTO truck_sensors_cache (
                     truck_id, unit_id, timestamp, wialon_epoch,
                     oil_pressure_psi, oil_temp_f, oil_level_pct,
-                    def_level_pct,
+                    def_level_pct, def_temp_f, def_quality,
                     engine_load_pct, rpm, coolant_temp_f, coolant_level_pct,
                     gear, brake_active,
                     intake_pressure_bar, intake_temp_f, intercooler_temp_f,
-                    fuel_temp_f, fuel_level_pct, fuel_rate_gph,
+                    fuel_temp_f, fuel_level_pct, fuel_rate_gph, fuel_pressure_psi,
                     ambient_temp_f, barometric_pressure_inhg,
                     voltage, backup_voltage,
                     engine_hours, idle_hours, pto_hours,
                     total_idle_fuel_gal, total_fuel_used_gal,
                     dtc_count, dtc_code,
-                    latitude, longitude, speed_mph, altitude_ft, odometer_mi,
+                    latitude, longitude, speed_mph, altitude_ft, odometer_mi, heading_deg,
+                    throttle_position_pct, turbo_pressure_psi,
+                    dpf_pressure_psi, dpf_soot_pct, dpf_ash_pct, dpf_status,
+                    egr_position_pct, egr_temp_f,
+                    alternator_status,
+                    transmission_temp_f, transmission_pressure_psi,
                     data_age_seconds
                 ) VALUES (
-                    %s, %s, %s, %s,
-                    %s, %s, %s,
-                    %s,
-                    %s, %s, %s, %s,
-                    %s, %s,
-                    %s, %s, %s,
-                    %s, %s, %s,
-                    %s, %s,
-                    %s, %s,
-                    %s, %s, %s,
-                    %s, %s,
-                    %s, %s,
-                    %s, %s, %s, %s,
-                    %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s
                 )
                 ON DUPLICATE KEY UPDATE
                     unit_id = VALUES(unit_id),
@@ -215,6 +212,8 @@ def update_sensor_cache():
                     oil_temp_f = VALUES(oil_temp_f),
                     oil_level_pct = VALUES(oil_level_pct),
                     def_level_pct = VALUES(def_level_pct),
+                    def_temp_f = VALUES(def_temp_f),
+                    def_quality = VALUES(def_quality),
                     engine_load_pct = VALUES(engine_load_pct),
                     rpm = VALUES(rpm),
                     coolant_temp_f = VALUES(coolant_temp_f),
@@ -227,6 +226,7 @@ def update_sensor_cache():
                     fuel_temp_f = VALUES(fuel_temp_f),
                     fuel_level_pct = VALUES(fuel_level_pct),
                     fuel_rate_gph = VALUES(fuel_rate_gph),
+                    fuel_pressure_psi = VALUES(fuel_pressure_psi),
                     ambient_temp_f = VALUES(ambient_temp_f),
                     barometric_pressure_inhg = VALUES(barometric_pressure_inhg),
                     voltage = VALUES(voltage),
@@ -243,6 +243,18 @@ def update_sensor_cache():
                     speed_mph = VALUES(speed_mph),
                     altitude_ft = VALUES(altitude_ft),
                     odometer_mi = VALUES(odometer_mi),
+                    heading_deg = VALUES(heading_deg),
+                    throttle_position_pct = VALUES(throttle_position_pct),
+                    turbo_pressure_psi = VALUES(turbo_pressure_psi),
+                    dpf_pressure_psi = VALUES(dpf_pressure_psi),
+                    dpf_soot_pct = VALUES(dpf_soot_pct),
+                    dpf_ash_pct = VALUES(dpf_ash_pct),
+                    dpf_status = VALUES(dpf_status),
+                    egr_position_pct = VALUES(egr_position_pct),
+                    egr_temp_f = VALUES(egr_temp_f),
+                    alternator_status = VALUES(alternator_status),
+                    transmission_temp_f = VALUES(transmission_temp_f),
+                    transmission_pressure_psi = VALUES(transmission_pressure_psi),
                     data_age_seconds = VALUES(data_age_seconds)
             """
 
@@ -259,6 +271,8 @@ def update_sensor_cache():
                     get_val("oil_lvl"),
                     # DEF
                     get_val("def_level"),
+                    get_val("def_temp"),
+                    get_val("def_quality"),
                     # Engine
                     get_val("engine_load"),
                     get_val("rpm"),
@@ -275,6 +289,7 @@ def update_sensor_cache():
                     get_val("fuel_t"),
                     get_val("fuel_lvl"),
                     get_val("fuel_rate"),
+                    get_val("fuel_press"),
                     # Environmental
                     get_val("ambient_temp"),
                     get_val("barometer"),
@@ -295,7 +310,24 @@ def update_sensor_cache():
                     data.get("longitude"),
                     get_val("speed"),
                     get_val("altitude"),
-                    get_val("odometer"),  # Odometer in miles
+                    get_val("odometer"),
+                    get_val("heading"),
+                    # Performance
+                    get_val("throttle_pos"),
+                    get_val("turbo_press"),
+                    # DPF
+                    get_val("dpf_press"),
+                    get_val("dpf_soot"),
+                    get_val("dpf_ash"),
+                    get_val("dpf_status"),
+                    # EGR
+                    get_val("egr_pos"),
+                    get_val("egr_temp"),
+                    # Electrical Systems
+                    get_val("alternator_status"),
+                    # Transmission
+                    get_val("trans_temp"),
+                    get_val("trans_press"),
                     # Metadata
                     data["data_age_seconds"],
                 ),
