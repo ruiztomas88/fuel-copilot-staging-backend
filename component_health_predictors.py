@@ -271,7 +271,8 @@ class TurboHealthPredictor:
         avg_first = statistics.mean(first_third)
         avg_last = statistics.mean(last_third)
 
-        change_pct = (avg_last - avg_first) / avg_first * 100 if avg_first > 0 else 0
+        # Fix C1: Prevent division by zero using max(abs(avg_first), 0.001)
+        change_pct = (avg_last - avg_first) / max(abs(avg_first), 0.001) * 100
 
         if change_pct > 10:
             return TrendDirection.DEGRADING
@@ -304,6 +305,8 @@ class OilConsumptionTracker:
     - oil_level ✅ VERIFIED in Wialon
     - oil_press ✅ VERIFIED in Wialon
     - oil_temp ✅ VERIFIED in Wialon
+
+    Note: All temperatures are in °F (Fahrenheit) to match fleet_command_center.py
     """
 
     OIL_LEVEL_MIN_PCT = 20
@@ -313,9 +316,12 @@ class OilConsumptionTracker:
     OIL_PRESSURE_WARNING_PSI = 20
     OIL_PRESSURE_NORMAL = (25, 65)
 
-    OIL_TEMP_NORMAL = (80, 110)
-    OIL_TEMP_WARNING = 120
-    OIL_TEMP_CRITICAL = 130
+    # Fix C2: Standardized to °F (was °C before)
+    # Normal operating temp: 180-230°F (82-110°C)
+    # Warning: 250°F (121°C), Critical: 260°F (127°C)
+    OIL_TEMP_NORMAL = (180, 230)  # °F
+    OIL_TEMP_WARNING = 250  # °F
+    OIL_TEMP_CRITICAL = 260  # °F
 
     def __init__(self, history_size: int = 200):
         self._readings: Dict[str, Dict[str, deque]] = {}
@@ -473,7 +479,8 @@ class OilConsumptionTracker:
         avg_first = statistics.mean(first_half)
         avg_last = statistics.mean(last_half)
 
-        change_pct = (avg_last - avg_first) / avg_first * 100 if avg_first > 0 else 0
+        # Fix C1: Prevent division by zero using max(abs(avg_first), 0.001)
+        change_pct = (avg_last - avg_first) / max(abs(avg_first), 0.001) * 100
 
         if change_pct < -5:
             return TrendDirection.DEGRADING
@@ -684,7 +691,8 @@ class CoolantLeakDetector:
         avg_first = statistics.mean(first_half)
         avg_last = statistics.mean(last_half)
 
-        change_pct = (avg_last - avg_first) / avg_first * 100 if avg_first > 0 else 0
+        # Fix C1: Prevent division by zero using max(abs(avg_first), 0.001)
+        change_pct = (avg_last - avg_first) / max(abs(avg_first), 0.001) * 100
 
         if change_pct < -5:
             return TrendDirection.DEGRADING
@@ -702,6 +710,65 @@ class CoolantLeakDetector:
         elif score >= 25:
             return ComponentHealth.WARNING
         return ComponentHealth.CRITICAL
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fix C6: MEMORY CLEANUP UTILITIES
+# Prevents memory leaks from trucks removed from fleet
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def cleanup_inactive_trucks(
+    predictors: list, active_truck_ids: set, max_inactive_days: int = 7
+) -> int:
+    """
+    Clean up history buffers for trucks that are no longer active.
+
+    Fix C6: Prevents memory leaks by removing data for trucks that
+    have been removed from the fleet or are inactive for extended periods.
+
+    Args:
+        predictors: List of predictor instances to clean
+        active_truck_ids: Set of currently active truck IDs
+        max_inactive_days: Days of inactivity before cleanup (default 7)
+
+    Returns:
+        Number of trucks cleaned up
+    """
+    cleaned_count = 0
+    cutoff_time = datetime.now(timezone.utc) - timedelta(days=max_inactive_days)
+
+    for predictor in predictors:
+        if not hasattr(predictor, "_readings"):
+            continue
+
+        trucks_to_remove = []
+
+        for truck_id, readings_dict in predictor._readings.items():
+            # Remove if not in active fleet
+            if truck_id not in active_truck_ids:
+                trucks_to_remove.append(truck_id)
+                continue
+
+            # Check for inactivity
+            has_recent_data = False
+            for sensor_readings in readings_dict.values():
+                if sensor_readings and len(sensor_readings) > 0:
+                    latest_reading = max(sensor_readings, key=lambda r: r.timestamp)
+                    if latest_reading.timestamp > cutoff_time:
+                        has_recent_data = True
+                        break
+
+            if not has_recent_data:
+                trucks_to_remove.append(truck_id)
+
+        # Remove inactive trucks
+        for truck_id in trucks_to_remove:
+            del predictor._readings[truck_id]
+            cleaned_count += 1
+            logger.info(f"Cleaned up history buffer for inactive truck: {truck_id}")
+
+    return cleaned_count
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -732,6 +799,29 @@ def get_coolant_detector() -> CoolantLeakDetector:
     if _coolant_detector is None:
         _coolant_detector = CoolantLeakDetector()
     return _coolant_detector
+
+
+def cleanup_all_predictors(active_truck_ids: set) -> int:
+    """
+    Convenience function to clean up all global predictor instances.
+
+    Call this periodically (e.g., daily) to prevent memory leaks.
+
+    Args:
+        active_truck_ids: Set of currently active truck IDs from tanks.yaml
+
+    Returns:
+        Total number of trucks cleaned up across all predictors
+    """
+    predictors = [_turbo_predictor, _oil_tracker, _coolant_detector]
+
+    # Filter out None values
+    active_predictors = [p for p in predictors if p is not None]
+
+    if not active_predictors:
+        return 0
+
+    return cleanup_inactive_trucks(active_predictors, active_truck_ids)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

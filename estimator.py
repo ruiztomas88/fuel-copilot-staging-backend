@@ -312,16 +312,26 @@ class FuelEstimator:
 
         return False
 
-    def auto_resync(self, sensor_pct: float):
+    def auto_resync(
+        self, sensor_pct: float, speed: float = None, is_trip_active: bool = None
+    ):
         """
         Auto-resync on extreme drift (>15%)
         🔧 v5.8.5: Added 30-minute cooldown to prevent oscillation.
+        🔧 v5.9.1 (Fix C5): Added theft protection - don't auto-resync during
+                           potential theft conditions (parked + downward drift).
+
+        Args:
+            sensor_pct: Current sensor reading as percentage
+            speed: Current speed (optional, for theft detection)
+            is_trip_active: Whether truck is on active trip (optional)
         """
         if not self.initialized or sensor_pct is None or self.L is None:
             return
 
         estimated_pct = (self.L / self.capacity_liters) * 100
         drift_pct = abs(estimated_pct - sensor_pct)
+        drift_direction = "down" if sensor_pct < estimated_pct else "up"
 
         RESYNC_THRESHOLD = 15.0
         RESYNC_THRESHOLD_REFUEL = 30.0
@@ -335,6 +345,21 @@ class FuelEstimator:
             if time_since_resync < RESYNC_COOLDOWN_SECONDS:
                 return  # Still in cooldown period
 
+        # 🆕 v5.9.1 (Fix C5): Theft protection - flag for review instead of auto-resync
+        # If truck is parked (speed < 2 mph) and drift is downward, potential theft
+        is_parked = speed is not None and speed < 2.0
+        is_inactive = is_trip_active is not None and not is_trip_active
+
+        if drift_direction == "down" and drift_pct > RESYNC_THRESHOLD:
+            if is_parked or is_inactive:
+                # Potential theft - DO NOT auto-resync, flag for review
+                logger.warning(
+                    f"[{self.truck_id}] 🚨 POTENTIAL THEFT DETECTED - Drift {drift_pct:.1f}% down while parked. "
+                    f"Flagged for review instead of auto-resync."
+                )
+                self._flag_potential_theft(drift_pct, sensor_pct, estimated_pct)
+                return  # Don't resync - let theft detection handle it
+
         if drift_pct > RESYNC_THRESHOLD and (
             not self.recent_refuel or drift_pct > RESYNC_THRESHOLD_REFUEL
         ):
@@ -345,6 +370,36 @@ class FuelEstimator:
             self._last_resync_time = datetime.now(
                 timezone.utc
             )  # 🆕 v5.8.5: Track resync time
+
+    def _flag_potential_theft(
+        self, drift_pct: float, sensor_pct: float, estimated_pct: float
+    ):
+        """
+        🆕 v5.9.1 (Fix C5): Flag potential theft for manual review.
+
+        This prevents auto-resync from masking theft events by creating
+        a record that can be reviewed by the theft detection system.
+        """
+        if not hasattr(self, "_potential_theft_flags"):
+            self._potential_theft_flags = []
+
+        self._potential_theft_flags.append(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "truck_id": self.truck_id,
+                "drift_pct": drift_pct,
+                "sensor_pct": sensor_pct,
+                "estimated_pct": estimated_pct,
+                "potential_gallons_lost": (estimated_pct - sensor_pct)
+                / 100
+                * self.capacity_liters
+                / 3.785,
+                "reviewed": False,
+            }
+        )
+
+        # Keep only last 10 flags
+        self._potential_theft_flags = self._potential_theft_flags[-10:]
 
     def update_adaptive_Q_r(
         self, speed: float = None, rpm: float = None, consumption_lph: float = None
@@ -651,6 +706,20 @@ class FuelEstimator:
 
     def update(self, measured_pct: float):
         """Update state with measurement using adaptive Kalman gain"""
+        # Fix M1: Handle NaN/Inf values to prevent corrupted calculations
+        if measured_pct is None or not isinstance(measured_pct, (int, float)):
+            logger.warning(f"[{self.truck_id}] Invalid measured_pct: {measured_pct}")
+            return
+
+        import math
+
+        if math.isnan(measured_pct) or math.isinf(measured_pct):
+            logger.warning(f"[{self.truck_id}] NaN/Inf measured_pct: {measured_pct}")
+            return
+
+        # Clamp to valid range
+        measured_pct = max(0.0, min(100.0, measured_pct))
+
         measured_liters = (measured_pct / 100.0) * self.capacity_liters
         self.last_update_time = datetime.now(timezone.utc)
 
@@ -661,6 +730,14 @@ class FuelEstimator:
         # Kalman Gain
         R = self.Q_L
         K = self.P / (self.P + R)
+
+        # Fix M1: Validate K before proceeding
+        if math.isnan(K) or math.isinf(K):
+            logger.error(
+                f"[{self.truck_id}] Invalid Kalman gain K={K}, resetting filter"
+            )
+            self.initialize(sensor_pct=measured_pct)
+            return
 
         # 🔧 v5.8.2: Dynamic K clamp based on uncertainty (P)
         # Higher P = less certainty = allow more correction

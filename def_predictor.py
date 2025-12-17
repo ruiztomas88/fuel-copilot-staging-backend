@@ -139,12 +139,17 @@ class DEFPrediction:
     data_quality: str
 
 
+import threading
+
+
 class DEFPredictor:
     """
     Predicts DEF (Diesel Exhaust Fluid) depletion and generates alerts.
 
     Uses historical consumption patterns to predict when each truck
     will need DEF refill, preventing EPA-mandated derating.
+
+    Thread-safe: Uses RLock for concurrent access protection (Fix C3).
     """
 
     # Alert thresholds (percent)
@@ -164,6 +169,8 @@ class DEFPredictor:
         self.profiles: Dict[str, DEFConsumptionProfile] = {}
         self.readings_cache: Dict[str, List[DEFReading]] = defaultdict(list)
         self._truck_mapping: Dict[int, str] = {}  # unit_id -> truck_id
+        # Fix C3: Thread lock for concurrent access protection
+        self._lock = threading.RLock()
 
     def load_truck_mapping(self, tanks_config: Dict[str, Any]) -> None:
         """Load truck ID mapping from tanks.yaml config"""
@@ -244,19 +251,22 @@ class DEFPredictor:
             return 0
 
     def add_reading(self, reading: DEFReading) -> None:
-        """Add a single DEF reading"""
-        self.readings_cache[reading.truck_id].append(reading)
+        """Add a single DEF reading (thread-safe)"""
+        with self._lock:
+            self.readings_cache[reading.truck_id].append(reading)
 
     def add_readings(self, readings: List[DEFReading]) -> None:
-        """Add multiple DEF readings"""
-        for reading in readings:
-            self.readings_cache[reading.truck_id].append(reading)
+        """Add multiple DEF readings (thread-safe)"""
+        with self._lock:
+            for reading in readings:
+                self.readings_cache[reading.truck_id].append(reading)
 
     def calculate_consumption_profile(
         self, truck_id: str, tank_capacity: float = None
     ) -> Optional[DEFConsumptionProfile]:
         """
         Calculate DEF consumption profile for a truck based on historical data.
+        Thread-safe operation.
 
         Args:
             truck_id: Truck identifier
@@ -265,7 +275,8 @@ class DEFPredictor:
         Returns:
             DEFConsumptionProfile with consumption rates and predictions
         """
-        readings = self.readings_cache.get(truck_id, [])
+        with self._lock:
+            readings = list(self.readings_cache.get(truck_id, []))
 
         if len(readings) < 2:
             logger.warning(
