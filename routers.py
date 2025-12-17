@@ -74,7 +74,7 @@ def register_v3_12_21_routers(app: FastAPI) -> None:
 
         app.include_router(driver_alerts_router, tags=["Driver Alerts"])
         logger.info(
-            "✅ Registered driver_alerts_router at /fuelAnalytics/api/driver-alerts"
+            "✅ Registered driver_alerts_router at /fuelAnalytics/api/v2/driver-alerts"
         )
     except ImportError as e:
         logger.warning(f"⚠️ Could not import driver_alerts_router: {e}")

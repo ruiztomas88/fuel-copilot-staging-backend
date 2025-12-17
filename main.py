@@ -1575,6 +1575,103 @@ async def get_truck_history(
 
 
 # ============================================================================
+# V2 API ALIASES (for frontend compatibility)
+# ============================================================================
+
+@app.get("/fuelAnalytics/api/v2/trucks/{truck_id}", tags=["Trucks v2"])
+async def get_truck_detail_v2(truck_id: str):
+    """V2 API alias for get_truck_detail"""
+    return await get_truck_detail(truck_id)
+
+
+@app.get(
+    "/fuelAnalytics/api/v2/trucks/{truck_id}/history",
+    response_model=List[HistoricalRecord],
+    tags=["Trucks v2"]
+)
+async def get_truck_history_v2(
+    truck_id: str,
+    hours: int = Query(
+        24, ge=1, le=168, description="Hours of history to fetch (1-168)"
+    ),
+):
+    """V2 API alias for get_truck_history"""
+    return await get_truck_history(truck_id, hours)
+
+
+@app.get(
+    "/fuelAnalytics/api/v2/trucks/{truck_id}/refuels",
+    tags=["Trucks v2"]
+)
+async def get_truck_refuels_v2(
+    truck_id: str,
+    days: int = Query(
+        30, ge=1, le=90, description="Days of refuel history to fetch (1-90)"
+    ),
+):
+    """V2 API alias for get_truck_refuel_history"""
+    return await get_truck_refuel_history(truck_id, days)
+
+
+@app.get(
+    "/fuelAnalytics/api/v2/trucks/{truck_id}/sensors",
+    tags=["Trucks v2"]
+)
+async def get_truck_sensors_v2(truck_id: str):
+    """
+    V2 API endpoint for truck sensor data.
+    
+    Returns real-time sensor data including:
+    - Fuel level, RPM, speed, odometer
+    - Engine sensors (coolant temp, oil pressure, etc.)
+    - GPS location and status
+    """
+    try:
+        # Get latest sensor data from truck_sensors_cache
+        import pymysql
+        from database_mysql import get_db_connection
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        cursor.execute("""
+            SELECT *
+            FROM truck_sensors_cache
+            WHERE truck_id = %s
+            ORDER BY last_updated DESC
+            LIMIT 1
+        """, (truck_id,))
+        
+        sensor_data = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not sensor_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No sensor data found for truck {truck_id}"
+            )
+        
+        return {
+            "truck_id": truck_id,
+            "timestamp": sensor_data.get('last_updated'),
+            "sensors": {
+                k: v for k, v in sensor_data.items()
+                if k not in ['truck_id', 'last_updated', 'created_at'] and v is not None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching sensors for {truck_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching sensor data: {str(e)}"
+        )
+
+
+# ============================================================================
 # EFFICIENCY & RANKINGS
 # ============================================================================
 

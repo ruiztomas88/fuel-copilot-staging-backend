@@ -53,7 +53,7 @@ from component_health_predictors import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/fuelAnalytics/api/driver-alerts", tags=["Driver Alerts"])
+router = APIRouter(prefix="/fuelAnalytics/api/v2/driver-alerts", tags=["Driver Alerts"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
