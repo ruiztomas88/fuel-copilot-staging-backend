@@ -80,6 +80,9 @@ class DTCCode:
     system: str = (
         "UNKNOWN"  # 🆕 v5.7.1: System classification (ENGINE, TRANSMISSION, etc)
     )
+    # 🆕 v5.8.0: Additional Spanish fields for comprehensive alerts
+    name_es: Optional[str] = None  # Spanish component name
+    fmi_description_es: Optional[str] = None  # Spanish FMI description
 
     @property
     def code(self) -> str:
@@ -232,6 +235,17 @@ class DTCAnalyzer:
                 action = self._get_recommended_action(spn, fmi, severity)
                 system = self._get_system_classification(spn)
 
+                # 🆕 v5.8.0: Get Spanish names from database
+                name_es = None
+                fmi_description_es = None
+                if DTC_DATABASE_AVAILABLE:
+                    spn_info = get_spn_info(spn)
+                    if spn_info:
+                        name_es = spn_info.name_es
+                    fmi_info = get_fmi_info(fmi)
+                    if fmi_info:
+                        fmi_description_es = fmi_info.get("es", None)
+
                 codes.append(
                     DTCCode(
                         spn=spn,
@@ -241,6 +255,8 @@ class DTCAnalyzer:
                         description=description,
                         recommended_action=action,
                         system=system,
+                        name_es=name_es,
+                        fmi_description_es=fmi_description_es,
                     )
                 )
 

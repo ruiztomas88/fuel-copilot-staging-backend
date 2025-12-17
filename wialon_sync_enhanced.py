@@ -2183,43 +2183,48 @@ def sync_cycle(
 
                         if alert.severity == DTCSeverity.CRITICAL:
                             logger.warning(f"🚨 CRITICAL DTC: {alert.message}")
-                            # 🆕 v5.7.3: Send notification via alert_service
-                            send_dtc_alert(
-                                truck_id=truck_id,
-                                dtc_code=(
-                                    alert.codes[0].code if alert.codes else "UNKNOWN"
-                                ),
-                                severity="CRITICAL",
-                                description=alert.message,
-                                system=(
-                                    getattr(alert.codes[0], "system", "UNKNOWN")
-                                    if alert.codes
-                                    else "UNKNOWN"
-                                ),
-                                recommended_action=(
-                                    getattr(alert.codes[0], "recommended_action", None)
-                                    if alert.codes
-                                    else None
-                                ),
-                            )
+                            # 🆕 v5.8.0: Send notification with full Spanish descriptions
+                            if alert.codes:
+                                code = alert.codes[0]  # Primary code
+                                send_dtc_alert(
+                                    truck_id=truck_id,
+                                    dtc_code=code.code,
+                                    severity="CRITICAL",
+                                    description=code.description or alert.message,
+                                    system=getattr(code, "system", "UNKNOWN"),
+                                    recommended_action=getattr(
+                                        code, "recommended_action", None
+                                    ),
+                                    spn=code.spn,
+                                    fmi=code.fmi,
+                                    spn_name_es=getattr(code, "name_es", None),
+                                    fmi_description_es=getattr(
+                                        code, "fmi_description_es", None
+                                    ),
+                                )
                         elif alert.severity == DTCSeverity.WARNING:
                             logger.info(
-                                f"⚠️ DTC Warning: {truck_id} - {alert.codes[0].code}"
+                                f"⚠️ DTC Warning: {truck_id} - {alert.codes[0].code if alert.codes else 'UNKNOWN'}"
                             )
-                            # Send email-only for warnings
-                            send_dtc_alert(
-                                truck_id=truck_id,
-                                dtc_code=(
-                                    alert.codes[0].code if alert.codes else "UNKNOWN"
-                                ),
-                                severity="WARNING",
-                                description=alert.message,
-                                system=(
-                                    getattr(alert.codes[0], "system", "UNKNOWN")
-                                    if alert.codes
-                                    else "UNKNOWN"
-                                ),
-                            )
+                            # 🆕 v5.8.0: Send email with full Spanish descriptions for warnings
+                            if alert.codes:
+                                code = alert.codes[0]
+                                send_dtc_alert(
+                                    truck_id=truck_id,
+                                    dtc_code=code.code,
+                                    severity="WARNING",
+                                    description=code.description or alert.message,
+                                    system=getattr(code, "system", "UNKNOWN"),
+                                    recommended_action=getattr(
+                                        code, "recommended_action", None
+                                    ),
+                                    spn=code.spn,
+                                    fmi=code.fmi,
+                                    spn_name_es=getattr(code, "name_es", None),
+                                    fmi_description_es=getattr(
+                                        code, "fmi_description_es", None
+                                    ),
+                                )
                 except Exception as dtc_error:
                     logger.debug(f"DTC processing error for {truck_id}: {dtc_error}")
 

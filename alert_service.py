@@ -1134,37 +1134,74 @@ class AlertManager:
         severity: str,
         description: str,
         system: str = "UNKNOWN",
-        recommended_action: str = None,
+        recommended_action: Optional[str] = None,
+        spn: Optional[int] = None,
+        fmi: Optional[int] = None,
+        spn_name_es: Optional[str] = None,
+        fmi_description_es: Optional[str] = None,
     ) -> bool:
         """
-        🆕 v5.7.3: Send DTC (Diagnostic Trouble Code) alert.
+        🆕 v5.8.0: Send DTC (Diagnostic Trouble Code) alert with full Spanish descriptions.
 
         CRITICAL DTCs → SMS + Email
         WARNING DTCs → Email only
+
+        Now includes comprehensive bilingual information from dtc_database.py v5.8.0:
+        - Spanish component name (name_es)
+        - Spanish failure description (description_es)
+        - Spanish recommended action (action_es)
+        - System classification (ENGINE, AFTERTREATMENT, etc.)
         """
         if severity == "CRITICAL":
             priority = AlertPriority.CRITICAL
             channels = ["sms", "email"]
             emoji = "🚨"
+            severity_es = "CRÍTICO"
         else:
             priority = AlertPriority.HIGH
             channels = ["email"]
             emoji = "⚠️"
+            severity_es = "ADVERTENCIA"
+
+        # Build comprehensive Spanish message
+        if spn and fmi and spn_name_es and fmi_description_es:
+            # Full Spanish description available from dtc_database
+            message = (
+                f"{emoji} CÓDIGO DE DIAGNÓSTICO DEL MOTOR\n\n"
+                f"🔧 Código: {dtc_code} (SPN {spn} / FMI {fmi})\n"
+                f"⚙️ Sistema: {system}\n"
+                f"📊 Severidad: {severity_es}\n\n"
+                f"🔍 Componente: {spn_name_es}\n"
+                f"❌ Falla: {fmi_description_es}\n\n"
+                f"✅ Acción Recomendada:\n{recommended_action or 'Revisar inmediatamente con técnico especializado'}"
+            )
+        else:
+            # Fallback to basic description
+            message = (
+                f"{emoji} CÓDIGO DE DIAGNÓSTICO DEL MOTOR\n\n"
+                f"🔧 Código: {dtc_code}\n"
+                f"⚙️ Sistema: {system}\n"
+                f"📊 Severidad: {severity_es}\n\n"
+                f"❌ Descripción: {description}\n\n"
+                f"✅ Acción Recomendada:\n{recommended_action or 'Programar inspección de servicio'}"
+            )
 
         alert = Alert(
             alert_type=AlertType.DTC_ALERT,
             priority=priority,
             truck_id=truck_id,
-            message=f"{emoji} ENGINE DIAGNOSTIC CODE\n"
-            f"Code: {dtc_code}\n"
-            f"System: {system}\n"
-            f"{description}",
+            message=message,
             details={
                 "dtc_code": dtc_code,
+                "spn": spn,
+                "fmi": fmi,
                 "severity": severity,
+                "severity_es": severity_es,
                 "system": system,
                 "description": description,
-                "action": recommended_action or "Schedule service inspection",
+                "spn_name_es": spn_name_es,
+                "fmi_description_es": fmi_description_es,
+                "action": recommended_action or "Programar inspección de servicio",
             },
         )
         return self.send_alert(alert, channels=channels)
@@ -1452,11 +1489,24 @@ def send_dtc_alert(
     severity: str,
     description: str,
     system: str = "UNKNOWN",
-    recommended_action: str = None,
+    recommended_action: Optional[str] = None,
+    spn: Optional[int] = None,
+    fmi: Optional[int] = None,
+    spn_name_es: Optional[str] = None,
+    fmi_description_es: Optional[str] = None,
 ) -> bool:
-    """🆕 v5.7.3: Quick function to send DTC alert"""
+    """🆕 v5.8.0: Quick function to send DTC alert with full Spanish descriptions"""
     return get_alert_manager().alert_dtc(
-        truck_id, dtc_code, severity, description, system, recommended_action
+        truck_id,
+        dtc_code,
+        severity,
+        description,
+        system,
+        recommended_action,
+        spn,
+        fmi,
+        spn_name_es,
+        fmi_description_es,
     )
 
 
