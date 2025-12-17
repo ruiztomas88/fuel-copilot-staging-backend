@@ -1081,7 +1081,7 @@ def predict_maintenance_timing(
             f"Must be between 0.1 and 10000. Using default 1.0."
         )
         readings_per_day = 1.0
-    
+
     # Warn if suspicious value
     if readings_per_day > 100 and len(history) < 10:
         logger.warning(
@@ -1139,7 +1139,9 @@ def predict_maintenance_timing(
     trend_slope_per_day = slope * readings_per_day
 
     result["trend_slope_per_day"] = round(trend_slope_per_day, 4)
-    result["readings_frequency"] = f"{readings_per_day} readings/day"  # 🆕 Add to output
+    result["readings_frequency"] = (
+        f"{readings_per_day} readings/day"  # 🆕 Add to output
+    )
 
     # Determine trend direction relative to "worse"
     if is_higher_worse:

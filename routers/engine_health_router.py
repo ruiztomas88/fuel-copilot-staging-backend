@@ -165,7 +165,7 @@ async def get_truck_health_detail(
                     truck_id, sensor, historical_data
                 )
                 baselines[sensor] = baseline
-            
+
             # Save baselines to database for persistence (BUG-001 fix)
             if baselines:
                 analyzer._save_baselines(truck_id, baselines)

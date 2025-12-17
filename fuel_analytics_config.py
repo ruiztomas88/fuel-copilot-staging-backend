@@ -4,6 +4,7 @@ Centralized Configuration - Replaces hardcoded magic numbers
 v6.2.2 - All thresholds and constants in one place
 Environment variables override defaults
 """
+
 import os
 
 # THEFT DETECTION

@@ -1,0 +1,445 @@
+"""
+🛡️ SLOW SIPHONING DETECTOR - Fix BUG-C5
+═══════════════════════════════════════════════════════════════════════════════
+
+Detects gradual fuel theft that evades instantaneous detection.
+
+PROBLEM:
+- Current system only detects drops >10% instantaneously
+- Slow siphoning (2% per day × 5 days = 10%) goes UNDETECTED
+
+SOLUTION:
+- Track daily fuel loss patterns
+- Detect accumulative unexplained losses over time windows
+- Flag consistent small losses that add up to significant theft
+
+EXAMPLE:
+  Thief siphons 5 gallons/night for 4 nights = 20 gallons total
+  Each night is only 2.5% drop → Current system: NO ALERT
+  This detector: ALERT after day 3 (accumulative pattern detected)
+
+Author: Fuel Copilot Team
+Version: 6.3.0
+Date: December 2025
+"""
+
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from collections import defaultdict
+import statistics
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SiphonAlert:
+    """Alert for detected slow siphoning pattern"""
+
+    truck_id: str
+    type: str  # "slow_siphon", "accumulative_loss"
+    period_days: int
+    total_gallons_lost: float
+    daily_average_loss: float
+    confidence: float
+    start_date: datetime
+    end_date: datetime
+    pattern_description: str
+    recommendation: str
+
+
+@dataclass
+class DailyFuelChange:
+    """Daily fuel change summary"""
+
+    date: str  # YYYY-MM-DD
+    fuel_start_pct: float
+    fuel_end_pct: float
+    change_pct: float
+    change_gal: float
+    expected_consumption_gal: float
+    unexplained_loss_gal: float
+    miles_driven: float
+    hours_idle: float
+
+
+class SlowSiphonDetector:
+    """
+    Detects gradual fuel theft patterns over multi-day windows.
+
+    Configuration:
+    - SIPHON_THRESHOLD_DAILY: 2.0% max daily loss considered normal
+    - MIN_CONSECUTIVE_DAYS: 3 days minimum pattern
+    - MIN_TOTAL_LOSS_GAL: 10 gallons minimum to flag
+    - ANALYSIS_WINDOW_DAYS: 7 days rolling window
+    """
+
+    SIPHON_THRESHOLD_DAILY_PCT = 2.0  # % max daily unexplained loss
+    MIN_CONSECUTIVE_DAYS = 3  # Minimum days of pattern
+    MIN_TOTAL_LOSS_GAL = 10.0  # Minimum total gallons to flag
+    ANALYSIS_WINDOW_DAYS = 7  # Days to analyze
+
+    # Expected consumption rates
+    AVERAGE_MPG = 6.0  # Conservative MPG
+    IDLE_GPH = 1.5  # Gallons per hour while idling
+
+    def __init__(self):
+        """Initialize siphon detector"""
+        self.daily_history: Dict[str, List[DailyFuelChange]] = defaultdict(list)
+        logger.info("SlowSiphonDetector initialized")
+
+    def analyze(
+        self, truck_id: str, readings: List[Dict], tank_capacity_gal: float = 200.0
+    ) -> Optional[SiphonAlert]:
+        """
+        Analyze fuel readings for slow siphoning patterns.
+
+        Args:
+            truck_id: Truck identifier
+            readings: List of fuel readings (sorted by timestamp)
+                      Each: {timestamp, fuel_pct, odometer, idle_hours, ...}
+            tank_capacity_gal: Tank capacity in gallons
+
+        Returns:
+            SiphonAlert if pattern detected, None otherwise
+        """
+        if not readings or len(readings) < 2:
+            return None
+
+        # Group readings by day
+        daily_changes = self._group_daily_changes(readings, tank_capacity_gal)
+
+        if len(daily_changes) < self.MIN_CONSECUTIVE_DAYS:
+            return None
+
+        # Analyze for siphoning patterns
+        return self._detect_pattern(truck_id, daily_changes, tank_capacity_gal)
+
+    def _group_daily_changes(
+        self, readings: List[Dict], tank_capacity_gal: float
+    ) -> List[DailyFuelChange]:
+        """
+        Group readings by day and calculate daily fuel changes.
+
+        Args:
+            readings: List of fuel readings
+            tank_capacity_gal: Tank capacity
+
+        Returns:
+            List of DailyFuelChange objects
+        """
+        daily_data = defaultdict(lambda: {"readings": [], "miles": [], "idle": []})
+
+        for reading in readings:
+            timestamp = reading.get("timestamp")
+            if not timestamp:
+                continue
+
+            if isinstance(timestamp, str):
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+            date_key = timestamp.date().isoformat()
+
+            daily_data[date_key]["readings"].append(
+                {
+                    "timestamp": timestamp,
+                    "fuel_pct": reading.get("fuel_pct", 0),
+                    "odometer": reading.get("odometer", 0),
+                    "idle_hours": reading.get("idle_hours", 0),
+                }
+            )
+
+        # Calculate daily changes
+        daily_changes = []
+        sorted_dates = sorted(daily_data.keys())
+
+        for i in range(len(sorted_dates) - 1):
+            date = sorted_dates[i]
+            next_date = sorted_dates[i + 1]
+
+            day_readings = daily_data[date]["readings"]
+            next_day_readings = daily_data[next_date]["readings"]
+
+            if not day_readings or not next_day_readings:
+                continue
+
+            # Start of day vs end of day fuel levels
+            fuel_start = day_readings[0]["fuel_pct"]
+            fuel_end = next_day_readings[0]["fuel_pct"]
+
+            # Calculate odometer change (last reading of day to first of next)
+            odo_start = day_readings[-1]["odometer"]
+            odo_end = next_day_readings[0]["odometer"]
+            miles_driven = max(0, odo_end - odo_start)
+
+            # Estimate idle hours
+            idle_hours = sum(r.get("idle_hours", 0) for r in day_readings)
+
+            # Calculate expected consumption
+            driving_consumption = miles_driven / self.AVERAGE_MPG
+            idle_consumption = idle_hours * self.IDLE_GPH
+            expected_consumption_gal = driving_consumption + idle_consumption
+
+            # Calculate actual change
+            change_pct = fuel_start - fuel_end
+            change_gal = (change_pct / 100) * tank_capacity_gal
+
+            # Unexplained loss
+            unexplained_loss_gal = change_gal - expected_consumption_gal
+
+            daily_change = DailyFuelChange(
+                date=date,
+                fuel_start_pct=fuel_start,
+                fuel_end_pct=fuel_end,
+                change_pct=change_pct,
+                change_gal=change_gal,
+                expected_consumption_gal=expected_consumption_gal,
+                unexplained_loss_gal=unexplained_loss_gal,
+                miles_driven=miles_driven,
+                hours_idle=idle_hours,
+            )
+
+            daily_changes.append(daily_change)
+
+        return daily_changes
+
+    def _detect_pattern(
+        self,
+        truck_id: str,
+        daily_changes: List[DailyFuelChange],
+        tank_capacity_gal: float,
+    ) -> Optional[SiphonAlert]:
+        """
+        Detect siphoning pattern in daily changes.
+
+        Args:
+            truck_id: Truck identifier
+            daily_changes: List of daily fuel changes
+            tank_capacity_gal: Tank capacity
+
+        Returns:
+            SiphonAlert if pattern detected
+        """
+        consecutive_loss_days = 0
+        total_unexplained_loss = 0.0
+        pattern_start_date = None
+        pattern_changes = []
+
+        threshold_gal = (self.SIPHON_THRESHOLD_DAILY_PCT / 100) * tank_capacity_gal
+
+        for change in daily_changes:
+            if change.unexplained_loss_gal > threshold_gal:
+                # Start or continue pattern
+                if consecutive_loss_days == 0:
+                    pattern_start_date = change.date
+
+                consecutive_loss_days += 1
+                total_unexplained_loss += change.unexplained_loss_gal
+                pattern_changes.append(change)
+
+            else:
+                # Reset if pattern broken
+                if consecutive_loss_days > 0:
+                    # Check if we should alert before resetting
+                    alert = self._evaluate_pattern(
+                        truck_id,
+                        consecutive_loss_days,
+                        total_unexplained_loss,
+                        pattern_start_date,
+                        pattern_changes[-1].date if pattern_changes else None,
+                        pattern_changes,
+                    )
+                    if alert:
+                        return alert
+
+                # Reset counters
+                consecutive_loss_days = 0
+                total_unexplained_loss = 0.0
+                pattern_start_date = None
+                pattern_changes = []
+
+        # Check final pattern if exists
+        if consecutive_loss_days >= self.MIN_CONSECUTIVE_DAYS:
+            return self._evaluate_pattern(
+                truck_id,
+                consecutive_loss_days,
+                total_unexplained_loss,
+                pattern_start_date,
+                pattern_changes[-1].date if pattern_changes else None,
+                pattern_changes,
+            )
+
+        return None
+
+    def _evaluate_pattern(
+        self,
+        truck_id: str,
+        consecutive_days: int,
+        total_loss_gal: float,
+        start_date: str,
+        end_date: str,
+        pattern_changes: List[DailyFuelChange],
+    ) -> Optional[SiphonAlert]:
+        """
+        Evaluate if pattern qualifies as siphoning alert.
+
+        Args:
+            truck_id: Truck ID
+            consecutive_days: Number of consecutive loss days
+            total_loss_gal: Total unexplained loss in gallons
+            start_date: Pattern start date
+            end_date: Pattern end date
+            pattern_changes: List of daily changes in pattern
+
+        Returns:
+            SiphonAlert if thresholds met, None otherwise
+        """
+        if (
+            consecutive_days < self.MIN_CONSECUTIVE_DAYS
+            or total_loss_gal < self.MIN_TOTAL_LOSS_GAL
+        ):
+            return None
+
+        # Calculate confidence
+        # Base: 50%
+        # +10% per consecutive day (max +30)
+        # +20% if total loss > 20 gal
+        # +10% if consistent daily pattern (low variance)
+        confidence = 50.0
+        confidence += min(30, consecutive_days * 10)
+
+        if total_loss_gal > 20:
+            confidence += 20
+
+        # Check consistency (low variance = higher confidence)
+        daily_losses = [c.unexplained_loss_gal for c in pattern_changes]
+        if len(daily_losses) > 1:
+            variance = statistics.variance(daily_losses)
+            if variance < 2.0:  # Very consistent
+                confidence += 10
+
+        confidence = min(95, confidence)
+
+        # Create pattern description
+        daily_avg = total_loss_gal / consecutive_days
+        pattern_desc = (
+            f"{consecutive_days} consecutive days of unexplained fuel loss. "
+            f"Average {daily_avg:.1f} gal/day, total {total_loss_gal:.1f} gal lost."
+        )
+
+        # Recommendation based on confidence
+        if confidence >= 85:
+            recommendation = "🔴 HIGH PRIORITY: Immediate physical inspection required"
+        elif confidence >= 70:
+            recommendation = "🟡 MEDIUM: Schedule inspection within 48 hours"
+        else:
+            recommendation = "🟢 LOW: Monitor pattern, verify with driver"
+
+        return SiphonAlert(
+            truck_id=truck_id,
+            type="slow_siphon",
+            period_days=consecutive_days,
+            total_gallons_lost=total_loss_gal,
+            daily_average_loss=daily_avg,
+            confidence=confidence,
+            start_date=datetime.fromisoformat(start_date),
+            end_date=datetime.fromisoformat(end_date),
+            pattern_description=pattern_desc,
+            recommendation=recommendation,
+        )
+
+    def get_daily_summary(self, truck_id: str, days: int = 7) -> Dict:
+        """
+        Get daily fuel loss summary for a truck.
+
+        Args:
+            truck_id: Truck identifier
+            days: Number of days to include
+
+        Returns:
+            Summary dictionary
+        """
+        history = self.daily_history.get(truck_id, [])
+
+        if not history:
+            return {
+                "truck_id": truck_id,
+                "days_analyzed": 0,
+                "total_unexplained_loss_gal": 0,
+                "average_daily_loss_gal": 0,
+                "suspicious_days": 0,
+            }
+
+        # Filter to last N days
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        recent = [h for h in history if datetime.fromisoformat(h.date).replace(tzinfo=timezone.utc) >= cutoff]
+
+        total_unexplained = sum(h.unexplained_loss_gal for h in recent)
+        suspicious = sum(1 for h in recent if h.unexplained_loss_gal > 2.0)
+
+        return {
+            "truck_id": truck_id,
+            "days_analyzed": len(recent),
+            "total_unexplained_loss_gal": round(total_unexplained, 2),
+            "average_daily_loss_gal": (
+                round(total_unexplained / len(recent), 2) if recent else 0
+            ),
+            "suspicious_days": suspicious,
+            "pattern_risk": (
+                "HIGH" if suspicious >= 3 else "MEDIUM" if suspicious >= 2 else "LOW"
+            ),
+        }
+
+
+# Global instance
+SIPHON_DETECTOR = SlowSiphonDetector()
+
+
+if __name__ == "__main__":
+    # Example usage
+    logging.basicConfig(level=logging.INFO)
+
+    # Simulate 5 days of gradual siphoning (5 gal/night)
+    test_readings = []
+    base_date = datetime.now(timezone.utc) - timedelta(days=6)
+    fuel_level = 80.0  # Start at 80%
+    odometer = 50000
+
+    for day in range(6):
+        # Start of day reading
+        test_readings.append(
+            {
+                "timestamp": base_date + timedelta(days=day),
+                "fuel_pct": fuel_level,
+                "odometer": odometer,
+                "idle_hours": 2.0,
+            }
+        )
+
+        # Simulate normal consumption during day (50 miles @ 6 MPG = 8.3 gal)
+        miles_today = 50
+        consumption_gal = miles_today / 6.0 + 2.0 * 1.5  # Driving + idle
+
+        # Add siphoning (5 gal extra loss = 2.5% on 200 gal tank)
+        siphon_gal = 5.0
+        total_loss_pct = ((consumption_gal + siphon_gal) / 200) * 100
+
+        fuel_level -= total_loss_pct
+        odometer += miles_today
+
+    # Analyze
+    detector = SlowSiphonDetector()
+    alert = detector.analyze("TEST_TRUCK", test_readings, tank_capacity_gal=200.0)
+
+    if alert:
+        print("\n🚨 SIPHONING DETECTED!")
+        print(f"   Truck: {alert.truck_id}")
+        print(f"   Period: {alert.period_days} days")
+        print(f"   Total loss: {alert.total_gallons_lost:.1f} gallons")
+        print(f"   Daily avg: {alert.daily_average_loss:.1f} gal/day")
+        print(f"   Confidence: {alert.confidence:.0f}%")
+        print(f"   {alert.pattern_description}")
+        print(f"   {alert.recommendation}")
+    else:
+        print("\n✅ No siphoning pattern detected")

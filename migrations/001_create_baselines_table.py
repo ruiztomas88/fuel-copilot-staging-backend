@@ -53,13 +53,13 @@ ON engine_health_baselines(truck_id, sensor_name, last_updated);
 def run_migration():
     """Execute the migration"""
     print("🔧 BUG-001 FIX: Creating engine_health_baselines table...")
-    
+
     engine = get_local_engine()
     if not engine:
         print("❌ ERROR: Could not connect to database")
         print("   Set MYSQL_PASSWORD environment variable")
         return False
-    
+
     try:
         with engine.connect() as conn:
             # Create table
@@ -67,30 +67,36 @@ def run_migration():
             conn.execute(text(CREATE_TABLE_SQL))
             conn.commit()
             print("   ✅ Table created")
-            
+
             # Create additional index
             print("   Creating indexes...")
             conn.execute(text(CREATE_INDEX_SQL))
             conn.commit()
             print("   ✅ Indexes created")
-            
+
             # Verify
-            result = conn.execute(text("""
+            result = conn.execute(
+                text(
+                    """
                 SELECT COUNT(*) as count 
                 FROM information_schema.tables 
                 WHERE table_name = 'engine_health_baselines'
-            """))
+            """
+                )
+            )
             count = result.scalar()
-            
+
             if count > 0:
                 print("\n✅ Migration completed successfully!")
                 print(f"   Table: engine_health_baselines")
-                print(f"   Columns: truck_id, sensor_name, mean_value, std_dev, min_value, max_value, ...")
+                print(
+                    f"   Columns: truck_id, sensor_name, mean_value, std_dev, min_value, max_value, ..."
+                )
                 return True
             else:
                 print("\n❌ Migration failed - table not found")
                 return False
-                
+
     except Exception as e:
         print(f"\n❌ Migration failed: {e}")
         return False

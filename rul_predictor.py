@@ -1,0 +1,489 @@
+"""
+📊 REMAINING USEFUL LIFE (RUL) PREDICTOR
+═══════════════════════════════════════════════════════════════════════════════
+
+Predicts when components will fail using multiple degradation models:
+- Linear: Constant degradation rate
+- Exponential: Accelerating degradation
+- Weibull: Reliability analysis
+
+Provides actionable maintenance predictions:
+- Days until failure
+- Miles until failure
+- Recommended service date
+- Estimated repair cost
+
+Author: Fuel Copilot Team
+Version: 6.3.0
+Date: December 2025
+"""
+
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+import statistics
+import math
+
+logger = logging.getLogger(__name__)
+
+
+class DegradationModel(Enum):
+    """Degradation model types"""
+
+    LINEAR = "linear"  # health = a - b*t (constant rate)
+    EXPONENTIAL = "exponential"  # health = a * exp(-b*t) (accelerating)
+    WEIBULL = "weibull"  # Reliability analysis
+
+
+@dataclass
+class RULPrediction:
+    """Remaining Useful Life prediction result"""
+
+    component: str
+    current_score: float
+    model_used: str
+    rul_days: Optional[int]
+    rul_miles: Optional[int]
+    degradation_rate_per_day: float
+    confidence: float  # R² or fit quality
+    recommended_service_date: Optional[datetime]
+    estimated_repair_cost: float
+    status: str  # "stable", "degrading", "critical", "insufficient_data"
+    message: str
+    potential_loss_if_ignored: str
+
+
+class RULPredictor:
+    """
+    Predicts Remaining Useful Life for truck components.
+
+    Uses historical health scores to fit degradation models
+    and predict when component will reach critical threshold.
+    """
+
+    # Critical health thresholds
+    CRITICAL_THRESHOLD = 25.0  # Below this = component failure imminent
+    WARNING_THRESHOLD = 50.0  # Below this = needs attention
+
+    # Minimum data requirements
+    MIN_HISTORY_POINTS = 5  # Minimum readings for prediction
+    MIN_HISTORY_DAYS = 14  # Minimum days of data
+
+    # Average daily miles (for mile prediction)
+    AVERAGE_DAILY_MILES = 250.0
+
+    # Component repair costs (estimates)
+    COMPONENT_COSTS = {
+        "turbo": 4500,
+        "turbo_health": 4500,
+        "oil": 800,
+        "oil_consumption": 800,
+        "coolant": 1200,
+        "coolant_leak": 1200,
+        "def": 600,
+        "def_system": 600,
+        "battery": 300,
+        "alternator": 800,
+        "starter": 600,
+        "default": 1000,
+    }
+
+    def __init__(self):
+        """Initialize RUL predictor"""
+        logger.info("RULPredictor initialized")
+
+    def predict_rul(
+        self, component: str, health_history: List[Tuple[datetime, float]]
+    ) -> RULPrediction:
+        """
+        Predict remaining useful life for a component.
+
+        Args:
+            component: Component name (e.g., "turbo_health", "oil_consumption")
+            health_history: List of (timestamp, health_score) tuples
+                           where health_score is 0-100 (100 = perfect)
+
+        Returns:
+            RULPrediction with days/miles to failure
+        """
+        # Validate inputs
+        if not health_history or len(health_history) < self.MIN_HISTORY_POINTS:
+            return self._insufficient_data(component, len(health_history))
+
+        # Sort by timestamp
+        health_history = sorted(health_history, key=lambda x: x[0])
+
+        # Check time span
+        time_span = (health_history[-1][0] - health_history[0][0]).days
+        if time_span < self.MIN_HISTORY_DAYS:
+            return self._insufficient_data(component, len(health_history), time_span)
+
+        # Convert to days since start and scores
+        start_time = health_history[0][0]
+        times = [(h[0] - start_time).days for h in health_history]
+        scores = [h[1] for h in health_history]
+
+        current_day = times[-1]
+        current_score = scores[-1]
+
+        # Try linear model first (simplest and most common)
+        linear_result = self._fit_linear_model(
+            component, times, scores, current_day, current_score
+        )
+
+        # Try exponential if linear shows degradation
+        if linear_result.status == "degrading" and linear_result.rul_days:
+            exp_result = self._fit_exponential_model(
+                component, times, scores, current_day, current_score
+            )
+
+            # Use exponential if it has better fit
+            if exp_result.confidence > linear_result.confidence:
+                return exp_result
+
+        return linear_result
+
+    def _fit_linear_model(
+        self,
+        component: str,
+        times: List[float],
+        scores: List[float],
+        current_day: float,
+        current_score: float,
+    ) -> RULPrediction:
+        """
+        Fit linear degradation model: health = a - b*t
+
+        Args:
+            component: Component name
+            times: Days since first reading
+            scores: Health scores
+            current_day: Current day index
+            current_score: Current health score
+
+        Returns:
+            RULPrediction
+        """
+        # Linear regression
+        slope, intercept = self._linear_regression(times, scores)
+
+        # Check if degrading
+        if slope >= -0.05:  # Slope close to zero or positive
+            return RULPrediction(
+                component=component,
+                current_score=current_score,
+                model_used="linear",
+                rul_days=None,
+                rul_miles=None,
+                degradation_rate_per_day=abs(slope),
+                confidence=self._r_squared(times, scores, slope, intercept),
+                recommended_service_date=None,
+                estimated_repair_cost=self._estimate_cost(component),
+                status="stable",
+                message=f"✅ Component stable or improving (score: {current_score:.0f})",
+                potential_loss_if_ignored="N/A - component stable",
+            )
+
+        # Calculate days to critical threshold
+        days_to_critical = (self.CRITICAL_THRESHOLD - intercept) / slope
+        days_remaining = max(0, days_to_critical - current_day)
+
+        # Calculate confidence (R²)
+        confidence = self._r_squared(times, scores, slope, intercept)
+
+        # Determine status
+        if current_score < self.CRITICAL_THRESHOLD:
+            status = "critical"
+        elif current_score < self.WARNING_THRESHOLD:
+            status = "degrading"
+        else:
+            status = "degrading"
+
+        # Calculate service date (7 days before failure for buffer)
+        service_buffer_days = 7
+        recommended_date = datetime.now(timezone.utc) + timedelta(
+            days=max(0, int(days_remaining - service_buffer_days))
+        )
+
+        # Estimate miles
+        rul_miles = int(days_remaining * self.AVERAGE_DAILY_MILES)
+
+        # Cost estimate
+        repair_cost = self._estimate_cost(component)
+        loss_range = f"${repair_cost:,.0f} - ${repair_cost * 1.8:,.0f}"
+
+        # Generate message
+        if days_remaining <= 7:
+            message = (
+                f"🔴 CRITICAL: {component} will fail in ~{int(days_remaining)} days! "
+                f"Immediate service required."
+            )
+        elif days_remaining <= 30:
+            message = (
+                f"🟡 WARNING: {component} degrading rapidly. "
+                f"Service needed in ~{int(days_remaining)} days ({rul_miles:,} miles)"
+            )
+        else:
+            message = (
+                f"⚠️ {component} degrading at {abs(slope):.2f} pts/day. "
+                f"~{int(days_remaining)} days ({rul_miles:,} miles) until failure"
+            )
+
+        return RULPrediction(
+            component=component,
+            current_score=current_score,
+            model_used="linear",
+            rul_days=int(days_remaining),
+            rul_miles=rul_miles,
+            degradation_rate_per_day=abs(slope),
+            confidence=confidence,
+            recommended_service_date=recommended_date,
+            estimated_repair_cost=repair_cost,
+            status=status,
+            message=message,
+            potential_loss_if_ignored=loss_range,
+        )
+
+    def _fit_exponential_model(
+        self,
+        component: str,
+        times: List[float],
+        scores: List[float],
+        current_day: float,
+        current_score: float,
+    ) -> RULPrediction:
+        """
+        Fit exponential degradation model: health = a * exp(-b*t)
+
+        This model captures accelerating degradation.
+
+        Args:
+            component: Component name
+            times: Days since first reading
+            scores: Health scores
+            current_day: Current day index
+            current_score: Current health score
+
+        Returns:
+            RULPrediction
+        """
+        try:
+            # Convert to log space for linear regression
+            # ln(health) = ln(a) - b*t
+            log_scores = [math.log(max(s, 1)) for s in scores]  # Avoid log(0)
+
+            slope, intercept = self._linear_regression(times, log_scores)
+
+            # Check if degrading exponentially
+            if slope >= 0:
+                # Not exponentially degrading, fall back to linear
+                return self._fit_linear_model(
+                    component, times, scores, current_day, current_score
+                )
+
+            # Calculate days to critical
+            # exp(ln(a) - b*t) = critical
+            # ln(a) - b*t = ln(critical)
+            # t = (ln(a) - ln(critical)) / b
+            a = math.exp(intercept)
+            b = -slope  # Make positive for easier reading
+
+            days_to_critical = (math.log(a) - math.log(self.CRITICAL_THRESHOLD)) / b
+            days_remaining = max(0, days_to_critical - current_day)
+
+            # Calculate confidence
+            predicted = [a * math.exp(-b * t) for t in times]
+            confidence = self._r_squared_direct(scores, predicted)
+
+            # Similar to linear model for the rest
+            service_buffer_days = 7
+            recommended_date = datetime.now(timezone.utc) + timedelta(
+                days=max(0, int(days_remaining - service_buffer_days))
+            )
+
+            rul_miles = int(days_remaining * self.AVERAGE_DAILY_MILES)
+            repair_cost = self._estimate_cost(component)
+            loss_range = f"${repair_cost:,.0f} - ${repair_cost * 1.8:,.0f}"
+
+            # Degradation rate (approximate at current point)
+            current_rate = abs(a * b * math.exp(-b * current_day))
+
+            status = (
+                "critical" if current_score < self.CRITICAL_THRESHOLD else "degrading"
+            )
+
+            message = (
+                f"🔴 ACCELERATING DEGRADATION: {component} failing exponentially. "
+                f"~{int(days_remaining)} days until critical failure"
+            )
+
+            return RULPrediction(
+                component=component,
+                current_score=current_score,
+                model_used="exponential",
+                rul_days=int(days_remaining),
+                rul_miles=rul_miles,
+                degradation_rate_per_day=current_rate,
+                confidence=confidence,
+                recommended_service_date=recommended_date,
+                estimated_repair_cost=repair_cost,
+                status=status,
+                message=message,
+                potential_loss_if_ignored=loss_range,
+            )
+
+        except (ValueError, ZeroDivisionError) as e:
+            logger.warning(f"Exponential fit failed for {component}: {e}")
+            # Fall back to linear
+            return self._fit_linear_model(
+                component, times, scores, current_day, current_score
+            )
+
+    def _linear_regression(self, x: List[float], y: List[float]) -> Tuple[float, float]:
+        """
+        Simple linear regression: y = slope*x + intercept
+
+        Args:
+            x: Independent variable
+            y: Dependent variable
+
+        Returns:
+            (slope, intercept)
+        """
+        n = len(x)
+        x_mean = statistics.mean(x)
+        y_mean = statistics.mean(y)
+
+        numerator = sum((x[i] - x_mean) * (y[i] - y_mean) for i in range(n))
+        denominator = sum((x[i] - x_mean) ** 2 for i in range(n))
+
+        slope = numerator / denominator if denominator != 0 else 0
+        intercept = y_mean - slope * x_mean
+
+        return slope, intercept
+
+    def _r_squared(
+        self, x: List[float], y: List[float], slope: float, intercept: float
+    ) -> float:
+        """
+        Calculate R² (coefficient of determination).
+
+        Args:
+            x: Independent variable
+            y: Dependent variable
+            slope: Regression slope
+            intercept: Regression intercept
+
+        Returns:
+            R² value (0-1, higher = better fit)
+        """
+        y_mean = statistics.mean(y)
+        ss_tot = sum((yi - y_mean) ** 2 for yi in y)
+        ss_res = sum((y[i] - (slope * x[i] + intercept)) ** 2 for i in range(len(x)))
+
+        r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+        return max(0, min(1, r2))  # Clamp to [0, 1]
+
+    def _r_squared_direct(self, actual: List[float], predicted: List[float]) -> float:
+        """
+        Calculate R² from actual vs predicted values.
+
+        Args:
+            actual: Actual values
+            predicted: Predicted values
+
+        Returns:
+            R² value
+        """
+        y_mean = statistics.mean(actual)
+        ss_tot = sum((yi - y_mean) ** 2 for yi in actual)
+        ss_res = sum((actual[i] - predicted[i]) ** 2 for i in range(len(actual)))
+
+        r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+        return max(0, min(1, r2))
+
+    def _estimate_cost(self, component: str) -> float:
+        """
+        Estimate repair cost for component.
+
+        Args:
+            component: Component name
+
+        Returns:
+            Estimated cost in dollars
+        """
+        # Normalize component name
+        comp_lower = component.lower().replace("_", "")
+
+        for key, cost in self.COMPONENT_COSTS.items():
+            if key in comp_lower or comp_lower in key:
+                return cost
+
+        return self.COMPONENT_COSTS["default"]
+
+    def _insufficient_data(
+        self, component: str, points: int, days: int = 0
+    ) -> RULPrediction:
+        """
+        Return prediction for insufficient data case.
+
+        Args:
+            component: Component name
+            points: Number of data points
+            days: Time span in days
+
+        Returns:
+            RULPrediction with status "insufficient_data"
+        """
+        return RULPrediction(
+            component=component,
+            current_score=0,
+            model_used="none",
+            rul_days=None,
+            rul_miles=None,
+            degradation_rate_per_day=0,
+            confidence=0,
+            recommended_service_date=None,
+            estimated_repair_cost=0,
+            status="insufficient_data",
+            message=f"⚠️ Insufficient data ({points} points, {days} days). Need {self.MIN_HISTORY_POINTS}+ points over {self.MIN_HISTORY_DAYS}+ days.",
+            potential_loss_if_ignored="Unknown - insufficient data",
+        )
+
+
+# Global instance
+RUL_PREDICTOR = RULPredictor()
+
+
+if __name__ == "__main__":
+    # Example usage
+    logging.basicConfig(level=logging.INFO)
+
+    # Simulate degrading turbo health over 60 days
+    start_date = datetime.now(timezone.utc) - timedelta(days=60)
+    health_history = []
+
+    # Linear degradation: 90 → 40 over 60 days
+    for day in range(0, 61, 3):  # Every 3 days
+        health = 90 - (day * 0.83)  # Degrading ~0.83 pts/day
+        timestamp = start_date + timedelta(days=day)
+        health_history.append((timestamp, health))
+
+    predictor = RULPredictor()
+    prediction = predictor.predict_rul("turbo_health", health_history)
+
+    print("\n📊 RUL PREDICTION RESULT")
+    print("=" * 60)
+    print(f"Component: {prediction.component}")
+    print(f"Current Score: {prediction.current_score:.0f}")
+    print(f"Model: {prediction.model_used}")
+    print(f"Status: {prediction.status}")
+    print(f"RUL: {prediction.rul_days} days ({prediction.rul_miles:,} miles)")
+    print(f"Degradation Rate: {prediction.degradation_rate_per_day:.2f} pts/day")
+    print(f"Confidence (R²): {prediction.confidence:.2%}")
+    print(f"Service Date: {prediction.recommended_service_date}")
+    print(f"Repair Cost: ${prediction.estimated_repair_cost:,.0f}")
+    print(f"\n{prediction.message}")
+    print(f"Potential Loss: {prediction.potential_loss_if_ignored}")

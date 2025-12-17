@@ -1,0 +1,512 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║      INSTRUCCIONES DE DEPLOYMENT - VM WINDOWS DE PRODUCCIÓN                   ║
+║                    Fuel Analytics Backend v6.2.2                               ║
+║                         PowerShell Commands                                    ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+📅 Fecha: 17 de Diciembre, 2025
+🎯 Commit: 70b4bb0
+✅ Tests: 31/31 pasando (100%)
+🔧 Fixes implementados: BUG-002, BUG-024, BUG-001, BUG-003
+💻 Sistema: Windows Server VM con PowerShell
+
+═══════════════════════════════════════════════════════════════════════════════
+⚡ RESUMEN EJECUTIVO
+═══════════════════════════════════════════════════════════════════════════════
+
+CAMBIOS CRÍTICOS:
+✅ Circuit Breaker: Sistema sobrevive caídas de DB sin crash
+✅ readings_per_day: Predicciones precisas (antes: error 24x-5760x)
+✅ Baseline Persistence: Baselines guardados en MySQL (antes: se perdían)
+✅ Geofence System: Detección real vs hardcoded 30%
+
+TIEMPO ESTIMADO DE DEPLOYMENT: 10-15 minutos
+DOWNTIME ESPERADO: 2-3 minutos (restart de servicio)
+RIESGO: BAJO (cambios testeados, graceful degradation implementado)
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 PASO 1: BACKUP PRE-DEPLOYMENT (5 minutos)
+═══════════════════════════════════════════════════════════════════════════════
+
+# Abrir PowerShell como Administrador
+# Conectar a la VM (RDP o PowerShell remoting)
+
+# Navegar al directorio del proyecto
+cd C:\FuelAnalytics\Fuel-Analytics-Backend
+
+# Backup de código actual
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+Copy-Item -Path "C:\FuelAnalytics\Fuel-Analytics-Backend" -Destination "C:\FuelAnalytics\Fuel-Analytics-Backend.backup-$timestamp" -Recurse
+
+# Verificar que el backup se creó
+Get-ChildItem C:\FuelAnalytics\*.backup-* | Select-Object Name, Length, LastWriteTime
+
+# Backup de base de datos (CRÍTICO)
+# Opción A: Si MySQL está en PATH
+$backupFile = "C:\FuelAnalytics\Backups\fuel_analytics_backup_$timestamp.sql"
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe" -u root -p fuel_analytics > $backupFile
+
+# Opción B: Si necesitas especificar password (SOLO PARA TESTING, usar -p en producción)
+# & "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe" -u root --password=TU_PASSWORD fuel_analytics > $backupFile
+
+# Verificar que el backup existe
+Get-Item $backupFile | Select-Object Name, @{Name="SizeMB";Expression={[math]::Round($_.Length/1MB,2)}}, LastWriteTime
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 PASO 2: PULL CAMBIOS DESDE GITHUB (2 minutos)
+═══════════════════════════════════════════════════════════════════════════════
+
+cd C:\FuelAnalytics\Fuel-Analytics-Backend
+
+# Ver rama actual
+git branch
+
+# Asegurar que estamos en main
+git checkout main
+
+# Pull de los cambios
+git pull origin main
+
+# Verificar el commit correcto
+git log --oneline -1
+# Debe mostrar: 70b4bb0 feat: Complete critical fixes...
+
+# Verificar archivos modificados
+git diff HEAD~1 --name-only
+
+Deberías ver:
+  engine_health_engine.py
+  fleet_utilization_engine.py
+  mpg_engine.py
+  theft_detection_engine.py
+  routers/engine_health_router.py
+  migrations/001_create_baselines_table.py
+  migrations/002_create_geofences_table.py
+  tests/test_critical_fixes.py
+  tests/test_baseline_persistence.py
+  tests/test_geofence_system.py
+  + más archivos...
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 PASO 3: EJECUTAR MIGRACIONES DE BASE DE DATOS (3 minutos)
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️ IMPORTANTE: Las migraciones usan CREATE TABLE IF NOT EXISTS
+              Si ya existen las tablas, no pasa nada (son idempotentes)
+
+# Migración 1: Tabla de baselines
+python migrations\001_create_baselines_table.py
+
+Expected output:
+  🔧 BUG-001 FIX: Creating engine_health_baselines table...
+     Creating table...
+     ✅ Table created
+     Creating indexes...
+     ✅ Indexes created
+  ✅ Migration completed successfully!
+
+# Migración 2: Tabla de geofences
+python migrations\002_create_geofences_table.py
+
+Expected output:
+  🔧 BUG-003 FIX: Creating geofences table...
+     Creating table...
+     ✅ Table created
+     Creating spatial index...
+     ✅ Spatial index created
+     Inserting sample geofences...
+     ✅ Sample data inserted
+  ✅ Migration completed successfully!
+     Sample geofences: 7
+
+# Verificar tablas creadas (PowerShell con MySQL)
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SHOW TABLES LIKE '%baseline%';"
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SHOW TABLES LIKE '%geofence%';"
+
+# Ver datos de sample en geofences
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SELECT name, location_type, city, state FROM geofences;"
+
+Expected:
+  Walmart DC - Bentonville    | customer  | Bentonville | AR
+  Amazon Fulfillment - Phoenix| customer  | Phoenix     | AZ
+  Home Depot DC - Atlanta     | customer  | Atlanta     | GA
+  Main Terminal - Dallas      | terminal  | Dallas      | TX
+  ... etc
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 PASO 4: EJECUTAR TESTS EN LA VM (3 minutos)
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️ CRÍTICO: Los tests DEBEN pasar antes de restart del servicio
+
+# Instalar pytest si no está (solo primera vez)
+pip install pytest pytest-cov
+
+# Ejecutar tests implementados
+python -m pytest tests\test_critical_fixes.py tests\test_baseline_persistence.py tests\test_geofence_system.py -v
+
+Expected output:
+  ============================== 31 passed in X.XXs ==============================
+
+Si algún test falla:
+  ❌ NO CONTINUAR con el deployment
+  ❌ Investigar el error
+  ❌ Posiblemente hacer rollback
+
+# Test rápido de imports (smoke test)
+python -c "from theft_detection_engine import TheftPatternAnalyzer; from mpg_engine import predict_maintenance_timing; from engine_health_engine import EngineHealthAnalyzer; from fleet_utilization_engine import FleetUtilizationEngine; print('✅ All imports successful')"
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 PASO 5: RESTART DEL SERVICIO WINDOWS (2-3 minutos downtime)
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️ DOWNTIME ALERT: El servicio estará offline durante 2-3 minutos
+
+Opción A: Si el backend corre como Windows Service
+───────────────────────────────────────────────────
+# Restart del servicio
+Restart-Service -Name "FuelAnalyticsAPI"
+
+# Verificar estado
+Get-Service -Name "FuelAnalyticsAPI" | Select-Object Name, Status, StartType
+
+Expected:
+  Name              Status  StartType
+  ----              ------  ---------
+  FuelAnalyticsAPI  Running Automatic
+
+# Ver logs del servicio (Event Viewer)
+Get-EventLog -LogName Application -Source "FuelAnalyticsAPI" -Newest 20
+
+Opción B: Si usas NSSM (Non-Sucking Service Manager)
+─────────────────────────────────────────────────────
+# Restart con NSSM
+nssm restart FuelAnalyticsAPI
+
+# Verificar estado
+nssm status FuelAnalyticsAPI
+
+Expected: SERVICE_RUNNING
+
+# Ver logs
+Get-Content C:\FuelAnalytics\Logs\fuel-analytics-api.log -Tail 50 -Wait
+
+Opción C: Si usas Python directamente (sin servicio)
+─────────────────────────────────────────────────────
+# Detener el proceso actual (si está corriendo)
+Get-Process python | Where-Object {$_.Path -like "*FuelAnalytics*"} | Stop-Process -Force
+
+# Iniciar de nuevo
+cd C:\FuelAnalytics\Fuel-Analytics-Backend
+Start-Process python -ArgumentList "main.py" -NoNewWindow
+
+# O usar uvicorn
+Start-Process uvicorn -ArgumentList "main:app --host 0.0.0.0 --port 8000" -NoNewWindow
+
+Opción D: Si usas PM2 en Windows
+─────────────────────────────────
+pm2 restart fuel-analytics-api
+
+# Verificar estado
+pm2 status
+
+Expected:
+  fuel-analytics-api  online  12345  ...
+
+# Ver logs
+pm2 logs fuel-analytics-api --lines 50
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 PASO 6: VERIFICACIÓN POST-DEPLOYMENT (5 minutos)
+═══════════════════════════════════════════════════════════════════════════════
+
+# 1. Health Check (PowerShell)
+Invoke-RestMethod -Uri "http://localhost:8000/fuelAnalytics/api/health" -Method Get
+
+Expected:
+  status  : healthy
+  ...
+
+# Alternativa con curl (si está instalado en Windows)
+curl.exe http://localhost:8000/fuelAnalytics/api/health
+
+# 2. Verificar que Circuit Breaker funciona (PowerShell)
+Select-String -Path "C:\FuelAnalytics\Logs\fuel-analytics-api.log" -Pattern "circuit" -CaseSensitive:$false | Select-Object -Last 20
+
+# 3. Verificar que baselines se cargan
+Select-String -Path "C:\FuelAnalytics\Logs\fuel-analytics-api.log" -Pattern "baseline" -CaseSensitive:$false | Select-Object -Last 20
+
+Deberías ver:
+  📥 Loaded N baselines for TRUCK_ID from DB
+  💾 Saved N baselines for TRUCK_ID to DB
+
+# 4. Verificar geofences
+Select-String -Path "C:\FuelAnalytics\Logs\fuel-analytics-api.log" -Pattern "geofence" -CaseSensitive:$false | Select-Object -Last 20
+
+Deberías ver (cuando hay idle en location conocida):
+  📍 Location (36.3729, -94.2088) inside geofence: Walmart DC
+
+# 5. Test endpoint específico (DTC)
+Invoke-RestMethod -Uri "http://localhost:8000/fuelAnalytics/api/v2/driver-alerts/GP9677/dtc-report" -Method Get
+
+Expected: 200 OK (no 404)
+
+# 6. Test engine health con baselines
+Invoke-RestMethod -Uri "http://localhost:8000/fuelAnalytics/api/engine-health/truck/GP9677?include_history=true" -Method Get
+
+Expected: JSON con baselines cargados
+
+# 7. Monitor logs en tiempo real (PowerShell)
+Get-Content C:\FuelAnalytics\Logs\fuel-analytics-api.log -Tail 50 -Wait
+
+Buscar señales de problemas:
+  ❌ "ERROR" (excepto db connection errors esperados durante testing)
+  ❌ "CRITICAL"
+  ❌ Stack traces
+  ✅ "BUG-001", "BUG-002", "BUG-003", "BUG-024" (confirmación de fixes activos)
+  ✅ "💾 Saved", "📥 Loaded" (baselines working)
+  ✅ "📍 Location" (geofences working)
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 PASO 7: TESTING FUNCIONAL (10 minutos)
+═══════════════════════════════════════════════════════════════════════════════
+
+# Test 1: Baseline Persistence
+───────────────────────────────
+# Hacer request a engine health (PowerShell)
+Invoke-RestMethod -Uri "http://localhost:8000/fuelAnalytics/api/engine-health/truck/GP9677" -Method Get
+
+# Verificar en DB que se guardó
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SELECT truck_id, sensor_name, mean_value, sample_count FROM engine_health_baselines WHERE truck_id='GP9677';"
+
+Expected: Debe haber filas con oil_pressure_psi, coolant_temp_f, battery_voltage
+
+# Test 2: Circuit Breaker (simular DB failure)
+────────────────────────────────────────────────
+# Detener MySQL temporalmente
+Stop-Service -Name "MySQL80"
+
+# Hacer request
+Invoke-RestMethod -Uri "http://localhost:8000/fuelAnalytics/api/fleet-utilization/summary" -Method Get
+
+# Verificar logs - debe haber fallado gracefully
+Select-String -Path "C:\FuelAnalytics\Logs\fuel-analytics-api.log" -Pattern "Circuit" | Select-Object -Last 5
+
+Expected:
+  ⛔ Circuit breaker OPEN - cannot load/persist...
+
+# Restaurar MySQL
+Start-Service -Name "MySQL80"
+
+# Test 3: Geofence Detection
+─────────────────────────────
+# Ver si hay trucks idle en ubicaciones conocidas
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SELECT unit_id, latitude, longitude, speed_mph FROM telemetria_trucks WHERE speed_mph < 5 AND latitude IS NOT NULL LIMIT 10;"
+
+# Copiar una lat/lon y verificar contra geofences
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SELECT name, center_lat, center_lon, radius_meters FROM geofences LIMIT 5;"
+
+# Test 4: readings_per_day Validation
+──────────────────────────────────────
+# Verificar que warnings aparezcan si hay datos sospechosos
+Select-String -Path "C:\FuelAnalytics\Logs\fuel-analytics-api.log" -Pattern "readings_per_day" | Select-Object -Last 10
+
+═══════════════════════════════════════════════════════════════════════════════
+🚨 TROUBLESHOOTING - SI ALGO SALE MAL (Windows PowerShell)
+═══════════════════════════════════════════════════════════════════════════════
+
+PROBLEMA 1: Servicio no inicia después de restart
+──────────────────────────────────────────────────
+# Ver logs del servicio
+Get-EventLog -LogName Application -Source "FuelAnalyticsAPI" -Newest 100
+
+# Ver archivo de logs
+Get-Content C:\FuelAnalytics\Logs\fuel-analytics-api.log -Tail 100
+
+# Verificar sintaxis Python
+python -m py_compile theft_detection_engine.py
+python -m py_compile mpg_engine.py
+python -m py_compile engine_health_engine.py
+
+# Si hay error de sintaxis → ROLLBACK
+cd C:\FuelAnalytics
+Remove-Item -Path "Fuel-Analytics-Backend" -Recurse -Force
+$latestBackup = Get-ChildItem "Fuel-Analytics-Backend.backup-*" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Rename-Item -Path $latestBackup.FullName -NewName "Fuel-Analytics-Backend"
+Restart-Service -Name "FuelAnalyticsAPI"
+
+PROBLEMA 2: Migraciones fallan
+──────────────────────────────
+# Verificar variables de entorno
+Get-ChildItem Env:MYSQL*
+
+# Verificar conexión a MySQL
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SELECT 1;"
+
+# Si tabla ya existe (error esperado)
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SHOW TABLES LIKE 'engine_health_baselines';"
+
+Si ya existe → ESTÁ BIEN, continuar
+
+PROBLEMA 3: Tests fallan en VM
+────────────────────────────────
+# Verificar dependencias (PowerShell)
+pip list | Select-String -Pattern "pytest|sqlalchemy|pymysql"
+
+# Instalar si falta
+pip install pytest sqlalchemy pymysql
+
+# Si falla por DB connection en tests
+# → Los tests usan mocks, no deberían necesitar DB real
+# → Verificar imports
+
+PROBLEMA 4: Endpoints devuelven 500
+────────────────────────────────────
+# Ver stack trace completo
+Get-Content C:\FuelAnalytics\Logs\fuel-analytics-api.log -Tail 100
+
+# Verificar tabla existe
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SHOW TABLES;"
+
+# Test manual de función (PowerShell)
+python -c "from database_pool import get_local_engine; engine = get_local_engine(); print(engine)"
+
+Expected: <Engine ...>  # Debe mostrar conexión válida
+
+PROBLEMA 5: Baselines no se guardan
+────────────────────────────────────
+# Verificar permisos de tabla
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SHOW GRANTS FOR 'root'@'localhost';"
+
+# Intentar INSERT manual
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "INSERT INTO engine_health_baselines (truck_id, sensor_name, mean_value, std_dev, min_value, max_value, sample_count, days_analyzed) VALUES ('TEST123', 'oil_pressure_psi', 45.0, 5.0, 35.0, 60.0, 100, 30);"
+
+# Verificar que se insertó
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics -e "SELECT * FROM engine_health_baselines WHERE truck_id='TEST123';"
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 ROLLBACK PROCEDURE WINDOWS (SI TODO FALLA)
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️ ÚLTIMO RECURSO: Solo si deployment causa problemas críticos
+
+# 1. Detener servicio
+Stop-Service -Name "FuelAnalyticsAPI"
+
+# 2. Restaurar código desde backup
+cd C:\FuelAnalytics
+Remove-Item -Path "Fuel-Analytics-Backend" -Recurse -Force
+
+# Restaurar desde backup más reciente
+$latestBackup = Get-ChildItem "Fuel-Analytics-Backend.backup-*" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Copy-Item -Path $latestBackup.FullName -Destination "Fuel-Analytics-Backend" -Recurse
+
+# 3. Restaurar base de datos (SOLO SI MIGRACIONES CAUSARON PROBLEMAS)
+$latestDbBackup = Get-ChildItem "C:\FuelAnalytics\Backups\fuel_analytics_backup_*.sql" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p fuel_analytics < $latestDbBackup.FullName
+
+# 4. Restart servicio
+Start-Service -Name "FuelAnalyticsAPI"
+
+# 5. Verificar
+Invoke-RestMethod -Uri "http://localhost:8000/fuelAnalytics/api/health" -Method Get
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ CHECKLIST FINAL
+═══════════════════════════════════════════════════════════════════════════════
+
+Pre-Deployment:
+□ Backup de código creado (PowerShell)
+□ Backup de base de datos creado
+□ Git pull exitoso (commit 70b4bb0)
+
+Deployment:
+□ Migración 001 (baselines) ejecutada sin errores
+□ Migración 002 (geofences) ejecutada sin errores
+□ 31/31 tests pasando en la VM Windows
+□ Servicio Windows reiniciado exitosamente
+
+Post-Deployment:
+□ Health check responde 200 OK (Invoke-RestMethod)
+□ Logs muestran "💾 Saved baselines"
+□ Logs muestran "📥 Loaded baselines"
+□ Logs muestran "📍 Location inside geofence" (cuando aplica)
+□ No hay errors críticos en logs (últimos 100 lines)
+□ Endpoints principales funcionan (DTC, engine-health, fleet-utilization)
+□ Baselines visibles en MySQL
+□ Geofences visibles en MySQL (7 sample geofences)
+
+Monitoring (Primeras 24 horas):
+□ Revisar logs cada 4 horas (Get-Content con -Wait)
+□ Verificar que baselines se actualizan
+□ Confirmar que no hay circuit breaker OPEN constante
+□ Verificar métricas de performance (response times)
+
+═══════════════════════════════════════════════════════════════════════════════
+📞 CONTACTO & SOPORTE
+═══════════════════════════════════════════════════════════════════════════════
+
+Si encuentras problemas:
+1. Revisar logs: C:\FuelAnalytics\Logs\fuel-analytics-api.log
+2. Verificar IMPLEMENTATION_SUMMARY_v6.2.2.md para detalles técnicos
+3. Ejecutar tests en VM para diagnóstico
+4. En último caso: Rollback procedure (PowerShell)
+
+Archivos de referencia en el repo:
+- IMPLEMENTATION_SUMMARY_v6.2.2.md (documentación completa)
+- IMPLEMENTATION_PLAN.md (plan original)
+- fuel_analytics_config.py (configuración centralizada)
+
+═══════════════════════════════════════════════════════════════════════════════
+💡 NOTAS IMPORTANTES PARA WINDOWS
+═══════════════════════════════════════════════════════════════════════════════
+
+1. RUTAS DE ARCHIVOS:
+   - Backend: C:\FuelAnalytics\Fuel-Analytics-Backend
+   - Logs: C:\FuelAnalytics\Logs\fuel-analytics-api.log
+   - Backups: C:\FuelAnalytics\Backups\
+   - MySQL: C:\Program Files\MySQL\MySQL Server 8.0\bin\
+
+2. SERVICIOS WINDOWS:
+   - Nombre del servicio API: "FuelAnalyticsAPI" (ajustar según tu configuración)
+   - Nombre del servicio MySQL: "MySQL80" (ajustar según versión)
+   - Comandos: Start-Service, Stop-Service, Restart-Service, Get-Service
+
+3. POWERSHELL TIPS:
+   - Ejecutar como Administrador
+   - Usar & para ejecutar .exe con espacios en la ruta
+   - Variables con $timestamp, $latestBackup, etc.
+   - -Recurse para copiar directorios completos
+
+4. MYSQL EN WINDOWS:
+   - Siempre usar ruta completa al ejecutable
+   - Opción -p para password interactivo (más seguro)
+   - Evitar --password=XXX en scripts de producción
+
+5. PYTHON EN WINDOWS:
+   - Usar "python" no "python3"
+   - Usar "\" para separadores de ruta (migrations\001_...)
+   - pip install (no pip3)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ Deployment completado: _____________ (fecha/hora)
+✅ Verificado por: ____________________
+✅ Todo funcionando: □ SÍ  □ NO
+
+Notas:
+_____________________________________________________________________________
+_____________________________________________________________________________
+_____________________________________________________________________________
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ Deployment completado: _____________ (fecha/hora)
+✅ Verificado por: ____________________
+✅ Todo funcionando: □ SÍ  □ NO
+
+Notas:
+_____________________________________________________________________________
+_____________________________________________________________________________
+_____________________________________________________________________________

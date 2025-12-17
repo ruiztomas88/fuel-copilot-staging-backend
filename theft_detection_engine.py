@@ -49,9 +49,15 @@ except ImportError:
     def get_local_engine():
         return None
 
+
 # 🆕 v6.2.2: Circuit Breaker for database resilience (BUG-002 fix)
 try:
-    from circuit_breaker import CircuitBreaker, CircuitBreakerOpenError, get_circuit_breaker
+    from circuit_breaker import (
+        CircuitBreaker,
+        CircuitBreakerOpenError,
+        get_circuit_breaker,
+    )
+
     db_main_breaker = get_circuit_breaker("db_main", None)
     CircuitBreakerOpen = CircuitBreakerOpenError  # Alias
     CIRCUIT_BREAKER_AVAILABLE = True
@@ -234,7 +240,7 @@ class TheftPatternAnalyzer:
     def _load_from_db(self):
         """
         🔧 v6.2.2: Load theft history from database with circuit breaker protection.
-        
+
         BUG-002 FIX: Prevents silent failures when DB is down.
         """
         if self._loaded_from_db:
@@ -246,7 +252,7 @@ class TheftPatternAnalyzer:
                 db_main_breaker.execute(self._do_load_from_db)
             else:
                 self._do_load_from_db()
-                
+
         except CircuitBreakerOpen as e:
             logger.warning(
                 f"⛔ Circuit breaker OPEN - cannot load theft history: {e}. "
@@ -263,7 +269,7 @@ class TheftPatternAnalyzer:
         if not engine:
             logger.debug("No database engine available for theft history")
             return
-        
+
         try:
             with engine.connect() as conn:
                 # Try to load from theft_events table if it exists
@@ -314,17 +320,19 @@ class TheftPatternAnalyzer:
     ):
         """
         🔧 v6.2.2: Persist theft event to database with circuit breaker protection.
-        
+
         BUG-002 FIX: Graceful degradation if DB fails.
         """
         try:
             if CIRCUIT_BREAKER_AVAILABLE:
                 db_main_breaker.execute(
-                    lambda: self._do_persist_event(truck_id, timestamp, drop_gal, confidence)
+                    lambda: self._do_persist_event(
+                        truck_id, timestamp, drop_gal, confidence
+                    )
                 )
             else:
                 self._do_persist_event(truck_id, timestamp, drop_gal, confidence)
-                
+
         except CircuitBreakerOpen as e:
             logger.error(
                 f"⛔ Circuit breaker OPEN - cannot persist theft event for {truck_id}. "
@@ -340,7 +348,7 @@ class TheftPatternAnalyzer:
         engine = get_local_engine()
         if not engine:
             return
-        
+
         try:
             with engine.connect() as conn:
                 # Insert into theft_events table (create if not exists)

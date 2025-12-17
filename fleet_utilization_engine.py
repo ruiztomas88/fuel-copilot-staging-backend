@@ -432,7 +432,7 @@ class FleetUtilizationEngine:
     def _is_productive_location(self, location: Tuple[float, float]) -> bool:
         """
         🔧 v6.2.2: BUG-003 FIX - Check if location is within a productive geofence.
-        
+
         Uses actual geofence database instead of hardcoded 30% assumption.
         Implements point-in-circle algorithm for fast lookup.
 
@@ -444,35 +444,36 @@ class FleetUtilizationEngine:
         """
         if not location or len(location) != 2:
             return False
-        
+
         lat, lon = location
-        
+
         # Invalid coordinates
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
             return False
-        
+
         try:
             from database_pool import get_local_engine
             from sqlalchemy import text
             import math
-            
+
             engine = get_local_engine()
             if not engine:
                 # No DB connection - use conservative default
                 return False
-            
+
             with engine.connect() as conn:
                 # Use Haversine formula to find geofences within reasonable distance
                 # First, quick filter using bounding box (much faster than full distance calculation)
-                
+
                 # Approximate: 1 degree latitude ≈ 111km
                 # 1 degree longitude varies by latitude, but we use conservative bounds
                 max_search_radius_km = 1.0  # 1km max geofence radius
                 lat_delta = max_search_radius_km / 111.0
                 lon_delta = max_search_radius_km / (111.0 * math.cos(math.radians(lat)))
-                
+
                 result = conn.execute(
-                    text("""
+                    text(
+                        """
                         SELECT id, name, location_type, is_productive, 
                                center_lat, center_lon, radius_meters
                         FROM geofences
@@ -480,26 +481,27 @@ class FleetUtilizationEngine:
                           AND center_lat BETWEEN :min_lat AND :max_lat
                           AND center_lon BETWEEN :min_lon AND :max_lon
                         LIMIT 50
-                    """),
+                    """
+                    ),
                     {
                         "min_lat": lat - lat_delta,
                         "max_lat": lat + lat_delta,
                         "min_lon": lon - lon_delta,
-                        "max_lon": lon + lon_delta
-                    }
+                        "max_lon": lon + lon_delta,
+                    },
                 )
-                
+
                 # Check each candidate geofence with precise distance calculation
                 for row in result:
                     geofence_lat = float(row[4])
                     geofence_lon = float(row[5])
                     radius_meters = int(row[6]) if row[6] else 500  # Default 500m
-                    
+
                     # Haversine distance calculation
                     distance_meters = self._haversine_distance(
                         lat, lon, geofence_lat, geofence_lon
                     )
-                    
+
                     if distance_meters <= radius_meters:
                         # Inside productive geofence!
                         logger.debug(
@@ -507,10 +509,10 @@ class FleetUtilizationEngine:
                             f"{row[1]} (distance: {distance_meters:.0f}m)"
                         )
                         return True
-                
+
                 # Not inside any productive geofence
                 return False
-                
+
         except Exception as e:
             logger.debug(f"Geofence lookup failed: {e}")
             # Graceful fallback to conservative default
@@ -521,29 +523,31 @@ class FleetUtilizationEngine:
     ) -> float:
         """
         Calculate distance between two points using Haversine formula.
-        
+
         Args:
             lat1, lon1: First point (degrees)
             lat2, lon2: Second point (degrees)
-        
+
         Returns:
             Distance in meters
         """
         import math
-        
+
         R = 6371000  # Earth radius in meters
-        
+
         # Convert to radians
         phi1 = math.radians(lat1)
         phi2 = math.radians(lat2)
         delta_phi = math.radians(lat2 - lat1)
         delta_lambda = math.radians(lon2 - lon1)
-        
+
         # Haversine formula
-        a = (math.sin(delta_phi / 2) ** 2 +
-             math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2)
+        a = (
+            math.sin(delta_phi / 2) ** 2
+            + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+        )
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-        
+
         distance = R * c
         return distance
 

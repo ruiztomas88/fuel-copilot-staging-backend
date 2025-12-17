@@ -89,13 +89,13 @@ ON DUPLICATE KEY UPDATE updated_at = NOW();
 def run_migration():
     """Execute the migration"""
     print("🔧 BUG-003 FIX: Creating geofences table...")
-    
+
     engine = get_local_engine()
     if not engine:
         print("❌ ERROR: Could not connect to database")
         print("   Set MYSQL_PASSWORD environment variable")
         return False
-    
+
     try:
         with engine.connect() as conn:
             # Create table
@@ -103,7 +103,7 @@ def run_migration():
             conn.execute(text(CREATE_TABLE_SQL))
             conn.commit()
             print("   ✅ Table created")
-            
+
             # Create spatial index
             print("   Creating spatial index...")
             try:
@@ -112,38 +112,45 @@ def run_migration():
                 print("   ✅ Spatial index created")
             except Exception as e:
                 print(f"   ⚠️  Spatial index skipped (may already exist): {e}")
-            
+
             # Insert sample data
             print("   Inserting sample geofences...")
             conn.execute(text(INSERT_SAMPLE_DATA_SQL))
             conn.commit()
             print("   ✅ Sample data inserted")
-            
+
             # Verify
-            result = conn.execute(text("""
+            result = conn.execute(
+                text(
+                    """
                 SELECT COUNT(*) as count 
                 FROM information_schema.tables 
                 WHERE table_name = 'geofences'
-            """))
+            """
+                )
+            )
             count = result.scalar()
-            
+
             if count > 0:
                 # Count geofences
                 result = conn.execute(text("SELECT COUNT(*) FROM geofences"))
                 geofence_count = result.scalar()
-                
+
                 print(f"\n✅ Migration completed successfully!")
                 print(f"   Table: geofences")
                 print(f"   Sample geofences: {geofence_count}")
-                print(f"   Columns: name, location_type, center_lat, center_lon, radius_meters, ...")
+                print(
+                    f"   Columns: name, location_type, center_lat, center_lon, radius_meters, ..."
+                )
                 return True
             else:
                 print("\n❌ Migration failed - table not found")
                 return False
-                
+
     except Exception as e:
         print(f"\n❌ Migration failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
