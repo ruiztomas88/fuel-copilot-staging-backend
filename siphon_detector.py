@@ -373,7 +373,11 @@ class SlowSiphonDetector:
 
         # Filter to last N days
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        recent = [h for h in history if datetime.fromisoformat(h.date).replace(tzinfo=timezone.utc) >= cutoff]
+        recent = [
+            h
+            for h in history
+            if datetime.fromisoformat(h.date).replace(tzinfo=timezone.utc) >= cutoff
+        ]
 
         total_unexplained = sum(h.unexplained_loss_gal for h in recent)
         suspicious = sum(1 for h in recent if h.unexplained_loss_gal > 2.0)

@@ -1579,3 +1579,443 @@ async def get_fleet_driver_behavior(
     finally:
         if conn:
             conn.close()
+
+
+# =============================================================================
+# RUL PREDICTOR ENDPOINTS
+# =============================================================================
+@router.get(
+    "/rul-predictions/{truck_id}",
+    summary="Get RUL Predictions",
+    tags=["Predictive Maintenance"],
+)
+async def get_rul_predictions(
+    truck_id: str,
+    component: Optional[str] = Query(
+        None, description="Specific component to predict (turbo, oil, coolant, etc.)"
+    ),
+):
+    """
+    Get Remaining Useful Life (RUL) predictions for truck components.
+
+    Predicts days and miles until component failure using:
+    - Linear degradation model (constant rate)
+    - Exponential degradation model (accelerating failure)
+
+    Returns predictions with confidence scores and recommended service dates.
+    """
+    try:
+        from rul_predictor import RULPredictor
+        import mysql.connector
+        import os
+
+        predictor = RULPredictor()
+
+        # Connect to local fuel_copilot database
+        DB_CONFIG = {
+            "host": "localhost",
+            "port": 3306,
+            "user": os.getenv("MYSQL_USER", "fuel_admin"),
+            "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+            "database": "fuel_copilot",
+        }
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+
+        # Get component health history from database
+        # Query last 60 days of health scores
+        query = """
+        SELECT 
+            timestamp,
+            turbo_health,
+            oil_consumption_health,
+            coolant_leak_health,
+            def_system_health,
+            battery_health,
+            alternator_health
+        FROM component_health
+        WHERE truck_id = %s
+        AND timestamp >= DATE_SUB(NOW(), INTERVAL 60 DAY)
+        ORDER BY timestamp ASC
+        """
+
+        cursor.execute(query, (truck_id,))
+        rows = cursor.fetchall()
+
+        if not rows:
+            return {
+                "truck_id": truck_id,
+                "predictions": [],
+                "message": "No health history found for this truck",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        # Build history dict for each component
+        component_histories = {
+            "turbo_health": [],
+            "oil_consumption_health": [],
+            "coolant_leak_health": [],
+            "def_system_health": [],
+            "battery_health": [],
+            "alternator_health": [],
+        }
+
+        for row in rows:
+            timestamp = row["timestamp"]
+            for comp in component_histories.keys():
+                if row[comp] is not None:
+                    component_histories[comp].append((timestamp, row[comp]))
+
+        # Generate predictions
+        predictions = []
+
+        components_to_check = [component] if component else component_histories.keys()
+
+        for comp_name in components_to_check:
+            history = component_histories.get(comp_name, [])
+            if not history:
+                continue
+
+            prediction = predictor.predict_rul(comp_name, history)
+
+            if prediction:
+                pred_dict = {
+                    "component": prediction.component,
+                    "current_score": prediction.current_score,
+                    "model_used": prediction.model_used,
+                    "rul_days": prediction.rul_days,
+                    "rul_miles": prediction.rul_miles,
+                    "degradation_rate_per_day": prediction.degradation_rate_per_day,
+                    "confidence": prediction.confidence,
+                    "recommended_service_date": (
+                        prediction.recommended_service_date.isoformat()
+                        if prediction.recommended_service_date
+                        else None
+                    ),
+                    "estimated_repair_cost": prediction.estimated_repair_cost,
+                    "status": prediction.status,
+                    "message": prediction.message,
+                }
+                predictions.append(pred_dict)
+
+        return {
+            "truck_id": truck_id,
+            "predictions": predictions,
+            "count": len(predictions),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get RUL predictions for {truck_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get RUL predictions: {str(e)}"
+        )
+    finally:
+        if "cursor" in locals():
+            cursor.close()
+        if "conn" in locals():
+            conn.close()
+
+
+# =============================================================================
+# SIPHONING DETECTION ENDPOINTS
+# =============================================================================
+@router.get(
+    "/siphoning-alerts",
+    summary="Get Siphoning Alerts",
+    tags=["Theft Detection"],
+)
+async def get_siphoning_alerts(
+    days: int = Query(7, ge=1, le=30, description="Number of days to analyze"),
+    truck_id: Optional[str] = Query(None, description="Filter by specific truck"),
+    min_confidence: float = Query(
+        0.5, ge=0.0, le=1.0, description="Minimum confidence threshold"
+    ),
+):
+    """
+    Get slow siphoning detection alerts for the fleet.
+
+    Detects gradual fuel theft (2%/day over multiple days) that evades instant detection.
+    Returns alerts with confidence scores and recommendations.
+    """
+    try:
+        from siphon_detector import SlowSiphonDetector
+        import mysql.connector
+        import os
+
+        detector = SlowSiphonDetector()
+
+        # Connect to local fuel_copilot database
+        DB_CONFIG = {
+            "host": "localhost",
+            "port": 3306,
+            "user": os.getenv("MYSQL_USER", "fuel_admin"),
+            "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+            "database": "fuel_copilot",
+        }
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+
+        # Get fuel readings for analysis
+        truck_filter = "AND truck_id = %s" if truck_id else ""
+        params = [days]
+        if truck_id:
+            params.append(truck_id)
+
+        query = f"""
+        SELECT 
+            truck_id,
+            timestamp,
+            fuel_level_pct,
+            fuel_level_liters,
+            odometer_km
+        FROM fuel_readings
+        WHERE timestamp >= DATE_SUB(NOW(), INTERVAL %s DAY)
+        {truck_filter}
+        ORDER BY truck_id, timestamp ASC
+        """
+
+        cursor.execute(query, tuple(params))
+        rows = cursor.fetchall()
+
+        if not rows:
+            return {
+                "alerts": [],
+                "period_days": days,
+                "message": "No fuel data found for analysis",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        # Group by truck
+        truck_readings = {}
+        for row in rows:
+            tid = row["truck_id"]
+            if tid not in truck_readings:
+                truck_readings[tid] = []
+            truck_readings[tid].append(row)
+
+        # Analyze each truck
+        alerts = []
+        for tid, readings in truck_readings.items():
+            # Assume 200 gallon tank (standard semi truck)
+            tank_capacity_gal = 200.0
+
+            alert = detector.analyze(tid, readings, tank_capacity_gal)
+
+            if alert and alert.confidence >= min_confidence:
+                alert_dict = {
+                    "truck_id": tid,
+                    "start_date": alert.start_date,
+                    "end_date": alert.end_date,
+                    "period_days": alert.period_days,
+                    "total_gallons_lost": alert.total_gallons_lost,
+                    "avg_daily_loss_gal": alert.avg_daily_loss_gal,
+                    "confidence": alert.confidence,
+                    "pattern_description": alert.pattern_description,
+                    "recommendation": alert.recommendation,
+                }
+                alerts.append(alert_dict)
+
+        # Sort by confidence (highest first)
+        alerts.sort(key=lambda x: x["confidence"], reverse=True)
+
+        return {
+            "alerts": alerts,
+            "count": len(alerts),
+            "period_days": days,
+            "total_loss_gallons": sum(a["total_gallons_lost"] for a in alerts),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get siphoning alerts: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get siphoning alerts: {str(e)}"
+        )
+    finally:
+        if "cursor" in locals():
+            cursor.close()
+        if "conn" in locals():
+            conn.close()
+
+
+# =============================================================================
+# MPG CONTEXT ENDPOINTS
+# =============================================================================
+@router.get(
+    "/mpg-context/{truck_id}",
+    summary="Get MPG Context",
+    tags=["Fuel Efficiency"],
+)
+async def get_mpg_context(
+    truck_id: str,
+    days: int = Query(7, ge=1, le=30, description="Number of days to analyze"),
+):
+    """
+    Get MPG context explanation for driver scoring.
+
+    Returns route-specific baselines and adjustment factors:
+    - Route type (Highway, City, Mountain, etc.)
+    - Load factors (Empty, Normal, Heavy, Overloaded)
+    - Weather factors (Clear, Rain, Snow, etc.)
+    - Terrain factors (Flat, Rolling, Hilly, Mountainous)
+
+    Helps explain why expected MPG differs from baseline.
+    """
+    try:
+        from mpg_context import (
+            MPGContextEngine,
+            RouteContext,
+            RouteType,
+            WeatherCondition,
+        )
+        import mysql.connector
+        import os
+
+        engine = MPGContextEngine()
+
+        # Connect to local fuel_copilot database
+        DB_CONFIG = {
+            "host": "localhost",
+            "port": 3306,
+            "user": os.getenv("MYSQL_USER", "fuel_admin"),
+            "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+            "database": "fuel_copilot",
+        }
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+
+        # Get recent trip data
+        query = """
+        SELECT 
+            timestamp,
+            avg_speed_mph,
+            stop_count,
+            distance_miles,
+            elevation_change_ft,
+            is_loaded,
+            load_weight_lbs,
+            weather_condition,
+            ambient_temp_f,
+            actual_mpg
+        FROM trip_data
+        WHERE truck_id = %s
+        AND timestamp >= DATE_SUB(NOW(), INTERVAL %s DAY)
+        ORDER BY timestamp DESC
+        LIMIT 50
+        """
+
+        cursor.execute(query, (truck_id, days))
+        rows = cursor.fetchall()
+
+        if not rows:
+            return {
+                "truck_id": truck_id,
+                "contexts": [],
+                "message": "No trip data found for this truck",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        # Analyze contexts
+        contexts = []
+
+        for row in rows:
+            # Classify route
+            route_type = engine.classify_route(
+                avg_speed_mph=row["avg_speed_mph"] or 45.0,
+                stop_count=row["stop_count"] or 10,
+                distance_miles=row["distance_miles"] or 100.0,
+                elevation_change_ft=row["elevation_change_ft"] or 0.0,
+            )
+
+            # Map weather string to enum
+            weather_map = {
+                "clear": WeatherCondition.CLEAR,
+                "rain": WeatherCondition.RAIN,
+                "snow": WeatherCondition.SNOW,
+                "wind": WeatherCondition.WIND,
+                "extreme_cold": WeatherCondition.EXTREME_COLD,
+                "extreme_heat": WeatherCondition.EXTREME_HEAT,
+            }
+            weather = weather_map.get(
+                row.get("weather_condition", "clear"), WeatherCondition.CLEAR
+            )
+
+            # Create context
+            context = RouteContext(
+                route_type=route_type,
+                avg_speed_mph=row["avg_speed_mph"] or 45.0,
+                stop_count=row["stop_count"] or 10,
+                elevation_change_ft=row["elevation_change_ft"] or 0.0,
+                distance_miles=row["distance_miles"] or 100.0,
+                is_loaded=row.get("is_loaded", True),
+                load_weight_lbs=row.get("load_weight_lbs"),
+                weather=weather,
+                ambient_temp_f=row.get("ambient_temp_f"),
+            )
+
+            # Calculate expected MPG
+            result = engine.calculate_expected_mpg(context)
+
+            context_dict = {
+                "timestamp": row["timestamp"].isoformat(),
+                "route_type": route_type.value,
+                "baseline_mpg": result.baseline_mpg,
+                "expected_mpg": result.expected_mpg,
+                "actual_mpg": row.get("actual_mpg"),
+                "route_factor": result.route_factor,
+                "load_factor": result.load_factor,
+                "weather_factor": result.weather_factor,
+                "terrain_factor": result.terrain_factor,
+                "combined_factor": result.combined_factor,
+                "confidence": result.confidence,
+                "explanation": result.explanation,
+            }
+            contexts.append(context_dict)
+
+        # Calculate averages
+        avg_expected_mpg = (
+            sum(c["expected_mpg"] for c in contexts) / len(contexts) if contexts else 0
+        )
+        avg_actual_mpg = (
+            sum(c.get("actual_mpg", 0) for c in contexts if c.get("actual_mpg"))
+            / len([c for c in contexts if c.get("actual_mpg")])
+            if any(c.get("actual_mpg") for c in contexts)
+            else 0
+        )
+
+        return {
+            "truck_id": truck_id,
+            "contexts": contexts,
+            "summary": {
+                "period_days": days,
+                "trip_count": len(contexts),
+                "avg_expected_mpg": round(avg_expected_mpg, 2),
+                "avg_actual_mpg": (
+                    round(avg_actual_mpg, 2) if avg_actual_mpg > 0 else None
+                ),
+                "performance_vs_expected": (
+                    round(
+                        ((avg_actual_mpg - avg_expected_mpg) / avg_expected_mpg * 100),
+                        1,
+                    )
+                    if avg_expected_mpg > 0 and avg_actual_mpg > 0
+                    else None
+                ),
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get MPG context for {truck_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get MPG context: {str(e)}"
+        )
+    finally:
+        if "cursor" in locals():
+            cursor.close()
+        if "conn" in locals():
+            conn.close()

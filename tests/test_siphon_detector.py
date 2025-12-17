@@ -212,7 +212,7 @@ class TestSlowSiphonDetector:
         """Test daily summary generation"""
         detector = SlowSiphonDetector()
         from datetime import datetime, timedelta, timezone
-        
+
         today = datetime.now(timezone.utc).date()
         yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
 
