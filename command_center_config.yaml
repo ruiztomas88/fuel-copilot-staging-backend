@@ -1,0 +1,188 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fleet Command Center Configuration v1.5.0
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# This file allows fleet administrators to customize thresholds, weights,
+# and decision rules without modifying code.
+#
+# Place this file in one of these locations:
+#   - ./command_center_config.yaml (project root)
+#   - ./config/command_center_config.yaml
+#   - Same directory as fleet_command_center.py
+#
+# All values shown are defaults. Uncomment and modify as needed.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Sensor Valid Ranges
+# Define min/max values for sensor validation. Values outside these ranges
+# are considered invalid and will be filtered out.
+# ───────────────────────────────────────────────────────────────────────────────
+# sensor_valid_ranges:
+#   oil_press:
+#     min: 0
+#     max: 150
+#     unit: "PSI"
+#   oil_temp:
+#     min: 0
+#     max: 350
+#     unit: "°F"
+#   cool_temp:
+#     min: 0
+#     max: 300
+#     unit: "°F"
+#   trams_t:
+#     min: 0
+#     max: 350
+#     unit: "°F"
+#   def_level:
+#     min: 0
+#     max: 100
+#     unit: "%"
+#   voltage:
+#     min: 0
+#     max: 30
+#     unit: "V"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Sensor Windows (FASE 4.2)
+# Different sensors need different time windows for meaningful analysis.
+# window_seconds: Time window for collecting readings
+# min_readings: Minimum readings needed for analysis
+# type: fast (seconds), medium (minutes-hours), slow (hours-days)
+# ───────────────────────────────────────────────────────────────────────────────
+# sensor_windows:
+#   oil_press:
+#     window_seconds: 30
+#     min_readings: 3
+#     type: "fast"
+#   cool_temp:
+#     window_seconds: 60
+#     min_readings: 3
+#     type: "fast"
+#   def_level:
+#     window_seconds: 3600
+#     min_readings: 2
+#     type: "medium"
+#   mpg:
+#     window_seconds: 86400
+#     min_readings: 5
+#     type: "slow"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Persistence Thresholds (FASE 4.1)
+# Require multiple consecutive readings before triggering critical actions.
+# This prevents false alarms from sensor glitches.
+# ───────────────────────────────────────────────────────────────────────────────
+# persistence_thresholds:
+#   oil_press:
+#     min_readings_for_critical: 2
+#     confirmation_window_sec: 60
+#   cool_temp:
+#     min_readings_for_critical: 2
+#     confirmation_window_sec: 120
+#   voltage:
+#     min_readings_for_critical: 2
+#     confirmation_window_sec: 60
+#   def_level:
+#     min_readings_for_critical: 3
+#     confirmation_window_sec: 3600
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Offline Detection Thresholds (FASE 4.7)
+# Configure when trucks are considered offline/stale.
+# ───────────────────────────────────────────────────────────────────────────────
+# offline_thresholds:
+#   hours_no_data_warning: 2      # Warning after 2 hours without data
+#   hours_no_data_critical: 12    # Critical after 12 hours
+#   gps_stale_hours: 1            # GPS considered stale after 1 hour
+
+# ───────────────────────────────────────────────────────────────────────────────
+# DEF Consumption Configuration (FASE 5.3)
+# Adjust these based on your fleet's actual DEF consumption patterns.
+# ───────────────────────────────────────────────────────────────────────────────
+# def_consumption_config:
+#   tank_capacity_liters: 75          # Typical DEF tank size
+#   avg_consumption_pct_diesel: 2.5   # DEF as % of diesel consumption
+#   avg_daily_diesel_liters: 150      # ~40 gallons/day for Class 8
+#   derate_threshold_pct: 5           # Truck derates at this DEF level
+#   warning_threshold_pct: 15         # Warning issued at this level
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Time Horizon Weights (FASE 5.5)
+# Customize how issues are prioritized based on urgency timeframe.
+# ───────────────────────────────────────────────────────────────────────────────
+# time_horizon_weights:
+#   immediate:    # 0-24 hours
+#     days_weight: 0.50
+#     criticality_weight: 0.30
+#     cost_weight: 0.15
+#     anomaly_weight: 0.05
+#   short_term:   # 1-7 days
+#     days_weight: 0.40
+#     criticality_weight: 0.25
+#     cost_weight: 0.20
+#     anomaly_weight: 0.15
+#   medium_term:  # 7-30 days
+#     days_weight: 0.30
+#     criticality_weight: 0.20
+#     cost_weight: 0.25
+#     anomaly_weight: 0.25
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Failure Correlations (FASE 5.1)
+# Define patterns that indicate systemic issues.
+# When multiple correlated sensors show issues, it suggests a common cause.
+# ───────────────────────────────────────────────────────────────────────────────
+# failure_correlations:
+#   overheating_syndrome:
+#     primary: "cool_temp"
+#     correlated: ["oil_temp", "trams_t"]
+#     min_correlation: 0.7
+#     cause: "Sistema de enfriamiento comprometido o carga excesiva"
+#     action: "Verificar radiador, termostato, bomba de agua y fluidos"
+#   electrical_failure:
+#     primary: "voltage"
+#     correlated: ["engine_load", "rpm"]
+#     min_correlation: 0.6
+#     cause: "Falla de alternador o sistema de carga"
+#     action: "Probar alternador y verificar conexiones de batería"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Action Decision Table (FASE 5.4)
+# Customize the recommended steps for each component and priority level.
+# These steps are shown to fleet managers and drivers.
+# ───────────────────────────────────────────────────────────────────────────────
+# action_decision_table:
+#   oil_system:
+#     CRITICAL:
+#       - "⚠️ DETENER EL CAMIÓN INMEDIATAMENTE de forma segura"
+#       - "📞 Llamar a servicio de emergencia o grúa"
+#       - "🔧 NO intentar continuar - daño de motor inminente"
+#     HIGH:
+#       - "📅 Programar servicio para HOY o mañana temprano"
+#       - "✅ Verificar nivel de aceite antes de cada viaje"
+#       - "🔍 Inspeccionar por fugas visibles"
+#     MEDIUM:
+#       - "📅 Agendar cambio de aceite esta semana"
+#       - "✅ Monitorear presión de aceite diariamente"
+#     LOW:
+#       - "📋 Incluir en próximo servicio preventivo"
+#       - "✅ Continuar monitoreo normal"
+#
+#   def_system:
+#     CRITICAL:
+#       - "⛽ LLENAR DEF INMEDIATAMENTE - Derate inminente"
+#       - "⚠️ Camión entrará en modo de baja potencia"
+#       - "📍 Ubicar estación de DEF más cercana"
+#     HIGH:
+#       - "⛽ Llenar DEF hoy - menos de 2 días restantes"
+#       - "📋 Programar revisión del sistema SCR"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOTAS:
+# - Todos los valores mostrados son los defaults del sistema
+# - Descomenta y modifica solo lo que necesites cambiar
+# - Los cambios toman efecto al reiniciar el servicio
+# - Para cambios en caliente, usa la API de configuración (próxima versión)
+# ═══════════════════════════════════════════════════════════════════════════════
