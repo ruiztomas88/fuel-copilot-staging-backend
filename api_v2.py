@@ -527,41 +527,119 @@ async def get_truck_sensors(truck_id: str):
             "data_available": True,
             "data_age_seconds": row.get("data_age_seconds"),
             # Oil System
-            "oil_pressure_psi": float(row["oil_pressure_psi"]) if row["oil_pressure_psi"] is not None else None,
-            "oil_temp_f": float(row["oil_temp_f"]) if row["oil_temp_f"] is not None else None,
-            "oil_level_pct": float(row["oil_level_pct"]) if row["oil_level_pct"] is not None else None,
+            "oil_pressure_psi": (
+                float(row["oil_pressure_psi"])
+                if row["oil_pressure_psi"] is not None
+                else None
+            ),
+            "oil_temp_f": (
+                float(row["oil_temp_f"]) if row["oil_temp_f"] is not None else None
+            ),
+            "oil_level_pct": (
+                float(row["oil_level_pct"])
+                if row["oil_level_pct"] is not None
+                else None
+            ),
             # DEF
-            "def_level_pct": float(row["def_level_pct"]) if row["def_level_pct"] is not None else None,
+            "def_level_pct": (
+                float(row["def_level_pct"])
+                if row["def_level_pct"] is not None
+                else None
+            ),
             # Engine
-            "engine_load_pct": float(row["engine_load_pct"]) if row["engine_load_pct"] is not None else None,
+            "engine_load_pct": (
+                float(row["engine_load_pct"])
+                if row["engine_load_pct"] is not None
+                else None
+            ),
             "rpm": int(row["rpm"]) if row["rpm"] is not None else None,
-            "coolant_temp_f": float(row["coolant_temp_f"]) if row["coolant_temp_f"] is not None else None,
-            "coolant_level_pct": float(row["coolant_level_pct"]) if row["coolant_level_pct"] is not None else None,
+            "coolant_temp_f": (
+                float(row["coolant_temp_f"])
+                if row["coolant_temp_f"] is not None
+                else None
+            ),
+            "coolant_level_pct": (
+                float(row["coolant_level_pct"])
+                if row["coolant_level_pct"] is not None
+                else None
+            ),
             # Transmission & Brakes
             "gear": int(row["gear"]) if row["gear"] is not None else None,
-            "brake_active": bool(row["brake_active"]) if row["brake_active"] is not None else None,
+            "brake_active": (
+                bool(row["brake_active"]) if row["brake_active"] is not None else None
+            ),
             # Air Intake
-            "intake_pressure_bar": float(row["intake_pressure_bar"]) if row["intake_pressure_bar"] is not None else None,
-            "intake_temp_f": float(row["intake_temp_f"]) if row["intake_temp_f"] is not None else None,
-            "intercooler_temp_f": float(row["intercooler_temp_f"]) if row["intercooler_temp_f"] is not None else None,
+            "intake_pressure_bar": (
+                float(row["intake_pressure_bar"])
+                if row["intake_pressure_bar"] is not None
+                else None
+            ),
+            "intake_temp_f": (
+                float(row["intake_temp_f"])
+                if row["intake_temp_f"] is not None
+                else None
+            ),
+            "intercooler_temp_f": (
+                float(row["intercooler_temp_f"])
+                if row["intercooler_temp_f"] is not None
+                else None
+            ),
             # Fuel
-            "fuel_temp_f": float(row["fuel_temp_f"]) if row["fuel_temp_f"] is not None else None,
-            "fuel_level_pct": float(row["fuel_level_pct"]) if row["fuel_level_pct"] is not None else None,
-            "fuel_rate_gph": float(row["fuel_rate_gph"]) if row["fuel_rate_gph"] is not None else None,
+            "fuel_temp_f": (
+                float(row["fuel_temp_f"]) if row["fuel_temp_f"] is not None else None
+            ),
+            "fuel_level_pct": (
+                float(row["fuel_level_pct"])
+                if row["fuel_level_pct"] is not None
+                else None
+            ),
+            "fuel_rate_gph": (
+                float(row["fuel_rate_gph"])
+                if row["fuel_rate_gph"] is not None
+                else None
+            ),
             # Environmental
-            "ambient_temp_f": float(row["ambient_temp_f"]) if row["ambient_temp_f"] is not None else None,
-            "barometric_pressure_inhg": float(row["barometric_pressure_inhg"]) if row["barometric_pressure_inhg"] is not None else None,
+            "ambient_temp_f": (
+                float(row["ambient_temp_f"])
+                if row["ambient_temp_f"] is not None
+                else None
+            ),
+            "barometric_pressure_inhg": (
+                float(row["barometric_pressure_inhg"])
+                if row["barometric_pressure_inhg"] is not None
+                else None
+            ),
             # Electrical
             "voltage": float(row["voltage"]) if row["voltage"] is not None else None,
-            "backup_voltage": float(row["backup_voltage"]) if row["backup_voltage"] is not None else None,
+            "backup_voltage": (
+                float(row["backup_voltage"])
+                if row["backup_voltage"] is not None
+                else None
+            ),
             # Operational Counters
-            "engine_hours": float(row["engine_hours"]) if row["engine_hours"] is not None else None,
-            "idle_hours": float(row["idle_hours"]) if row["idle_hours"] is not None else None,
-            "pto_hours": float(row["pto_hours"]) if row["pto_hours"] is not None else None,
-            "total_idle_fuel_gal": float(row["total_idle_fuel_gal"]) if row["total_idle_fuel_gal"] is not None else None,
-            "total_fuel_used_gal": float(row["total_fuel_used_gal"]) if row["total_fuel_used_gal"] is not None else None,
+            "engine_hours": (
+                float(row["engine_hours"]) if row["engine_hours"] is not None else None
+            ),
+            "idle_hours": (
+                float(row["idle_hours"]) if row["idle_hours"] is not None else None
+            ),
+            "pto_hours": (
+                float(row["pto_hours"]) if row["pto_hours"] is not None else None
+            ),
+            "total_idle_fuel_gal": (
+                float(row["total_idle_fuel_gal"])
+                if row["total_idle_fuel_gal"] is not None
+                else None
+            ),
+            "total_fuel_used_gal": (
+                float(row["total_fuel_used_gal"])
+                if row["total_fuel_used_gal"] is not None
+                else None
+            ),
             # DTC
-            "dtc_count": int(row["dtc_count"]) if row["dtc_count"] is not None else None,
+            "dtc_count": (
+                int(row["dtc_count"]) if row["dtc_count"] is not None else None
+            ),
             "dtc_code": row["dtc_code"],
         }
 
@@ -1114,3 +1192,368 @@ async def get_def_alerts():
         "count": len(alerts),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# =============================================================================
+# TRIP AND DRIVER BEHAVIOR ENDPOINTS
+# =============================================================================
+@router.get("/trucks/{truck_id}/trips", summary="Get Truck Trips", tags=["Trips"])
+async def get_truck_trips(
+    truck_id: str,
+    days: int = Query(
+        default=7, ge=1, le=30, description="Number of days to look back"
+    ),
+    limit: int = Query(default=50, ge=1, le=500, description="Max trips to return"),
+):
+    """
+    Get recent trips for a specific truck.
+
+    Returns trip history including:
+    - Duration and distance
+    - Average/max speed
+    - Driver behavior metrics (harsh events, speeding)
+    """
+    from database_mysql import get_connection
+
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            query = """
+                SELECT 
+                    truck_id,
+                    start_time,
+                    end_time,
+                    duration_hours,
+                    distance_miles,
+                    avg_speed,
+                    max_speed,
+                    odometer,
+                    driver_name,
+                    harsh_accel_count,
+                    harsh_brake_count,
+                    speeding_count,
+                    created_at
+                FROM truck_trips
+                WHERE truck_id = %s
+                  AND start_time >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                ORDER BY start_time DESC
+                LIMIT %s
+            """
+            cursor.execute(query, (truck_id, days, limit))
+            trips = cursor.fetchall()
+
+            # Calculate summary stats
+            total_distance = sum(t["distance_miles"] or 0 for t in trips)
+            total_hours = sum(t["duration_hours"] or 0 for t in trips)
+            total_speeding = sum(t["speeding_count"] or 0 for t in trips)
+            total_harsh_accel = sum(t["harsh_accel_count"] or 0 for t in trips)
+            total_harsh_brake = sum(t["harsh_brake_count"] or 0 for t in trips)
+
+            avg_speed = (total_distance / total_hours) if total_hours > 0 else 0
+
+            return {
+                "truck_id": truck_id,
+                "trips": [
+                    {
+                        "start_time": (
+                            t["start_time"].isoformat() if t["start_time"] else None
+                        ),
+                        "end_time": (
+                            t["end_time"].isoformat() if t["end_time"] else None
+                        ),
+                        "duration_hours": (
+                            round(t["duration_hours"], 2) if t["duration_hours"] else 0
+                        ),
+                        "distance_miles": (
+                            round(t["distance_miles"], 2) if t["distance_miles"] else 0
+                        ),
+                        "avg_speed": round(t["avg_speed"], 1) if t["avg_speed"] else 0,
+                        "max_speed": round(t["max_speed"], 1) if t["max_speed"] else 0,
+                        "odometer": round(t["odometer"], 1) if t["odometer"] else 0,
+                        "driver": t["driver_name"],
+                        "harsh_accel": t["harsh_accel_count"] or 0,
+                        "harsh_brake": t["harsh_brake_count"] or 0,
+                        "speeding": t["speeding_count"] or 0,
+                    }
+                    for t in trips
+                ],
+                "summary": {
+                    "total_trips": len(trips),
+                    "total_distance_miles": round(total_distance, 1),
+                    "total_hours": round(total_hours, 1),
+                    "avg_speed_mph": round(avg_speed, 1),
+                    "total_speeding_events": total_speeding,
+                    "total_harsh_accel": total_harsh_accel,
+                    "total_harsh_brake": total_harsh_brake,
+                },
+                "period_days": days,
+            }
+    except Exception as e:
+        logger.error(f"Failed to fetch trips for truck {truck_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch trips: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get(
+    "/trucks/{truck_id}/speeding-events",
+    summary="Get Speeding Events",
+    tags=["Driver Behavior"],
+)
+async def get_speeding_events(
+    truck_id: str,
+    days: int = Query(
+        default=7, ge=1, le=30, description="Number of days to look back"
+    ),
+    severity: Optional[str] = Query(
+        default=None,
+        pattern="^(minor|moderate|severe)$",
+        description="Filter by severity",
+    ),
+):
+    """
+    Get speeding violation events for a specific truck.
+
+    Returns:
+    - Timestamp and duration
+    - Speed vs limit
+    - Severity classification
+    - Driver information
+    """
+    from database_mysql import get_connection
+
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            query = """
+                SELECT 
+                    truck_id,
+                    start_time,
+                    end_time,
+                    duration_minutes,
+                    max_speed,
+                    speed_limit,
+                    speed_over_limit,
+                    distance_miles,
+                    driver_name,
+                    severity,
+                    latitude,
+                    longitude,
+                    created_at
+                FROM truck_speeding_events
+                WHERE truck_id = %s
+                  AND start_time >= DATE_SUB(NOW(), INTERVAL %s DAY)
+            """
+
+            params = [truck_id, days]
+            if severity:
+                query += " AND severity = %s"
+                params.append(severity)
+
+            query += " ORDER BY start_time DESC"
+
+            cursor.execute(query, params)
+            events = cursor.fetchall()
+
+            # Calculate stats by severity
+            severity_counts = {"minor": 0, "moderate": 0, "severe": 0}
+            for event in events:
+                severity_counts[event["severity"]] += 1
+
+            return {
+                "truck_id": truck_id,
+                "events": [
+                    {
+                        "start_time": (
+                            e["start_time"].isoformat() if e["start_time"] else None
+                        ),
+                        "end_time": (
+                            e["end_time"].isoformat() if e["end_time"] else None
+                        ),
+                        "duration_minutes": (
+                            round(e["duration_minutes"], 1)
+                            if e["duration_minutes"]
+                            else 0
+                        ),
+                        "max_speed": round(e["max_speed"], 1) if e["max_speed"] else 0,
+                        "speed_limit": (
+                            round(e["speed_limit"], 1) if e["speed_limit"] else 0
+                        ),
+                        "speed_over_limit": (
+                            round(e["speed_over_limit"], 1)
+                            if e["speed_over_limit"]
+                            else 0
+                        ),
+                        "distance_miles": (
+                            round(e["distance_miles"], 2) if e["distance_miles"] else 0
+                        ),
+                        "driver": e["driver_name"],
+                        "severity": e["severity"],
+                        "location": (
+                            {"lat": e["latitude"], "lon": e["longitude"]}
+                            if e["latitude"] and e["longitude"]
+                            else None
+                        ),
+                    }
+                    for e in events
+                ],
+                "summary": {
+                    "total_events": len(events),
+                    "by_severity": severity_counts,
+                },
+                "period_days": days,
+            }
+    except Exception as e:
+        logger.error(f"Failed to fetch speeding events for truck {truck_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch speeding events: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get(
+    "/fleet/driver-behavior",
+    summary="Fleet Driver Behavior Metrics",
+    tags=["Driver Behavior"],
+)
+async def get_fleet_driver_behavior(
+    days: int = Query(default=7, ge=1, le=30, description="Number of days to analyze")
+):
+    """
+    Get fleet-wide driver behavior metrics and scoring.
+
+    Analyzes:
+    - Speeding violations
+    - Harsh acceleration/braking
+    - Driver safety scores
+    """
+    from database_mysql import get_connection
+
+    try:
+        conn = get_connection()
+        with conn.cursor() as cursor:
+            # Get trip-based metrics
+            trips_query = """
+                SELECT 
+                    truck_id,
+                    COUNT(*) as trip_count,
+                    SUM(distance_miles) as total_miles,
+                    SUM(speeding_count) as total_speeding,
+                    SUM(harsh_accel_count) as total_harsh_accel,
+                    SUM(harsh_brake_count) as total_harsh_brake,
+                    AVG(avg_speed) as avg_speed
+                FROM truck_trips
+                WHERE start_time >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                GROUP BY truck_id
+            """
+            cursor.execute(trips_query, (days,))
+            trip_metrics = cursor.fetchall()
+
+            # Get speeding event details
+            speeding_query = """
+                SELECT 
+                    truck_id,
+                    severity,
+                    COUNT(*) as event_count
+                FROM truck_speeding_events
+                WHERE start_time >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                GROUP BY truck_id, severity
+            """
+            cursor.execute(speeding_query, (days,))
+            speeding_by_severity = cursor.fetchall()
+
+            # Build truck profiles
+            truck_profiles = {}
+            for tm in trip_metrics:
+                truck_id = tm["truck_id"]
+                total_miles = tm["total_miles"] or 0
+
+                # Calculate safety score (0-100, higher is better)
+                # Deduct points for violations per 100 miles
+                base_score = 100
+                if total_miles > 0:
+                    speeding_penalty = min(
+                        30, (tm["total_speeding"] / total_miles * 100) * 10
+                    )
+                    accel_penalty = min(
+                        20, (tm["total_harsh_accel"] / total_miles * 100) * 10
+                    )
+                    brake_penalty = min(
+                        20, (tm["total_harsh_brake"] / total_miles * 100) * 10
+                    )
+                    safety_score = max(
+                        0, base_score - speeding_penalty - accel_penalty - brake_penalty
+                    )
+                else:
+                    safety_score = base_score
+
+                truck_profiles[truck_id] = {
+                    "truck_id": truck_id,
+                    "trips": tm["trip_count"],
+                    "total_miles": round(total_miles, 1),
+                    "speeding_events": tm["total_speeding"] or 0,
+                    "harsh_accel": tm["total_harsh_accel"] or 0,
+                    "harsh_brake": tm["total_harsh_brake"] or 0,
+                    "avg_speed": round(tm["avg_speed"], 1) if tm["avg_speed"] else 0,
+                    "safety_score": round(safety_score, 1),
+                    "speeding_by_severity": {"minor": 0, "moderate": 0, "severe": 0},
+                }
+
+            # Add speeding severity breakdown
+            for se in speeding_by_severity:
+                truck_id = se["truck_id"]
+                if truck_id in truck_profiles:
+                    truck_profiles[truck_id]["speeding_by_severity"][se["severity"]] = (
+                        se["event_count"]
+                    )
+
+            # Fleet-wide aggregates
+            fleet_total_miles = sum(p["total_miles"] for p in truck_profiles.values())
+            fleet_total_speeding = sum(
+                p["speeding_events"] for p in truck_profiles.values()
+            )
+            fleet_total_harsh_accel = sum(
+                p["harsh_accel"] for p in truck_profiles.values()
+            )
+            fleet_total_harsh_brake = sum(
+                p["harsh_brake"] for p in truck_profiles.values()
+            )
+            fleet_avg_safety_score = (
+                sum(p["safety_score"] for p in truck_profiles.values())
+                / len(truck_profiles)
+                if truck_profiles
+                else 0
+            )
+
+            return {
+                "trucks": list(truck_profiles.values()),
+                "fleet_summary": {
+                    "total_trucks": len(truck_profiles),
+                    "total_miles": round(fleet_total_miles, 1),
+                    "total_speeding_events": fleet_total_speeding,
+                    "total_harsh_accel": fleet_total_harsh_accel,
+                    "total_harsh_brake": fleet_total_harsh_brake,
+                    "avg_safety_score": round(fleet_avg_safety_score, 1),
+                    "violations_per_100_miles": round(
+                        (
+                            (fleet_total_speeding / fleet_total_miles * 100)
+                            if fleet_total_miles > 0
+                            else 0
+                        ),
+                        2,
+                    ),
+                },
+                "period_days": days,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+    except Exception as e:
+        logger.error(f"Failed to calculate fleet driver behavior: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to calculate driver behavior: {str(e)}"
+        )
+    finally:
+        if conn:
+            conn.close()
