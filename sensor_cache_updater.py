@@ -54,7 +54,7 @@ def load_truck_config() -> Dict[str, Dict]:
     """Load truck configuration from tanks.yaml"""
     tanks_path = Path(__file__).parent / "tanks.yaml"
     try:
-        with open(tanks_path, "r") as f:
+        with open(tanks_path, "r", encoding='utf-8') as f:
             config = yaml.safe_load(f)
             return config.get("trucks", {})
     except Exception as e:
