@@ -1,0 +1,228 @@
+"""
+Test Script: DTC Alert System v5.8.0
+═══════════════════════════════════════════════════════════════════════════════
+
+Tests the enhanced DTC alert system with Spanish descriptions from dtc_database.py
+
+Test scenarios:
+1. Critical DTC: SPN 100.4 (Oil Pressure - Voltage Below Normal)
+2. Warning DTC: SPN 597.4 (Cruise Control Switch - Shorted to Low Source)
+3. Multiple DTCs: 100.4,1761.0 (Oil Pressure + DEF Level)
+
+Expected outputs:
+- SMS + Email for CRITICAL
+- Email only for WARNING
+- Full Spanish descriptions in messages
+- Component names, failure modes, recommended actions
+
+Author: Fuel Analytics Team
+Date: Dec 2025
+"""
+
+import sys
+sys.path.insert(0, '/Users/tomasruiz/Desktop/Fuel-Analytics-Backend')
+
+from dtc_analyzer import process_dtc_from_sensor_data, DTCSeverity
+from alert_service import send_dtc_alert
+from datetime import datetime, timezone
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+def test_single_critical_dtc():
+    """Test 1: Single Critical DTC - Oil Pressure Below Normal"""
+    print("\n" + "=" * 80)
+    print("TEST 1: CRITICAL DTC - SPN 100.4 (Oil Pressure Voltage Below Normal)")
+    print("=" * 80)
+    
+    truck_id = "TEST-DR6664"
+    dtc_string = "100.4"
+    
+    # Process DTC through analyzer
+    alerts = process_dtc_from_sensor_data(
+        truck_id=truck_id,
+        dtc_value=dtc_string,
+        timestamp=datetime.now(timezone.utc)
+    )
+    
+    if not alerts:
+        print("❌ No alerts generated")
+        return
+    
+    alert = alerts[0]
+    print(f"\n✅ Alert generated:")
+    print(f"   Severity: {alert.severity.value}")
+    print(f"   Message: {alert.message}")
+    print(f"   Codes: {len(alert.codes)}")
+    
+    if alert.codes:
+        code = alert.codes[0]
+        print(f"\n📋 DTC Code Details:")
+        print(f"   Code: {code.code}")
+        print(f"   SPN: {code.spn}")
+        print(f"   FMI: {code.fmi}")
+        print(f"   System: {code.system}")
+        print(f"   Description: {code.description}")
+        print(f"   Spanish Name: {code.name_es}")
+        print(f"   FMI Description (ES): {code.fmi_description_es}")
+        print(f"   Recommended Action: {code.recommended_action}")
+        
+        # Send alert with full info
+        print(f"\n📧 Sending enhanced alert...")
+        result = send_dtc_alert(
+            truck_id=truck_id,
+            dtc_code=code.code,
+            severity="CRITICAL",
+            description=code.description or alert.message,
+            system=code.system,
+            recommended_action=code.recommended_action,
+            spn=code.spn,
+            fmi=code.fmi,
+            spn_name_es=code.name_es,
+            fmi_description_es=code.fmi_description_es,
+        )
+        print(f"   Alert sent: {'✅ Success' if result else '❌ Failed'}")
+
+
+def test_warning_dtc():
+    """Test 2: Warning DTC - Cruise Control Switch"""
+    print("\n" + "=" * 80)
+    print("TEST 2: WARNING DTC - SPN 597.4 (Cruise Control Shorted to Low)")
+    print("=" * 80)
+    
+    truck_id = "TEST-CO0681"
+    dtc_string = "597.4"
+    
+    alerts = process_dtc_from_sensor_data(
+        truck_id=truck_id,
+        dtc_value=dtc_string,
+        timestamp=datetime.now(timezone.utc)
+    )
+    
+    if not alerts:
+        print("❌ No alerts generated")
+        return
+    
+    alert = alerts[0]
+    print(f"\n✅ Alert generated:")
+    print(f"   Severity: {alert.severity.value}")
+    print(f"   Message: {alert.message}")
+    
+    if alert.codes:
+        code = alert.codes[0]
+        print(f"\n📋 DTC Code Details:")
+        print(f"   Code: {code.code}")
+        print(f"   Spanish Name: {code.name_es or 'N/A'}")
+        print(f"   FMI Description (ES): {code.fmi_description_es or 'N/A'}")
+        
+        print(f"\n📧 Sending warning alert (email only)...")
+        result = send_dtc_alert(
+            truck_id=truck_id,
+            dtc_code=code.code,
+            severity="WARNING",
+            description=code.description or alert.message,
+            system=code.system,
+            recommended_action=code.recommended_action,
+            spn=code.spn,
+            fmi=code.fmi,
+            spn_name_es=code.name_es,
+            fmi_description_es=code.fmi_description_es,
+        )
+        print(f"   Alert sent: {'✅ Success' if result else '❌ Failed'}")
+
+
+def test_multiple_dtcs():
+    """Test 3: Multiple DTCs"""
+    print("\n" + "=" * 80)
+    print("TEST 3: MULTIPLE DTCs - SPN 100.4,1761.0 (Oil + DEF)")
+    print("=" * 80)
+    
+    truck_id = "TEST-FF7702"
+    dtc_string = "100.4,1761.0"
+    
+    alerts = process_dtc_from_sensor_data(
+        truck_id=truck_id,
+        dtc_value=dtc_string,
+        timestamp=datetime.now(timezone.utc)
+    )
+    
+    if not alerts:
+        print("❌ No alerts generated")
+        return
+    
+    for i, alert in enumerate(alerts, 1):
+        print(f"\n✅ Alert {i}:")
+        print(f"   Severity: {alert.severity.value}")
+        print(f"   Codes: {', '.join(c.code for c in alert.codes)}")
+        
+        if alert.codes:
+            for code in alert.codes:
+                print(f"\n   📋 {code.code}:")
+                print(f"      Component: {code.name_es or code.description}")
+                print(f"      Failure: {code.fmi_description_es or 'N/A'}")
+                print(f"      System: {code.system}")
+                print(f"      Action: {code.recommended_action[:60]}...")
+
+
+def test_dtc_report_endpoint():
+    """Test 4: DTC Report Endpoint (API simulation)"""
+    print("\n" + "=" * 80)
+    print("TEST 4: DTC REPORT ENDPOINT - API Response Format")
+    print("=" * 80)
+    
+    from dtc_analyzer import get_dtc_analyzer
+    
+    truck_id = "TEST-DR6664"
+    dtc_string = "100.4,110.0,1761.1"
+    
+    analyzer = get_dtc_analyzer()
+    report = analyzer.get_dtc_analysis_report(truck_id, dtc_string)
+    
+    print(f"\n📊 Report Summary:")
+    print(f"   Truck: {report['truck_id']}")
+    print(f"   Status: {report['status']}")
+    print(f"   Total DTCs: {report['summary']['total']}")
+    print(f"   Critical: {report['summary']['critical']}")
+    print(f"   Warning: {report['summary']['warning']}")
+    print(f"   Systems Affected: {', '.join(report['systems_affected'])}")
+    
+    print(f"\n📋 Codes Detail:")
+    for code_info in report['codes']:
+        print(f"\n   {code_info['code']}:")
+        print(f"      Severity: {code_info['severity'].upper()}")
+        print(f"      Component: {code_info['component']}")
+        print(f"      Failure: {code_info['failure_mode']}")
+        print(f"      System: {code_info['system']}")
+        print(f"      Action: {code_info['action'][:60]}...")
+
+
+if __name__ == "__main__":
+    print("\n" + "=" * 80)
+    print("🧪 DTC ALERT SYSTEM TESTING - v5.8.0")
+    print("Testing enhanced Spanish descriptions from dtc_database.py")
+    print("=" * 80)
+    
+    try:
+        # Run all tests
+        test_single_critical_dtc()
+        test_warning_dtc()
+        test_multiple_dtcs()
+        test_dtc_report_endpoint()
+        
+        print("\n" + "=" * 80)
+        print("✅ ALL TESTS COMPLETED")
+        print("=" * 80)
+        print("\nCheck your email/SMS for DTC alerts with Spanish descriptions!")
+        print("Expected format:")
+        print("  🚨 CÓDIGO DE DIAGNÓSTICO DEL MOTOR")
+        print("  🔧 Código: SPN100.FMI4")
+        print("  🔍 Componente: [Spanish name from database]")
+        print("  ❌ Falla: [Spanish FMI description]")
+        print("  ✅ Acción Recomendada: [Spanish action]")
+        
+    except Exception as e:
+        print(f"\n❌ Test failed with error: {e}")
+        import traceback
+        traceback.print_exc()
