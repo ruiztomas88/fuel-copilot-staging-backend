@@ -186,23 +186,23 @@ def save_to_fuel_metrics(connection, truck_id: str, sensor_data: dict):
             oil_level = sensor_data.get("oil_level")  # Oil level %
             intake_press = sensor_data.get("intake_press")  # Intake pressure PSI
             intake_temp = sensor_data.get("intake_air_temp")  # Intake temp °F
-            
+
             # Cost tracking sensors
             def_level = sensor_data.get("def_level")  # DEF level %
             total_idle_fuel = sensor_data.get("total_idle_fuel")  # Idle fuel gal
             fuel_temp = sensor_data.get("fuel_temp")  # Fuel temperature °F
             ambient_temp = sensor_data.get("ambient_temp")  # Ambient temp °F
-            
+
             # Driver behavior sensors
             gear = sensor_data.get("gear")  # Current gear
             brake_switch = sensor_data.get("brake_switch")  # Brake active (0/1)
             pto_hours = sensor_data.get("pto_hours")  # PTO hours
-            
+
             # Safety sensors
             backup_battery = sensor_data.get("battery")  # Backup battery V
             barometer = sensor_data.get("barometer")  # Barometric pressure
             sats = sensor_data.get("sats")  # GPS satellites
-            
+
             # DTC/Diagnostics
             dtc = sensor_data.get("dtc")  # DTC count or codes
             idle_hours = sensor_data.get("idle_hours")  # ECU idle hours

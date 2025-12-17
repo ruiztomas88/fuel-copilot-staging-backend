@@ -314,3 +314,263 @@ class TestSingletonPattern:
         manager2 = get_voltage_history_manager()
 
         assert manager1 is manager2
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EXTENDED TESTS FOR VOLTAGE HISTORY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestVoltageStatusExtended:
+    """Extended tests for VoltageStatus"""
+
+    def test_can_iterate_statuses(self):
+        """Should iterate all statuses"""
+        statuses = list(VoltageStatus)
+        assert len(statuses) == 5
+
+    def test_status_from_value(self):
+        """Should create status from value"""
+        status = VoltageStatus("NORMAL")
+        assert status == VoltageStatus.NORMAL
+
+    def test_status_comparison(self):
+        """Statuses should be comparable"""
+        assert VoltageStatus.NORMAL != VoltageStatus.LOW
+        assert VoltageStatus.CRITICAL_LOW != VoltageStatus.CRITICAL_HIGH
+
+
+class TestVoltageReadingExtended:
+    """Extended tests for VoltageReading"""
+
+    def test_reading_with_none_rpm(self):
+        """Should handle None rpm"""
+        reading = VoltageReading(
+            truck_id="T001",
+            timestamp=datetime.now(timezone.utc),
+            voltage=12.5,
+            rpm=None,
+            engine_running=False,
+            status=VoltageStatus.NORMAL,
+        )
+        assert reading.rpm is None
+
+    def test_reading_equality(self):
+        """Readings with same data should be equal"""
+        now = datetime.now(timezone.utc)
+        r1 = VoltageReading(
+            truck_id="T001",
+            timestamp=now,
+            voltage=13.5,
+            rpm=1500,
+            engine_running=True,
+            status=VoltageStatus.NORMAL,
+        )
+        r2 = VoltageReading(
+            truck_id="T001",
+            timestamp=now,
+            voltage=13.5,
+            rpm=1500,
+            engine_running=True,
+            status=VoltageStatus.NORMAL,
+        )
+        assert r1 == r2
+
+    def test_reading_inequality_voltage(self):
+        """Readings with different voltage should differ"""
+        now = datetime.now(timezone.utc)
+        r1 = VoltageReading(
+            truck_id="T001",
+            timestamp=now,
+            voltage=13.5,
+            rpm=1500,
+            engine_running=True,
+            status=VoltageStatus.NORMAL,
+        )
+        r2 = VoltageReading(
+            truck_id="T001",
+            timestamp=now,
+            voltage=14.0,
+            rpm=1500,
+            engine_running=True,
+            status=VoltageStatus.NORMAL,
+        )
+        assert r1 != r2
+
+    def test_reading_preserves_timestamp(self):
+        """Timestamp should be preserved"""
+        specific = datetime(2025, 6, 15, 10, 30, tzinfo=timezone.utc)
+        reading = VoltageReading(
+            truck_id="T001",
+            timestamp=specific,
+            voltage=13.5,
+            rpm=1500,
+            engine_running=True,
+            status=VoltageStatus.NORMAL,
+        )
+        assert reading.timestamp == specific
+
+
+class TestVoltageClassificationExtended:
+    """Extended tests for voltage classification"""
+
+    @pytest.fixture
+    def manager(self):
+        with patch("voltage_history.get_db_connection"):
+            return VoltageHistoryManager()
+
+    def test_boundary_12_5_engine_on(self, manager):
+        """Test boundary at 12.5V engine running"""
+        assert manager._classify_voltage(12.49, True) == VoltageStatus.CRITICAL_LOW
+        assert manager._classify_voltage(12.5, True) == VoltageStatus.LOW
+
+    def test_boundary_13_2_engine_on(self, manager):
+        """Test boundary at 13.2V engine running"""
+        status = manager._classify_voltage(13.2, True)
+        assert status == VoltageStatus.NORMAL
+
+    def test_boundary_15_0_engine_on(self, manager):
+        """Test boundary at 15.0V engine running"""
+        status = manager._classify_voltage(15.01, True)
+        assert status == VoltageStatus.HIGH
+
+    def test_boundary_15_5_engine_on(self, manager):
+        """Test boundary at 15.5V engine running"""
+        status = manager._classify_voltage(15.51, True)
+        assert status == VoltageStatus.CRITICAL_HIGH
+
+    def test_boundary_11_5_engine_off(self, manager):
+        """Test boundary at 11.5V engine off"""
+        assert manager._classify_voltage(11.49, False) == VoltageStatus.CRITICAL_LOW
+        assert manager._classify_voltage(11.5, False) == VoltageStatus.LOW
+
+    def test_boundary_12_2_engine_off(self, manager):
+        """Test boundary at 12.2V engine off"""
+        status = manager._classify_voltage(12.2, False)
+        assert status == VoltageStatus.NORMAL
+
+
+class TestVoltageSamplingExtended:
+    """Extended tests for sampling logic"""
+
+    @pytest.fixture
+    def manager(self):
+        with patch("voltage_history.get_db_connection"):
+            return VoltageHistoryManager()
+
+    def test_sample_interval_constant(self, manager):
+        """Sample interval should be 60 minutes"""
+        assert manager.SAMPLE_INTERVAL_MINUTES == 60
+
+    def test_last_sample_tracking(self, manager):
+        """Should track last sample per truck"""
+        now = datetime.now(timezone.utc)
+        manager._last_sample["T001"] = now
+        assert manager._last_sample["T001"] == now
+
+    def test_separate_tracking(self, manager):
+        """Each truck has separate tracking"""
+        now = datetime.now(timezone.utc)
+        manager._last_sample["T001"] = now
+        manager._last_sample["T002"] = now - timedelta(hours=1)
+        assert manager._last_sample["T001"] != manager._last_sample["T002"]
+
+
+class TestVoltageHistoryTableConfig:
+    """Tests for table configuration"""
+
+    @pytest.fixture
+    def manager(self):
+        with patch("voltage_history.get_db_connection"):
+            return VoltageHistoryManager()
+
+    def test_table_name(self, manager):
+        """Should have correct table name"""
+        assert manager.TABLE_NAME == "voltage_history"
+
+
+class TestVoltageManagerNoDatabase:
+    """Tests for manager when database unavailable"""
+
+    @pytest.fixture
+    def manager(self):
+        with patch("voltage_history.get_db_connection", return_value=None):
+            return VoltageHistoryManager()
+
+    def test_record_returns_false(self, manager):
+        """Should return False when no database"""
+        result = manager.record_voltage("T001", 13.5)
+        assert result is False
+
+    def test_get_history_returns_empty(self, manager):
+        """Should return empty list when no database"""
+        result = manager.get_history("T001")
+        assert result == []
+
+
+class TestEngineRunningLogic:
+    """Tests for engine running detection logic"""
+
+    @pytest.fixture
+    def manager(self):
+        with patch("voltage_history.get_db_connection"):
+            return VoltageHistoryManager()
+
+    def test_high_voltage_engine_on_normal(self, manager):
+        """High voltage normal when engine on"""
+        status = manager._classify_voltage(14.5, True)
+        assert status == VoltageStatus.NORMAL
+
+    def test_high_voltage_engine_off_abnormal(self, manager):
+        """High voltage abnormal when engine off"""
+        status = manager._classify_voltage(14.5, False)
+        assert status == VoltageStatus.HIGH
+
+    def test_battery_voltage_engine_off_normal(self, manager):
+        """Battery voltage normal when engine off"""
+        status = manager._classify_voltage(12.6, False)
+        assert status == VoltageStatus.NORMAL
+
+
+class TestVoltageReadingFields:
+    """Tests for VoltageReading field types"""
+
+    def test_voltage_is_float(self):
+        """Voltage should be float"""
+        reading = VoltageReading(
+            truck_id="T001",
+            timestamp=datetime.now(timezone.utc),
+            voltage=13.5,
+            rpm=1500,
+            engine_running=True,
+            status=VoltageStatus.NORMAL,
+        )
+        assert isinstance(reading.voltage, float)
+
+    def test_engine_running_is_bool(self):
+        """Engine running should be bool"""
+        reading = VoltageReading(
+            truck_id="T001",
+            timestamp=datetime.now(timezone.utc),
+            voltage=13.5,
+            rpm=1500,
+            engine_running=True,
+            status=VoltageStatus.NORMAL,
+        )
+        assert isinstance(reading.engine_running, bool)
+
+    def test_truck_id_is_string(self):
+        """Truck ID should be string"""
+        reading = VoltageReading(
+            truck_id="T001",
+            timestamp=datetime.now(timezone.utc),
+            voltage=13.5,
+            rpm=1500,
+            engine_running=True,
+            status=VoltageStatus.NORMAL,
+        )
+        assert isinstance(reading.truck_id, str)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

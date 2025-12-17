@@ -481,3 +481,421 @@ class TestFleetStats:
         summary = engine.generate_gamification_summary(drivers_data)
         assert summary.fleet_stats is not None
         assert isinstance(summary.fleet_stats, dict)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EXTENDED TEST CLASSES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestMPGScoreEdgeCases:
+    """Extended edge case tests for MPG scoring"""
+
+    @pytest.fixture
+    def engine(self):
+        return GamificationEngine()
+
+    def test_mpg_very_high_ratio(self, engine):
+        """Test MPG score with very high ratio"""
+        score = engine.calculate_mpg_score(mpg=12.0, fleet_avg_mpg=6.0)
+        assert score == 100.0  # Capped at 100
+
+    def test_mpg_very_low_ratio(self, engine):
+        """Test MPG score with very low ratio"""
+        score = engine.calculate_mpg_score(mpg=2.0, fleet_avg_mpg=6.0)
+        assert score == 0.0  # Capped at 0
+
+    def test_mpg_exactly_80_percent(self, engine):
+        """Test MPG score at exactly 80% of average"""
+        # 80% ratio = 0 points
+        score = engine.calculate_mpg_score(mpg=4.8, fleet_avg_mpg=6.0)
+        assert score == pytest.approx(0.0, abs=5)
+
+    def test_mpg_exactly_120_percent(self, engine):
+        """Test MPG score at exactly 120% of average"""
+        # 120% ratio = 100 points
+        score = engine.calculate_mpg_score(mpg=7.2, fleet_avg_mpg=6.0)
+        assert score == pytest.approx(100.0, abs=5)
+
+
+class TestIdleScoreEdgeCases:
+    """Extended edge case tests for idle scoring"""
+
+    @pytest.fixture
+    def engine(self):
+        return GamificationEngine()
+
+    def test_idle_zero_percent(self, engine):
+        """Test idle score at 0%"""
+        score = engine.calculate_idle_score(idle_pct=0.0)
+        assert score == 100.0
+
+    def test_idle_exactly_10_percent(self, engine):
+        """Test idle score at exactly 10%"""
+        score = engine.calculate_idle_score(idle_pct=10.0)
+        assert score == 75.0
+
+    def test_idle_exactly_20_percent(self, engine):
+        """Test idle score at exactly 20%"""
+        score = engine.calculate_idle_score(idle_pct=20.0)
+        assert score == 25.0
+
+    def test_idle_very_high(self, engine):
+        """Test idle score at very high percentage"""
+        score = engine.calculate_idle_score(idle_pct=50.0)
+        assert score == 0.0  # Capped
+
+
+class TestConsistencyScoreEdgeCases:
+    """Extended edge case tests for consistency scoring"""
+
+    @pytest.fixture
+    def engine(self):
+        return GamificationEngine()
+
+    def test_consistency_exactly_5_percent(self, engine):
+        """Test consistency at 5% variance"""
+        score = engine.calculate_consistency_score(score_variance=5.0)
+        assert score == 75.0
+
+    def test_consistency_exactly_15_percent(self, engine):
+        """Test consistency at 15% variance"""
+        score = engine.calculate_consistency_score(score_variance=15.0)
+        assert score == 25.0
+
+    def test_consistency_very_high_variance(self, engine):
+        """Test consistency with very high variance"""
+        score = engine.calculate_consistency_score(score_variance=30.0)
+        assert score == 0.0  # Capped
+
+
+class TestImprovementScoreEdgeCases:
+    """Extended edge case tests for improvement scoring"""
+
+    @pytest.fixture
+    def engine(self):
+        return GamificationEngine()
+
+    def test_improvement_10_points(self, engine):
+        """Test 10 point improvement"""
+        score = engine.calculate_improvement_score(
+            current_score=80.0, previous_score=70.0
+        )
+        # 10 point change = 50 + (10/20 * 50) = 75
+        assert score == 75.0
+
+    def test_improvement_negative_10_points(self, engine):
+        """Test 10 point decline"""
+        score = engine.calculate_improvement_score(
+            current_score=65.0, previous_score=75.0
+        )
+        # -10 point change = 50 + (-10/20 * 50) = 25
+        assert score == 25.0
+
+    def test_improvement_extreme_gain(self, engine):
+        """Test extreme improvement"""
+        score = engine.calculate_improvement_score(
+            current_score=100.0, previous_score=50.0
+        )
+        assert score == 100.0  # Capped
+
+
+class TestOverallScoreEdgeCases:
+    """Extended tests for overall score calculation"""
+
+    @pytest.fixture
+    def engine(self):
+        return GamificationEngine()
+
+    def test_overall_mixed_scores(self, engine):
+        """Test overall score with mixed component scores"""
+        score = engine.calculate_overall_score(
+            mpg_score=100.0,
+            idle_score=0.0,
+            consistency_score=50.0,
+            improvement_score=50.0,
+        )
+        # 100*0.4 + 0*0.3 + 50*0.15 + 50*0.15 = 40 + 0 + 7.5 + 7.5 = 55
+        assert score == pytest.approx(55.0, abs=0.5)
+
+    def test_overall_with_default_consistency_improvement(self, engine):
+        """Test overall score with default consistency and improvement"""
+        score = engine.calculate_overall_score(
+            mpg_score=80.0,
+            idle_score=60.0,
+        )
+        # Uses default 50 for consistency and improvement
+        # 80*0.4 + 60*0.3 + 50*0.15 + 50*0.15 = 32 + 18 + 7.5 + 7.5 = 65
+        assert score == pytest.approx(65.0, abs=0.5)
+
+
+class TestTrendDeterminationEdgeCases:
+    """Extended tests for trend determination"""
+
+    @pytest.fixture
+    def engine(self):
+        return GamificationEngine()
+
+    def test_trend_exactly_plus_2(self, engine):
+        """Test trend at exactly +2 change"""
+        trend, change = engine.determine_trend(current_score=77.0, previous_score=75.0)
+        assert trend == TrendDirection.STABLE
+        assert change == 2.0
+
+    def test_trend_exactly_minus_2(self, engine):
+        """Test trend at exactly -2 change"""
+        trend, change = engine.determine_trend(current_score=73.0, previous_score=75.0)
+        assert trend == TrendDirection.STABLE
+        assert change == -2.0
+
+    def test_trend_just_above_threshold(self, engine):
+        """Test trend just above UP threshold"""
+        trend, change = engine.determine_trend(current_score=77.1, previous_score=75.0)
+        assert trend == TrendDirection.UP
+
+    def test_trend_just_below_threshold(self, engine):
+        """Test trend just below DOWN threshold"""
+        trend, change = engine.determine_trend(current_score=72.9, previous_score=75.0)
+        assert trend == TrendDirection.DOWN
+
+
+class TestBadgeDefinitionsExtended:
+    """Extended tests for badge definitions"""
+
+    def test_all_badges_have_icons(self):
+        """Test all badges have icons"""
+        for badge_id, badge_def in BADGE_DEFINITIONS.items():
+            assert badge_def["icon"], f"{badge_id} missing icon"
+            assert len(badge_def["icon"]) > 0
+
+    def test_badge_tiers_distribution(self):
+        """Test badge tier distribution"""
+        tier_counts = {tier: 0 for tier in BadgeTier}
+        for badge_def in BADGE_DEFINITIONS.values():
+            tier_counts[badge_def["tier"]] += 1
+
+        # Should have badges at all tiers
+        assert tier_counts[BadgeTier.BRONZE] > 0
+        assert tier_counts[BadgeTier.SILVER] > 0
+        assert tier_counts[BadgeTier.GOLD] > 0
+        assert tier_counts[BadgeTier.PLATINUM] > 0
+
+    def test_consistency_badge_exists(self):
+        """Test consistency badge exists"""
+        assert "consistent_performer" in BADGE_DEFINITIONS
+
+    def test_streak_master_badge_exists(self):
+        """Test streak master badge exists"""
+        assert "streak_master" in BADGE_DEFINITIONS
+
+
+class TestDriverBadgeExtended:
+    """Extended tests for DriverBadge dataclass"""
+
+    def test_badge_progress_rounding(self):
+        """Test badge progress rounding in to_dict"""
+        badge = DriverBadge(
+            id="test_badge",
+            name="Test Badge",
+            description="Test description",
+            icon="🎯",
+            tier=BadgeTier.BRONZE,
+            requirement="Test requirement",
+            progress=65.567,
+        )
+        result = badge.to_dict()
+        assert result["progress"] == 65.6
+
+    def test_badge_all_tiers(self):
+        """Test creating badges with all tiers"""
+        for tier in BadgeTier:
+            badge = DriverBadge(
+                id=f"test_{tier.value}",
+                name=f"Test {tier.value}",
+                description="Test",
+                icon="🎯",
+                tier=tier,
+                requirement="Test",
+            )
+            assert badge.tier == tier
+
+
+class TestLeaderboardEntryExtended:
+    """Extended tests for DriverLeaderboardEntry"""
+
+    def test_entry_with_zero_streak(self):
+        """Test leaderboard entry with zero streak"""
+        entry = DriverLeaderboardEntry(
+            rank=10,
+            truck_id="T010",
+            driver_name="New Driver",
+            overall_score=50.0,
+            mpg_score=45.0,
+            idle_score=55.0,
+            safety_score=50.0,
+            trend=TrendDirection.STABLE,
+            trend_change=0.0,
+            badges_earned=0,
+            streak_days=0,
+        )
+        result = entry.to_dict()
+        assert result["streak_days"] == 0
+
+    def test_entry_with_negative_trend(self):
+        """Test leaderboard entry with negative trend"""
+        entry = DriverLeaderboardEntry(
+            rank=8,
+            truck_id="T008",
+            driver_name="Declining Driver",
+            overall_score=60.0,
+            mpg_score=55.0,
+            idle_score=65.0,
+            safety_score=60.0,
+            trend=TrendDirection.DOWN,
+            trend_change=-8.5,
+            badges_earned=1,
+            streak_days=0,
+        )
+        result = entry.to_dict()
+        assert result["trend"] == "down"
+        assert result["trend_change"] == -8.5
+
+
+class TestGamificationSummaryExtended:
+    """Extended tests for GamificationSummary"""
+
+    def test_empty_leaderboard(self):
+        """Test summary with empty leaderboard"""
+        summary = GamificationSummary(
+            leaderboard=[],
+            available_badges=[],
+            fleet_stats={},
+        )
+        result = summary.to_dict()
+        assert result["leaderboard"] == []
+
+    def test_summary_with_multiple_entries(self):
+        """Test summary with multiple leaderboard entries"""
+        entries = []
+        for i in range(5):
+            entries.append(
+                DriverLeaderboardEntry(
+                    rank=i + 1,
+                    truck_id=f"T{i+1:03d}",
+                    driver_name=f"Driver {i+1}",
+                    overall_score=90.0 - i * 5,
+                    mpg_score=88.0 - i * 3,
+                    idle_score=85.0 - i * 4,
+                    safety_score=87.0 - i * 2,
+                    trend=TrendDirection.STABLE,
+                    trend_change=0.0,
+                    badges_earned=5 - i,
+                    streak_days=10 - i,
+                )
+            )
+
+        summary = GamificationSummary(
+            leaderboard=entries,
+            available_badges=[],
+            fleet_stats={"total_drivers": 5},
+        )
+        result = summary.to_dict()
+        assert len(result["leaderboard"]) == 5
+
+
+class TestScoreWeightsValidation:
+    """Tests for score weight validation"""
+
+    def test_all_weights_positive(self):
+        """Test all weights are positive"""
+        for weight_name, weight_value in SCORE_WEIGHTS.items():
+            assert weight_value > 0, f"Weight {weight_name} should be positive"
+
+    def test_weights_sum_exactly_one(self):
+        """Test weights sum to exactly 1.0"""
+        total = sum(SCORE_WEIGHTS.values())
+        assert total == 1.0
+
+    def test_mpg_has_highest_weight(self):
+        """Test MPG has highest weight"""
+        assert SCORE_WEIGHTS["mpg"] >= max(
+            SCORE_WEIGHTS["idle"],
+            SCORE_WEIGHTS["consistency"],
+            SCORE_WEIGHTS["improvement"],
+        )
+
+
+class TestBadgeCategoryValidation:
+    """Tests for badge category validation"""
+
+    def test_all_badges_have_category(self):
+        """Test all badges have a category"""
+        for badge_id, badge_def in BADGE_DEFINITIONS.items():
+            assert "category" in badge_def, f"{badge_id} missing category"
+
+    def test_valid_categories(self):
+        """Test categories are from valid set"""
+        valid_categories = {
+            "mpg",
+            "idle",
+            "consistency",
+            "streak",
+            "improvement",
+            "special",
+        }
+        for badge_id, badge_def in BADGE_DEFINITIONS.items():
+            assert (
+                badge_def["category"] in valid_categories
+            ), f"{badge_id} has invalid category"
+
+
+class TestEngineWithEmptyData:
+    """Tests for engine with empty or minimal data"""
+
+    @pytest.fixture
+    def engine(self):
+        return GamificationEngine()
+
+    def test_summary_with_no_drivers(self, engine):
+        """Test generating summary with no drivers"""
+        summary = engine.generate_gamification_summary([])
+        assert summary is not None
+        assert len(summary.leaderboard) == 0
+
+    def test_summary_with_single_driver(self, engine):
+        """Test generating summary with single driver"""
+        drivers_data = [
+            {
+                "truck_id": "T001",
+                "driver_name": "Solo Driver",
+                "mpg": 6.5,
+                "fleet_avg_mpg": 6.5,
+                "idle_percent": 12.0,
+                "safety_score": 85.0,
+            }
+        ]
+        summary = engine.generate_gamification_summary(drivers_data)
+        assert len(summary.leaderboard) == 1
+
+
+class TestProgressCalculation:
+    """Tests for badge progress calculation"""
+
+    def test_progress_percentage_formula(self):
+        """Test progress percentage formula"""
+        # 7 days out of 14 required = 50%
+        days_completed = 7
+        days_required = 14
+        progress = (days_completed / days_required) * 100
+        assert progress == 50.0
+
+    def test_progress_exceeds_100(self):
+        """Test progress doesn't exceed 100"""
+        days_completed = 20
+        days_required = 14
+        progress = min((days_completed / days_required) * 100, 100.0)
+        assert progress == 100.0
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

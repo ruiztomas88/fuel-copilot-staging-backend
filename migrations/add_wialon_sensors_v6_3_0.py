@@ -58,28 +58,42 @@ def run_migration():
     # All new columns to add
     new_columns = [
         # Priority 1: Predictive Maintenance
-        ("engine_load_pct", "FLOAT DEFAULT NULL COMMENT 'Engine load percentage (0-100)'"),
+        (
+            "engine_load_pct",
+            "FLOAT DEFAULT NULL COMMENT 'Engine load percentage (0-100)'",
+        ),
         ("oil_pressure_psi", "FLOAT DEFAULT NULL COMMENT 'Oil pressure in PSI'"),
         ("oil_temp_f", "FLOAT DEFAULT NULL COMMENT 'Oil temperature in Fahrenheit'"),
         ("oil_level_pct", "FLOAT DEFAULT NULL COMMENT 'Oil level percentage'"),
-        ("intake_pressure_psi", "FLOAT DEFAULT NULL COMMENT 'Intake manifold pressure PSI'"),
+        (
+            "intake_pressure_psi",
+            "FLOAT DEFAULT NULL COMMENT 'Intake manifold pressure PSI'",
+        ),
         ("intake_temp_f", "FLOAT DEFAULT NULL COMMENT 'Intake air temperature F'"),
-        
         # Priority 2: Cost Tracking
         ("def_level_pct", "FLOAT DEFAULT NULL COMMENT 'DEF/AdBlue level percentage'"),
-        ("total_idle_fuel_gal", "FLOAT DEFAULT NULL COMMENT 'Cumulative idle fuel used (gallons)'"),
+        (
+            "total_idle_fuel_gal",
+            "FLOAT DEFAULT NULL COMMENT 'Cumulative idle fuel used (gallons)'",
+        ),
         ("fuel_temp_f", "FLOAT DEFAULT NULL COMMENT 'Fuel temperature F'"),
-        ("ambient_temp_f", "FLOAT DEFAULT NULL COMMENT 'Ambient/outside temperature F'"),
-        
+        (
+            "ambient_temp_f",
+            "FLOAT DEFAULT NULL COMMENT 'Ambient/outside temperature F'",
+        ),
         # Priority 3: Driver Behavior
-        ("gear_position", "TINYINT DEFAULT NULL COMMENT 'Current gear position (0-18)'"),
+        (
+            "gear_position",
+            "TINYINT DEFAULT NULL COMMENT 'Current gear position (0-18)'",
+        ),
         ("brake_active", "TINYINT(1) DEFAULT NULL COMMENT 'Brake pedal active (0/1)'"),
         ("pto_hours", "FLOAT DEFAULT NULL COMMENT 'Power take-off hours'"),
-        
         # Priority 4: Safety/Other
         ("backup_battery_v", "FLOAT DEFAULT NULL COMMENT 'Backup battery voltage'"),
-        ("barometric_pressure", "FLOAT DEFAULT NULL COMMENT 'Barometric pressure (inHg)'"),
-        
+        (
+            "barometric_pressure",
+            "FLOAT DEFAULT NULL COMMENT 'Barometric pressure (inHg)'",
+        ),
         # Already should exist but let's ensure
         ("battery_voltage", "FLOAT DEFAULT NULL COMMENT 'Main battery voltage'"),
         ("idle_gph", "FLOAT DEFAULT NULL COMMENT 'Idle fuel consumption GPH'"),
@@ -97,7 +111,9 @@ def run_migration():
                 skipped += 1
             else:
                 try:
-                    cursor.execute(f"ALTER TABLE fuel_metrics ADD COLUMN {col_name} {col_def}")
+                    cursor.execute(
+                        f"ALTER TABLE fuel_metrics ADD COLUMN {col_name} {col_def}"
+                    )
                     conn.commit()
                     print(f"   ✅ {col_name} - added")
                     added += 1
@@ -112,7 +128,7 @@ def run_migration():
             ("idx_oil_pressure", "oil_pressure_psi"),
             ("idx_gear", "gear_position"),
         ]
-        
+
         for idx_name, col_name in indexes:
             try:
                 cursor.execute(f"CREATE INDEX {idx_name} ON fuel_metrics({col_name})")
