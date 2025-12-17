@@ -463,6 +463,15 @@ AFTERTREATMENT_SPNS = {
         description_es="Temperatura del líquido DEF (puede congelarse).",
         action_es="🔧 Verificar calentador del tanque DEF en clima frío.",
     ),
+    5444: SPNInfo(
+        spn=5444,
+        name_en="Aftertreatment 1 Diesel Exhaust Fluid Quality",
+        name_es="Calidad del Fluido DEF",
+        system=DTCSystem.AFTERTREATMENT,
+        severity=DTCSeverity.CRITICAL,
+        description_es="Calidad del Diesel Exhaust Fluid (DEF/AdBlue) fuera de especificación. Puede estar contaminado, diluido con agua, o degradado por edad.",
+        action_es="⛔ CRÍTICO: Vaciar tanque DEF y rellenar con DEF nuevo certificado ISO 22241. DEF contaminado puede causar falla del sistema SCR y derate del motor. Verificar fuente de DEF.",
+    ),
     # Exhaust System
     411: SPNInfo(
         spn=411,
