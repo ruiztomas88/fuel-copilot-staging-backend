@@ -474,7 +474,8 @@ async def get_truck_sensors(truck_id: str):
                 voltage, backup_voltage,
                 engine_hours, idle_hours, pto_hours,
                 total_idle_fuel_gal, total_fuel_used_gal,
-                dtc_count, dtc_code
+                dtc_count, dtc_code,
+                latitude, longitude, speed_mph, altitude_ft, odometer_mi
             FROM truck_sensors_cache
             WHERE truck_id = %s
         """
@@ -518,6 +519,11 @@ async def get_truck_sensors(truck_id: str):
                 "total_fuel_used_gal": None,
                 "dtc_count": None,
                 "dtc_code": None,
+                "latitude": None,
+                "longitude": None,
+                "speed_mph": None,
+                "altitude_ft": None,
+                "odometer_mi": None,
             }
 
         # Return cached data - already formatted and ready to use!
@@ -641,6 +647,22 @@ async def get_truck_sensors(truck_id: str):
                 int(row["dtc_count"]) if row["dtc_count"] is not None else None
             ),
             "dtc_code": row["dtc_code"],
+            # GPS & Odometer
+            "latitude": (
+                float(row["latitude"]) if row["latitude"] is not None else None
+            ),
+            "longitude": (
+                float(row["longitude"]) if row["longitude"] is not None else None
+            ),
+            "speed_mph": (
+                float(row["speed_mph"]) if row["speed_mph"] is not None else None
+            ),
+            "altitude_ft": (
+                float(row["altitude_ft"]) if row["altitude_ft"] is not None else None
+            ),
+            "odometer_mi": (
+                float(row["odometer_mi"]) if row["odometer_mi"] is not None else None
+            ),
         }
 
     except mysql.connector.Error as e:

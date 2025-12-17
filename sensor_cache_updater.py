@@ -54,7 +54,7 @@ def load_truck_config() -> Dict[str, Dict]:
     """Load truck configuration from tanks.yaml"""
     tanks_path = Path(__file__).parent / "tanks.yaml"
     try:
-        with open(tanks_path, "r", encoding='utf-8') as f:
+        with open(tanks_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
             return config.get("trucks", {})
     except Exception as e:
@@ -189,7 +189,7 @@ def update_sensor_cache():
                     engine_hours, idle_hours, pto_hours,
                     total_idle_fuel_gal, total_fuel_used_gal,
                     dtc_count, dtc_code,
-                    latitude, longitude, speed_mph, altitude_ft,
+                    latitude, longitude, speed_mph, altitude_ft, odometer_mi,
                     data_age_seconds
                 ) VALUES (
                     %s, %s, %s, %s,
@@ -242,6 +242,7 @@ def update_sensor_cache():
                     longitude = VALUES(longitude),
                     speed_mph = VALUES(speed_mph),
                     altitude_ft = VALUES(altitude_ft),
+                    odometer_mi = VALUES(odometer_mi),
                     data_age_seconds = VALUES(data_age_seconds)
             """
 
@@ -294,6 +295,7 @@ def update_sensor_cache():
                     data.get("longitude"),
                     get_val("speed"),
                     get_val("altitude"),
+                    get_val("odometer"),  # Odometer in miles
                     # Metadata
                     data["data_age_seconds"],
                 ),
