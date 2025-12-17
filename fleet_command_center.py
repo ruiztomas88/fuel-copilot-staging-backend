@@ -4056,67 +4056,63 @@ class FleetCommandCenter:
                     )
                 )
 
-            # 🆕 v6.3.0: Oil pressure issues - NOW WITH TRUCK IDs
+            # 🆕 v6.3.1: Oil pressure issues - INDIVIDUAL items per truck
             oil_trucks = truck_issues.get("oil_pressure_low", [])
-            if oil_trucks:
-                truck_list = ", ".join(
-                    [f"{t['truck_id']} ({t['value']} PSI)" for t in oil_trucks]
-                )
+            for oil_truck in oil_trucks:
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
-                        truck_id="FLEET",
+                        truck_id=oil_truck['truck_id'],
                         priority=Priority.CRITICAL,
                         priority_score=90,
                         category=IssueCategory.ENGINE,
                         component="Sistema de Lubricación",
-                        title=f"🛢️ {len(oil_trucks)} Camiones con Presión de Aceite Baja",
-                        description=f"⚠️ URGENTE - Camiones: {truck_list}",
+                        title=f"🛢️ Presión de Aceite Baja",
+                        description=f"⚠️ URGENTE - Presión actual: {oil_truck['value']} PSI (límite: <25 PSI)",
                         days_to_critical=0,
                         cost_if_ignored="$15,000 - $50,000 (motor fundido)",
-                        current_value=f"Min: {min(t['value'] for t in oil_trucks):.0f} PSI",
+                        current_value=f"{oil_truck['value']:.1f} PSI",
                         trend=None,
                         threshold="<25 PSI",
                         confidence="HIGH",
                         action_type=ActionType.STOP_IMMEDIATELY,
                         action_steps=[
-                            f"🛑 DETENER AHORA: {', '.join([t['truck_id'] for t in oil_trucks])}",
-                            "🔍 Verificar nivel de aceite en cada camión",
-                            "🔧 Revisar sensor y bomba de aceite",
-                            "🚫 No conducir hasta resolver",
+                            f"🛑 DETENER CAMIÓN {oil_truck['truck_id']} INMEDIATAMENTE",
+                            "🔍 Verificar nivel de aceite del motor",
+                            "🔧 Revisar sensor de presión de aceite",
+                            "🔧 Inspeccionar bomba de aceite",
+                            "🚫 No conducir hasta resolver el problema",
                         ],
                         icon="🛢️",
                         sources=["Oil Pressure Sensor"],
                     )
                 )
 
-            # 🆕 v6.3.0: DEF level warnings - NOW WITH TRUCK IDs
+            # 🆕 v6.3.1: DEF level warnings - INDIVIDUAL items per truck
             def_trucks = truck_issues.get("def_low", [])
-            if def_trucks:
-                truck_list = ", ".join(
-                    [f"{t['truck_id']} ({t['value']}%)" for t in def_trucks]
-                )
+            for def_truck in def_trucks:
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
-                        truck_id="FLEET",
+                        truck_id=def_truck['truck_id'],
                         priority=Priority.MEDIUM,
                         priority_score=50,
                         category=IssueCategory.DEF,
                         component="Sistema DEF/AdBlue",
-                        title=f"🧪 {len(def_trucks)} Camiones con DEF Bajo",
-                        description=f"Camiones: {truck_list}",
+                        title=f"🧪 Nivel de DEF Bajo",
+                        description=f"Nivel actual: {def_truck['value']:.1f}% (límite: <15%)",
                         days_to_critical=3,
                         cost_if_ignored="$5,000+ (derate del motor)",
-                        current_value=f"Min: {min(t['value'] for t in def_trucks):.0f}%",
+                        current_value=f"{def_truck['value']:.1f}%",
                         trend=None,
                         threshold="<15%",
                         confidence="HIGH",
                         action_type=ActionType.SCHEDULE_THIS_WEEK,
                         action_steps=[
-                            f"⛽ Recargar DEF en: {', '.join([t['truck_id'] for t in def_trucks])}",
+                            f"⛽ Recargar DEF en camión {def_truck['truck_id']}",
                             "📍 Localizar estación de DEF cercana",
                             "📝 Verificar consumo normal de DEF",
+                            "🔍 Inspeccionar sistema de inyección DEF",
                         ],
                         icon="🧪",
                         sources=["DEF Level Sensor"],
@@ -4125,31 +4121,28 @@ class FleetCommandCenter:
 
             # 🆕 v6.3.0: Engine overload alerts - NOW WITH TRUCK IDs
             overload_trucks = truck_issues.get("engine_overload", [])
-            if overload_trucks:
-                truck_list = ", ".join(
-                    [f"{t['truck_id']} ({t['value']}%)" for t in overload_trucks]
-                )
+            if overloa1: Engine overload alerts - INDIVIDUAL items per truck
+            overload_trucks = truck_issues.get("engine_overload", [])
+            for overload_truck in overload_trucks:
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
-                        truck_id="FLEET",
+                        truck_id=overload_truck['truck_id'],
                         priority=Priority.HIGH,
                         priority_score=70,
                         category=IssueCategory.ENGINE,
                         component="Carga del Motor",
-                        title=f"🔥 {len(overload_trucks)} Camiones con Sobrecarga de Motor",
-                        description=f"Camiones: {truck_list}",
+                        title=f"🔥 Sobrecarga de Motor",
+                        description=f"Carga actual: {overload_truck['value']:.1f}% (límite: >90%)",
                         days_to_critical=7,
                         cost_if_ignored="$5,000 - $15,000 (reparaciones prematuras)",
-                        current_value=f"Max: {max(t['value'] for t in overload_trucks):.0f}%",
+                        current_value=f"{overload_truck['value']:.1f}%",
                         trend=None,
                         threshold=">90%",
                         confidence="MEDIUM",
                         action_type=ActionType.MONITOR,
                         action_steps=[
-                            f"📊 Revisar carga en: {', '.join([t['truck_id'] for t in overload_trucks])}",
-                            "🚛 Verificar peso de carga transportada",
-                            "📈 Considerar rutas alternativas",
+                            f"📊 Revisar carga del motor en {overload_truck['truck_id']
                             "🔧 Inspeccionar filtros de aire",
                         ],
                         icon="🔥",
@@ -4157,34 +4150,32 @@ class FleetCommandCenter:
                     )
                 )
 
-            # 🆕 v6.3.0: Coolant temperature high - NOW WITH TRUCK IDs
+            # 🆕 v6.3.1: Coolant temperature high - INDIVIDUAL items per truck
             coolant_trucks = truck_issues.get("coolant_high", [])
-            if coolant_trucks:
-                truck_list = ", ".join(
-                    [f"{t['truck_id']} ({t['value']}°F)" for t in coolant_trucks]
-                )
+            for coolant_truck in coolant_trucks:
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
-                        truck_id="FLEET",
+                        truck_id=coolant_truck['truck_id'],
                         priority=Priority.CRITICAL,
                         priority_score=85,
                         category=IssueCategory.ENGINE,
                         component="Sistema de Enfriamiento",
-                        title=f"🌡️ {len(coolant_trucks)} Camiones con Temperatura Alta",
-                        description=f"⚠️ URGENTE - Camiones: {truck_list}",
+                        title=f"🌡️ Temperatura de Refrigerante Alta",
+                        description=f"⚠️ URGENTE - Temperatura: {coolant_truck['value']:.1f}°F (límite: >220°F)",
                         days_to_critical=0,
                         cost_if_ignored="$3,000 - $20,000 (daño por sobrecalentamiento)",
-                        current_value=f"Max: {max(t['value'] for t in coolant_trucks):.0f}°F",
+                        current_value=f"{coolant_truck['value']:.1f}°F",
                         trend=None,
                         threshold=">220°F",
                         confidence="HIGH",
                         action_type=ActionType.STOP_IMMEDIATELY,
                         action_steps=[
-                            f"🛑 Detener: {', '.join([t['truck_id'] for t in coolant_trucks])}",
-                            "💧 Verificar nivel de refrigerante",
+                            f"🛑 DETENER CAMIÓN {coolant_truck['truck_id']} INMEDIATAMENTE",
+                            "💧 Verificar nivel de refrigerante (esperar a que enfríe)",
                             "🔍 Revisar termostato y ventilador",
-                            "🚫 No abrir radiador si está caliente",
+                            "🔍 Inspeccionar radiador y mangueras",
+                            "🚫 NO abrir radiador si está caliente - riesgo de quemaduras",
                         ],
                         icon="🌡️",
                         sources=["Coolant Temperature Sensor"],
