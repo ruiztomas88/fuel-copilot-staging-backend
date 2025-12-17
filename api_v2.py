@@ -426,7 +426,11 @@ async def get_anomaly_timeline(
 )
 async def get_truck_sensors(truck_id: str):
     """
-    Get comprehensive real-time sensor data for a truck from Wialon.
+    Get comprehensive real-time sensor data for a truck.
+
+    ⚡ OPTIMIZED v2.0: Reads from local cache table (truck_sensors_cache)
+    Updated every 30 seconds by sensor_cache_updater.py service.
+    Much faster than querying Wialon directly (1 simple SELECT vs 2000 rows).
 
     Returns all ECU sensor readings including:
     - Oil: Pressure (PSI), Temperature (°F), Level (%)
@@ -435,78 +439,58 @@ async def get_truck_sensors(truck_id: str):
     - Transmission: Gear Position
     - Braking: Brake Switch status
     - Air Intake: Pressure (Bar), Temperature (°F)
-    - Fuel: Temperature (°F)
+    - Fuel: Temperature (°F), Level (%)
     - Environmental: Ambient Temp (°F), Barometric Pressure (inHg)
     - Electrical: Battery Voltage (V), Backup Battery (V)
     - Operational: Engine Hours, Idle Hours, PTO Hours
     """
     import mysql.connector
-    import yaml
     import os
-    from pathlib import Path
 
-    # Wialon DB connection config from environment variables
-    WIALON_CONFIG = {
-        "host": os.getenv("WIALON_DB_HOST", "20.127.200.135"),
-        "port": int(os.getenv("WIALON_DB_PORT", "3306")),
-        "database": os.getenv("WIALON_DB_NAME", "wialon_collect"),
-        "user": os.getenv("WIALON_DB_USER", "tomas"),
-        "password": os.getenv("WIALON_DB_PASS", "Tomas2025"),
-        "connect_timeout": 30,
+    # Connect to local fuel_copilot database
+    FUEL_COPILOT_CONFIG = {
+        "host": "localhost",
+        "port": 3306,
+        "user": os.getenv("MYSQL_USER", "fuel_admin"),
+        "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+        "database": "fuel_copilot",
     }
 
-    # Load unit_id mapping from tanks.yaml
-    tanks_path = Path(__file__).parent / "tanks.yaml"
-    unit_id = None
-    tank_capacity = 300  # Default
-
     try:
-        with open(tanks_path, "r") as f:
-            tanks_config = yaml.safe_load(f)
-            trucks = tanks_config.get("trucks", {})
-            if truck_id in trucks:
-                unit_id = trucks[truck_id].get("unit_id")
-                tank_capacity = trucks[truck_id].get("capacity_gal", 300)
-    except Exception as e:
-        logger.warning(f"Could not load tanks.yaml: {e}")
-
-    if not unit_id:
-        raise HTTPException(
-            status_code=404, detail=f"Truck {truck_id} not found in configuration"
-        )
-
-    try:
-        conn = mysql.connector.connect(**WIALON_CONFIG)
+        conn = mysql.connector.connect(**FUEL_COPILOT_CONFIG)
         cursor = conn.cursor(dictionary=True)
 
-        # Get latest sensor readings from Wialon sensors table
-        # Use the same strategy as wialon_reader.py
-        cutoff_epoch = int(__import__("time").time()) - 3600  # Last hour
-
+        # Simple SELECT from cache table - super fast!
         query = """
             SELECT 
-                p as param_name,
-                value,
-                m as epoch_time
-            FROM sensors
-            WHERE unit = %s
-                AND m >= %s
-            ORDER BY m DESC
-            LIMIT 2000
+                truck_id, timestamp, data_age_seconds,
+                oil_pressure_psi, oil_temp_f, oil_level_pct,
+                def_level_pct,
+                engine_load_pct, rpm, coolant_temp_f, coolant_level_pct,
+                gear, brake_active,
+                intake_pressure_bar, intake_temp_f, intercooler_temp_f,
+                fuel_temp_f, fuel_level_pct, fuel_rate_gph,
+                ambient_temp_f, barometric_pressure_inhg,
+                voltage, backup_voltage,
+                engine_hours, idle_hours, pto_hours,
+                total_idle_fuel_gal, total_fuel_used_gal,
+                dtc_count, dtc_code
+            FROM truck_sensors_cache
+            WHERE truck_id = %s
         """
 
-        cursor.execute(query, (unit_id, cutoff_epoch))
-        results = cursor.fetchall()
+        cursor.execute(query, (truck_id,))
+        row = cursor.fetchone()
         cursor.close()
         conn.close()
 
-        if not results:
-            # Return empty sensor data with null values
+        if not row:
+            # No data in cache - truck not found or no recent data
             return {
                 "truck_id": truck_id,
                 "timestamp": None,
                 "data_available": False,
-                "message": "No recent sensor data from Wialon (last hour)",
+                "message": "No recent sensor data available. Cache may be updating.",
                 "oil_pressure_psi": None,
                 "oil_temp_f": None,
                 "oil_level_pct": None,
@@ -531,90 +515,54 @@ async def get_truck_sensors(truck_id: str):
                 "idle_hours": None,
                 "pto_hours": None,
                 "total_idle_fuel_gal": None,
+                "total_fuel_used_gal": None,
+                "dtc_count": None,
+                "dtc_code": None,
             }
 
-        # Get latest timestamp
-        latest_epoch = results[0]["epoch_time"]
-        
-        # Build sensor dict using Last Known Value strategy
-        sensor_dict = {}
-        for row in results:
-            param = row["param_name"]
-            value = row["value"]
-            
-            # Only use values from latest timestamp first
-            if row["epoch_time"] == latest_epoch and param and value is not None:
-                sensor_dict[param] = value
-        
-        # Fill missing values from recent history (within 15 minutes)
-        for row in results:
-            age_sec = latest_epoch - row["epoch_time"]
-            if age_sec > 900:  # 15 minutes
-                break
-            
-            param = row["param_name"]
-            value = row["value"]
-            
-            if param and value is not None and param not in sensor_dict:
-                sensor_dict[param] = value
-
-        # Helper functions for unit conversions
-        def celsius_to_fahrenheit(c):
-            if c is None:
-                return None
-            return round(c * 9 / 5 + 32, 1)
-
-        def get_value(key, default=None):
-            """Get value from sensor dict"""
-            return sensor_dict.get(key, default)
-
-        # Build response with converted values
-        from datetime import datetime, timezone as tz
-
-        timestamp = datetime.fromtimestamp(latest_epoch, tz=tz.utc)
-        )
-
+        # Return cached data - already formatted and ready to use!
         return {
-            "truck_id": truck_id,
-            "timestamp": timestamp.isoformat(),
+            "truck_id": row["truck_id"],
+            "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None,
             "data_available": True,
-            # Oil System (PT40 devices send oil_press directly in PSI, oil_temp in °F)
-            "oil_pressure_psi": round(get_value("oil_press"), 1) if get_value("oil_press") else None,
-            "oil_temp_f": round(get_value("oil_temp"), 1) if get_value("oil_temp") else None,
-            "oil_level_pct": round(get_value("oil_lvl"), 1) if get_value("oil_lvl") else None,
+            "data_age_seconds": row.get("data_age_seconds"),
+            # Oil System
+            "oil_pressure_psi": float(row["oil_pressure_psi"]) if row["oil_pressure_psi"] is not None else None,
+            "oil_temp_f": float(row["oil_temp_f"]) if row["oil_temp_f"] is not None else None,
+            "oil_level_pct": float(row["oil_level_pct"]) if row["oil_level_pct"] is not None else None,
             # DEF
-            "def_level_pct": round(get_value("def_level"), 1) if get_value("def_level") else None,
-            # Engine (engine_load is %, rpm is direct, cool_temp in °F)
-            "engine_load_pct": round(get_value("engine_load"), 1) if get_value("engine_load") else None,
-            "rpm": int(get_value("rpm")) if get_value("rpm") else None,
-            "coolant_temp_f": round(get_value("cool_temp"), 1) if get_value("cool_temp") else None,
-            "coolant_level_pct": round(get_value("cool_lvl"), 1) if get_value("cool_lvl") else None,
+            "def_level_pct": float(row["def_level_pct"]) if row["def_level_pct"] is not None else None,
+            # Engine
+            "engine_load_pct": float(row["engine_load_pct"]) if row["engine_load_pct"] is not None else None,
+            "rpm": int(row["rpm"]) if row["rpm"] is not None else None,
+            "coolant_temp_f": float(row["coolant_temp_f"]) if row["coolant_temp_f"] is not None else None,
+            "coolant_level_pct": float(row["coolant_level_pct"]) if row["coolant_level_pct"] is not None else None,
             # Transmission & Brakes
-            "gear": int(get_value("gear")) if get_value("gear") else None,
-            "brake_active": bool(get_value("brake_switch")) if get_value("brake_switch") is not None else None,
-            # Air Intake (pressure in Bar, temp in °F)
-            "intake_pressure_bar": round(get_value("intake_pressure"), 2) if get_value("intake_pressure") else None,
-            "intake_temp_f": round(get_value("intk_t"), 1) if get_value("intk_t") else None,
-            "intercooler_temp_f": round(get_value("intrclr_t"), 1) if get_value("intrclr_t") else None,
-            # Fuel (temp in °F, level in %, rate in gal/hr)
-            "fuel_temp_f": round(get_value("fuel_t"), 1) if get_value("fuel_t") else None,
-            "fuel_level_pct": round(get_value("fuel_lvl"), 1) if get_value("fuel_lvl") else None,
-            "fuel_rate_gph": round(get_value("fuel_rate"), 2) if get_value("fuel_rate") else None,
+            "gear": int(row["gear"]) if row["gear"] is not None else None,
+            "brake_active": bool(row["brake_active"]) if row["brake_active"] is not None else None,
+            # Air Intake
+            "intake_pressure_bar": float(row["intake_pressure_bar"]) if row["intake_pressure_bar"] is not None else None,
+            "intake_temp_f": float(row["intake_temp_f"]) if row["intake_temp_f"] is not None else None,
+            "intercooler_temp_f": float(row["intercooler_temp_f"]) if row["intercooler_temp_f"] is not None else None,
+            # Fuel
+            "fuel_temp_f": float(row["fuel_temp_f"]) if row["fuel_temp_f"] is not None else None,
+            "fuel_level_pct": float(row["fuel_level_pct"]) if row["fuel_level_pct"] is not None else None,
+            "fuel_rate_gph": float(row["fuel_rate_gph"]) if row["fuel_rate_gph"] is not None else None,
             # Environmental
-            "ambient_temp_f": round(get_value("ambient_temp"), 1) if get_value("ambient_temp") else None,
-            "barometric_pressure_inhg": round(get_value("barometer"), 2) if get_value("barometer") else None,
+            "ambient_temp_f": float(row["ambient_temp_f"]) if row["ambient_temp_f"] is not None else None,
+            "barometric_pressure_inhg": float(row["barometric_pressure_inhg"]) if row["barometric_pressure_inhg"] is not None else None,
             # Electrical
-            "voltage": round(get_value("pwr_ext"), 2) if get_value("pwr_ext") else None,
-            "backup_voltage": round(get_value("pwr_int"), 2) if get_value("pwr_int") else None,
+            "voltage": float(row["voltage"]) if row["voltage"] is not None else None,
+            "backup_voltage": float(row["backup_voltage"]) if row["backup_voltage"] is not None else None,
             # Operational Counters
-            "engine_hours": round(get_value("engine_hours"), 1) if get_value("engine_hours") else None,
-            "idle_hours": round(get_value("idle_hours"), 1) if get_value("idle_hours") else None,
-            "pto_hours": round(get_value("pto_hours"), 1) if get_value("pto_hours") else None,
-            "total_idle_fuel_gal": round(get_value("total_idle_fuel"), 1) if get_value("total_idle_fuel") else None,
-            "total_fuel_used_gal": round(get_value("total_fuel_used"), 1) if get_value("total_fuel_used") else None,
+            "engine_hours": float(row["engine_hours"]) if row["engine_hours"] is not None else None,
+            "idle_hours": float(row["idle_hours"]) if row["idle_hours"] is not None else None,
+            "pto_hours": float(row["pto_hours"]) if row["pto_hours"] is not None else None,
+            "total_idle_fuel_gal": float(row["total_idle_fuel_gal"]) if row["total_idle_fuel_gal"] is not None else None,
+            "total_fuel_used_gal": float(row["total_fuel_used_gal"]) if row["total_fuel_used_gal"] is not None else None,
             # DTC
-            "dtc_count": int(get_value("dtc")) if get_value("dtc") else None,
-            "dtc_code": get_value("dtc_code"),
+            "dtc_count": int(row["dtc_count"]) if row["dtc_count"] is not None else None,
+            "dtc_code": row["dtc_code"],
         }
 
     except mysql.connector.Error as e:
