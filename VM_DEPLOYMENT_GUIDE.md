@@ -1,4 +1,4 @@
-# 🚀 Deployment en VM - Wialon Full Sync
+# 🚀 Deployment en VM Windows - Wialon Full Sync
 
 ## ✅ Ya Completado en VM
 
@@ -11,12 +11,12 @@
 
 ### Paso 1: Pull los Cambios del Backend
 
-```bash
-# Conectar a la VM
-ssh usuario@tu-vm-ip
+```powershell
+# Conectar a la VM (Remote Desktop o PowerShell remoting)
+# Abrir PowerShell como Administrador
 
 # Ir al directorio del backend
-cd /path/to/Fuel-Analytics-Backend
+cd C:\path\to\Fuel-Analytics-Backend
 
 # Pull los últimos cambios
 git pull origin main
@@ -31,9 +31,9 @@ git pull origin main
 
 ### Paso 2: Crear las Nuevas Tablas
 
-```bash
+```powershell
 # Ejecutar la migración para las nuevas tablas
-python3 migrations/create_wialon_sync_tables.py
+python migrations\create_wialon_sync_tables.py
 ```
 
 **Salida esperada:**
@@ -49,8 +49,11 @@ Creating Wialon sync tables...
 
 ### Paso 3: Verificar las Tablas
 
-```bash
+```powershell
+# Conectar a MySQL (ajusta la ruta según tu instalación)
 mysql -u root -p fuel_copilot
+# O si MySQL está en el PATH:
+# C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe -u root -p fuel_copilot
 ```
 
 ```sql
@@ -75,9 +78,9 @@ EXIT;
 ---
 
 ### Paso 4: Iniciar el Servicio de Sincronización
-
-**Opción A: Ejecutar en foreground (para testing - 5 minutos)**
-
+powershell
+# Ejecutar y ver los logs en tiempo real
+python
 ```bash
 # Ejecutar y ver los logs en tiempo real
 python3 wialon_full_sync_service.py
@@ -118,15 +121,12 @@ Verás algo como:
 
 **Opción B: Ejecutar en background (producción)**
 
-```bash
-# Iniciar como servicio en background
-nohup python3 wialon_full_sync_service.py > wialon_sync.log 2>&1 &
-
-# Guardar el PID para poder detenerlo después
-echo $! > wialon_sync.pid
+```powershell
+# Iniciar como proceso en background con PowerShell
+Start-Process -NoNewWindow -FilePath "python" -ArgumentList "wialon_full_sync_service.py" -RedirectStandardOutput "wialon_sync.log" -RedirectStandardError "wialon_sync_errors.log"
 
 # Ver los logs en tiempo real
-tail -f wialon_sync.log
+Get-Content wialon_sync.log -Wait -Tail 50
 
 # Para salir de los logs: Ctrl+C (el servicio sigue corriendo)
 ```
@@ -140,7 +140,7 @@ Espera 2-3 minutos y luego verifica:
 ```bash
 mysql -u root -p fuel_copilot
 ```
-
+powershell
 ```sql
 -- Verificar sensores (debe tener datos recientes)
 SELECT COUNT(*) as cached_trucks, 
@@ -186,115 +186,167 @@ LIMIT 5;
 ```bash
 # Endpoint 1: Fleet Driver Behavior
 curl -X GET "http://localhost:8008/fuelAnalytics/api/v2/fleet/driver-behavior?days=7"
+powershell
+# Endpoint 1: Fleet Driver Behavior
+Invoke-WebRequest -Uri "http://localhost:8008/fuelAnalytics/api/v2/fleet/driver-behavior?days=7" -Method GET | Select-Object -ExpandProperty Content
 
 # Endpoint 2: Trips de un truck específico
-curl -X GET "http://localhost:8008/fuelAnalytics/api/v2/trucks/GS5030/trips?days=7"
+Invoke-WebRequest -Uri "http://localhost:8008/fuelAnalytics/api/v2/trucks/GS5030/trips?days=7" -Method GET | Select-Object -ExpandProperty Content
 
 # Endpoint 3: Speeding events de un truck
-curl -X GET "http://localhost:8008/fuelAnalytics/api/v2/trucks/GS5030/speeding-events?days=7"
-```
+Invoke-WebRequest -Uri "http://localhost:8008/fuelAnalytics/api/v2/trucks/GS5030/speeding-events?days=7" -Method GET | Select-Object -ExpandProperty Content
 
-**Si obtienes JSON con datos:** ✅ Todo funciona correctamente!
+# Alternativa más simple (si tienes curl instalado en Windows):
+curl http://localhost:8008/fuelAnalytics/api/v2/fleet/driver-behavior?days=7
 
 ---
 
 ### Paso 7: Configurar el Servicio para Auto-Start (Opcional pero Recomendado)
+**Opción A: Usar NSSM (Non-Sucking Service Manager) - Recomendado**
 
-Para que el servicio se inicie automáticamente cuando la VM se reinicie:
+```powershell
+# 1. Descargar NSSM desde https://nssm.cc/download
+# 2. Extraer nssm.exe a C:\tools\nssm\ (o cualquier ubicación)
 
-```bash
-# Crear un servicio systemd
-sudo nano /etc/systemd/system/wialon-sync.service
-```
+# Instalar el servicio con NSSM
+C:\tools\nssm\nssm.exe install WialonSync python "C:\path\to\Fuel-Analytics-Backend\wialon_full_sync_service.py"
 
-Pegar este contenido:
-```ini
-[Unit]
-Description=Wialon Full Data Sync Service
-After=network.target mysql.service
+# Configurar el directorio de trabajo
+C:\tools\nssm\nssm.exe set WialonSync AppDirectory "C:\path\to\Fuel-Analytics-Backend"
 
-[Service]
-Type=simple
-User=tu-usuario
-WorkingDirectory=/path/to/Fuel-Analytics-Backend
-ExecStart=/usr/bin/python3 /path/to/Fuel-Analytics-Backend/wialon_full_sync_service.py
-Restart=always
-RestartSec=10
-StandardOutput=append:/var/log/wialon_sync.log
-StandardError=append:/var/log/wialon_sync.log
+# Configurar los logs
+C:\tools\nssm\nssm.exe set WialonSync AppStdout "C:\path\to\Fuel-Analytics-Backend\wialon_sync.log"
+C:\tools\nssm\nssm.exe set WialonSync AppStderr "C:\path\to\Fuel-Analytics-Backend\wialon_sync_errors.log"
 
-[Install]
-WantedBy=multi-user.target
-```
-
-**Guardar:** Ctrl+X, Y, Enter
-
-```bash
-# Recargar systemd
-sudo systemctl daemon-reload
-
-# Habilitar para auto-start
-sudo systemctl enable wialon-sync.service
+# Configurar auto-restart
+C:\tools\nssm\nssm.exe set WialonSync AppRestartDelay 10000
 
 # Iniciar el servicio
-sudo systemctl start wialon-sync.service
+Start-Service WialonSync
 
 # Ver estado
-sudo systemctl status wialon-sync.service
+Get-Service WialonSync
 
 # Ver logs
-sudo journalctl -u wialon-sync.service -f
+Get-Content C:\path\to\Fuel-Analytics-Backend\wialon_sync.log -Wait -Tail 50
 ```
 
-**Comandos útiles:**
-```bash
+**Opción B: Usar Scheduled Task**
+
+```powershell
+# Crear una tarea programada que inicie al arrancar
+$action = New-ScheduledTaskAction -Execute "python" -Argument "C:\path\to\Fuel-Analytics-Backend\wialon_full_sync_service.py" -WorkingDirectory "C:\path\to\Fuel-Analytics-Backend"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+
+Register-ScheduledTask -TaskName "WialonSyncService" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Wialon Full Data Sync Service"
+
+# Iniciar la tarea manualmente
+Start-ScheduledTask -TaskName "WialonSyncService"
+
+# Ver estado
+Get-ScheduledTask -TaskName "WialonSyncService" | Get-ScheduledTaskInfo
+```
+
+**Comandos útiles para NSSM:**
+```powershell
 # Detener el servicio
-sudo systemctl stop wialon-sync.service
+Stop-Service WialonSync
 
 # Reiniciar el servicio
-sudo systemctl restart wialon-sync.service
+Restart-Service WialonSync
+
+# Desinstalar el servicio
+C:\tools\nssm\nssm.exe remove WialonSync confirm
 
 # Ver logs
+Get-Content wialon_sync.log -Wait -Tail 50
+```powershell
+# Ver logs en tiempo real
+Get-Content wialon_sync.log -Wait -Tail 50
+
+# Ver últimos 50 logs
+Get-Content wialon_sync.log -Tail 50
+
+# Buscar errores
+Select-String -Path wialon_sync.log -Pattern "❌"
+
+# Ver ciclos de sincronización
+Select-String -Path wialon_sync.log -Pattern "Sync Cycle" | Select-Object -Last 10
+
+# Verificar proceso corriendo
+Get-Process | Where-Object {$_.ProcessName -like "*python*"}
+
+# Verificar servicio (si usas NSSM)
+Get-Service WialonSync
+
+# Ver detalles del proceso Python
+Get-Process python | Format-List *
 tail -f /var/log/wialon_sync.log
 ```
 
----
-
-### Paso 8: Monitoreo Continuo
-
-```bash
-# Ver logs en tiempo real
-tail -f wialon_sync.log
-
-# Ver últimos 50 logs
-tail -50 wialon_sync.log
-
-# Buscar errores
-grep "❌" wialon_sync.log
-
-# Ver ciclos de sincronización
-grep "Sync Cycle" wialon_sync.log | tail -10
-
-# Verificar proceso corriendo
-ps aux | grep wialon_full_sync_service
-```
-
----
-
-## 🔧 Troubleshooting
-
-### El servicio no inicia
-
-**Verificar Python y dependencias:**
-```bash
-python3 --version  # Debe ser 3.7+
-pip3 install pymysql
+---powershell
+python --version  # Debe ser 3.7+
+pip install pymysql
 ```
 
 **Verificar conexión a Wialon:**
-```bash
+```powershell
 mysql -h 20.127.200.135 -u wialonro -p wialon_collect -e "SELECT COUNT(*) FROM sensors;"
 # Password: KjmAqwertY1#2024!@Wialon
+```
+
+**Verificar conexión local:**
+```powershell
+mysql -u root -p fuel_copilot -e "SELECT COUNT(*) FROM truck_sensors_cache;"
+```
+
+**Verificar firewall:**
+```powershell
+# Ver reglas de firewall para Python
+Get-NetFirewallRule | Where-Object {$_.DisplayName -like "*Python*"}
+
+# Agregar regla si es necesario
+New-NetFirewallRule -DisplayName "Python MySQL" -Direction Outbound -Program "C:\path\to\python.exe" -Action Allow
+```
+
+### No aparecen datos en las tablas
+
+**Verificar logs:**
+```powershell
+Get-Content wialon_sync.log -Tail 50 | Select-String "❌"
+```
+
+**Verificar que el servicio esté corriendo:**
+```powershell
+# Si usas NSSM:
+Get-Service WialonSync
+
+# Si usas Scheduled Task:
+Get-ScheduledTask -TaskName "WialonSyncService" | Get-ScheduledTaskInfo
+
+# Verificar proceso Python:
+Get-Process | Where-Object {$_.ProcessName -eq "python"}
+```
+
+Si no está corriendo, iniciarlo:
+```powershell
+# Si usas NSSM:
+Start-Service WialonSync
+
+# Si usas Scheduled Task:
+Start-ScheduledTask -TaskName "WialonSyncService"
+
+# O ejecutar directamente:
+pythonstall pymysql
+```
+
+**Verificar conexión a Wialon:**
+```bashInvoke-WebRequest tests)
+- [ ] Servicio configurado para auto-start (NSSM o Scheduled Task)
+- [ ] Monitoreo establecido (logs, SQL queries)
+- [ ] Firewall configurado (si es necesario
 ```
 
 **Verificar conexión local:**
@@ -323,13 +375,16 @@ python3 wialon_full_sync_service.py
 
 **Verificar freshness de los datos:**
 ```sql
-SELECT MAX(last_updated) as last_sync,
-       TIMESTAMPDIFF(SECOND, MAX(last_updated), NOW()) as age_seconds
-FROM truck_sensors_cache;
-```
+SELECT MAX(last_updated)Get-Content wialon_sync.log -Wait -Tail 50`
+2. **Verificar SQL:** Ejecutar las queries de verificación arriba
+3. **Verificar proceso:** `Get-Process | Where-Object {$_.ProcessName -eq "python"}`
+4. **Reintentar:** 
+   - NSSM: `Restart-Service WialonSync`
+   - Scheduled Task: `Stop-ScheduledTask -TaskName "WialonSyncService"; Start-ScheduledTask -TaskName "WialonSyncService"`
 
-Si `age_seconds > 120`: El servicio está detenido o hay error de conexión.
+---
 
+**Plataforma:** Windows Server  
 ---
 
 ## ✅ Checklist de Deployment
