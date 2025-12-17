@@ -421,11 +421,13 @@ async def get_anomaly_timeline(
 # =============================================================================
 # 🆕 v6.3.0: TRUCK SENSOR DATA ENDPOINT
 # =============================================================================
-@router.get("/trucks/{truck_id}/sensors", summary="Real-time Sensor Data", tags=["Sensors"])
+@router.get(
+    "/trucks/{truck_id}/sensors", summary="Real-time Sensor Data", tags=["Sensors"]
+)
 async def get_truck_sensors(truck_id: str):
     """
     Get comprehensive real-time sensor data for a truck from Wialon.
-    
+
     Returns all ECU sensor readings including:
     - Oil: Pressure (PSI), Temperature (°F), Level (%)
     - DEF: Tank Level (%)
@@ -442,7 +444,7 @@ async def get_truck_sensors(truck_id: str):
     import yaml
     import os
     from pathlib import Path
-    
+
     # Wialon DB connection config from environment variables
     WIALON_CONFIG = {
         "host": os.getenv("WIALON_DB_HOST", "20.127.200.135"),
@@ -452,12 +454,12 @@ async def get_truck_sensors(truck_id: str):
         "password": os.getenv("WIALON_DB_PASS", "Tomas2025"),
         "connect_timeout": 30,
     }
-    
+
     # Load unit_id mapping from tanks.yaml
     tanks_path = Path(__file__).parent / "tanks.yaml"
     unit_id = None
     tank_capacity = 300  # Default
-    
+
     try:
         with open(tanks_path, "r") as f:
             tanks_config = yaml.safe_load(f)
@@ -467,14 +469,16 @@ async def get_truck_sensors(truck_id: str):
                 tank_capacity = trucks[truck_id].get("capacity_gal", 300)
     except Exception as e:
         logger.warning(f"Could not load tanks.yaml: {e}")
-    
+
     if not unit_id:
-        raise HTTPException(status_code=404, detail=f"Truck {truck_id} not found in configuration")
-    
+        raise HTTPException(
+            status_code=404, detail=f"Truck {truck_id} not found in configuration"
+        )
+
     try:
         conn = mysql.connector.connect(**WIALON_CONFIG)
         cursor = conn.cursor(dictionary=True)
-        
+
         # Query latest data from Wialon
         query = """
             SELECT 
@@ -523,12 +527,12 @@ async def get_truck_sensors(truck_id: str):
             ORDER BY p.time DESC
             LIMIT 1
         """
-        
+
         cursor.execute(query, (unit_id,))
         row = cursor.fetchone()
         cursor.close()
         conn.close()
-        
+
         if not row:
             # Return empty sensor data with null values
             return {
@@ -562,20 +566,20 @@ async def get_truck_sensors(truck_id: str):
                 "pto_hours": None,
                 "total_idle_fuel_gal": None,
             }
-        
+
         # Helper functions for unit conversions
         def celsius_to_fahrenheit(c):
             if c is None:
                 return None
-            return round(c * 9/5 + 32, 1)
-        
+            return round(c * 9 / 5 + 32, 1)
+
         def raw_to_psi(raw, factor=1.0):
             """Convert raw pressure value to PSI"""
             if raw is None:
                 return None
             # PT40 devices: oil_press raw is directly in PSI
             return round(raw * factor, 1)
-        
+
         def raw_to_percent(raw, max_val=255):
             """Convert raw 0-255 value to percentage"""
             if raw is None:
@@ -583,7 +587,7 @@ async def get_truck_sensors(truck_id: str):
             if raw > max_val:
                 return raw  # Already in percent
             return round((raw / max_val) * 100, 1)
-        
+
         def raw_to_inhg(raw):
             """Convert barometer raw (kPa * 10?) to inHg"""
             if raw is None:
@@ -592,7 +596,7 @@ async def get_truck_sensors(truck_id: str):
             # Formula: 1 kPa = 0.2953 inHg
             # If raw is in 0.1 kPa units: raw * 0.1 * 0.2953
             return round(raw * 0.02953 * 5, 1)  # Adjusted factor
-        
+
         def rpm_from_raw(raw):
             """Convert RPM raw value"""
             if raw is None:
@@ -601,62 +605,75 @@ async def get_truck_sensors(truck_id: str):
             if raw < 100:  # Likely needs multiplication
                 return int(raw * 32)
             return int(raw)
-        
+
         # Build response with converted values
         from datetime import datetime
-        timestamp = datetime.fromtimestamp(row['timestamp']) if row.get('timestamp') else None
-        
+
+        timestamp = (
+            datetime.fromtimestamp(row["timestamp"]) if row.get("timestamp") else None
+        )
+
         return {
             "truck_id": truck_id,
             "timestamp": timestamp.isoformat() if timestamp else None,
             "data_available": True,
-            
             # Oil System
-            "oil_pressure_psi": raw_to_psi(row.get('oil_press_raw')),
-            "oil_temp_f": celsius_to_fahrenheit(row.get('oil_temp_raw')),
-            "oil_level_pct": raw_to_percent(row.get('oil_level_raw')),
-            
+            "oil_pressure_psi": raw_to_psi(row.get("oil_press_raw")),
+            "oil_temp_f": celsius_to_fahrenheit(row.get("oil_temp_raw")),
+            "oil_level_pct": raw_to_percent(row.get("oil_level_raw")),
             # DEF
-            "def_level_pct": raw_to_percent(row.get('def_level_raw')),
-            
+            "def_level_pct": raw_to_percent(row.get("def_level_raw")),
             # Engine
-            "engine_load_pct": row.get('engine_load'),
-            "rpm": rpm_from_raw(row.get('rpm_raw')),
-            "coolant_temp_f": celsius_to_fahrenheit(row.get('coolant_temp_raw')),
-            "coolant_level_pct": raw_to_percent(row.get('coolant_level')),
-            
+            "engine_load_pct": row.get("engine_load"),
+            "rpm": rpm_from_raw(row.get("rpm_raw")),
+            "coolant_temp_f": celsius_to_fahrenheit(row.get("coolant_temp_raw")),
+            "coolant_level_pct": raw_to_percent(row.get("coolant_level")),
             # Transmission & Brakes
-            "gear": int(row.get('gear')) if row.get('gear') is not None else None,
-            "brake_active": row.get('brake_switch') == 255 if row.get('brake_switch') is not None else None,
-            
+            "gear": int(row.get("gear")) if row.get("gear") is not None else None,
+            "brake_active": (
+                row.get("brake_switch") == 255
+                if row.get("brake_switch") is not None
+                else None
+            ),
             # Air Intake
-            "intake_pressure_bar": row.get('intake_pressure'),
-            "intake_temp_f": celsius_to_fahrenheit(row.get('intake_temp_raw')),
-            "intercooler_temp_f": celsius_to_fahrenheit(row.get('intercooler_temp_raw')),
-            
+            "intake_pressure_bar": row.get("intake_pressure"),
+            "intake_temp_f": celsius_to_fahrenheit(row.get("intake_temp_raw")),
+            "intercooler_temp_f": celsius_to_fahrenheit(
+                row.get("intercooler_temp_raw")
+            ),
             # Fuel
-            "fuel_temp_f": celsius_to_fahrenheit(row.get('fuel_temp_raw')),
-            "fuel_level_pct": raw_to_percent(row.get('fuel_level_raw')),
-            "fuel_rate_gph": row.get('fuel_rate'),
-            
+            "fuel_temp_f": celsius_to_fahrenheit(row.get("fuel_temp_raw")),
+            "fuel_level_pct": raw_to_percent(row.get("fuel_level_raw")),
+            "fuel_rate_gph": row.get("fuel_rate"),
             # Environmental
-            "ambient_temp_f": celsius_to_fahrenheit(row.get('ambient_temp_raw')),
-            "barometric_pressure_inhg": raw_to_inhg(row.get('barometer_raw')),
-            
+            "ambient_temp_f": celsius_to_fahrenheit(row.get("ambient_temp_raw")),
+            "barometric_pressure_inhg": raw_to_inhg(row.get("barometer_raw")),
             # Electrical
-            "voltage": round(row.get('voltage'), 1) if row.get('voltage') else None,
-            "backup_voltage": round(row.get('backup_voltage'), 1) if row.get('backup_voltage') else None,
-            
+            "voltage": round(row.get("voltage"), 1) if row.get("voltage") else None,
+            "backup_voltage": (
+                round(row.get("backup_voltage"), 1)
+                if row.get("backup_voltage")
+                else None
+            ),
             # Operational Counters
-            "engine_hours": round(row.get('engine_hours'), 1) if row.get('engine_hours') else None,
-            "idle_hours": round(row.get('idle_hours'), 1) if row.get('idle_hours') else None,
-            "pto_hours": round(row.get('pto_hours'), 1) if row.get('pto_hours') else None,
-            "total_idle_fuel_gal": round(row.get('total_idle_fuel'), 1) if row.get('total_idle_fuel') else None,
-            
+            "engine_hours": (
+                round(row.get("engine_hours"), 1) if row.get("engine_hours") else None
+            ),
+            "idle_hours": (
+                round(row.get("idle_hours"), 1) if row.get("idle_hours") else None
+            ),
+            "pto_hours": (
+                round(row.get("pto_hours"), 1) if row.get("pto_hours") else None
+            ),
+            "total_idle_fuel_gal": (
+                round(row.get("total_idle_fuel"), 1)
+                if row.get("total_idle_fuel")
+                else None
+            ),
             # DTC Info
-            "dtc_count": int(row.get('dtc_count') or 0),
+            "dtc_count": int(row.get("dtc_count") or 0),
         }
-        
+
     except mysql.connector.Error as e:
         logger.error(f"MySQL error fetching sensors for {truck_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
