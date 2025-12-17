@@ -20,14 +20,17 @@ Date: Dec 2025
 """
 
 import sys
-sys.path.insert(0, '/Users/tomasruiz/Desktop/Fuel-Analytics-Backend')
+
+sys.path.insert(0, "/Users/tomasruiz/Desktop/Fuel-Analytics-Backend")
 
 from dtc_analyzer import process_dtc_from_sensor_data, DTCSeverity
 from alert_service import send_dtc_alert
 from datetime import datetime, timezone
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -36,27 +39,25 @@ def test_single_critical_dtc():
     print("\n" + "=" * 80)
     print("TEST 1: CRITICAL DTC - SPN 100.4 (Oil Pressure Voltage Below Normal)")
     print("=" * 80)
-    
+
     truck_id = "TEST-DR6664"
     dtc_string = "100.4"
-    
+
     # Process DTC through analyzer
     alerts = process_dtc_from_sensor_data(
-        truck_id=truck_id,
-        dtc_value=dtc_string,
-        timestamp=datetime.now(timezone.utc)
+        truck_id=truck_id, dtc_value=dtc_string, timestamp=datetime.now(timezone.utc)
     )
-    
+
     if not alerts:
         print("❌ No alerts generated")
         return
-    
+
     alert = alerts[0]
     print(f"\n✅ Alert generated:")
     print(f"   Severity: {alert.severity.value}")
     print(f"   Message: {alert.message}")
     print(f"   Codes: {len(alert.codes)}")
-    
+
     if alert.codes:
         code = alert.codes[0]
         print(f"\n📋 DTC Code Details:")
@@ -68,7 +69,7 @@ def test_single_critical_dtc():
         print(f"   Spanish Name: {code.name_es}")
         print(f"   FMI Description (ES): {code.fmi_description_es}")
         print(f"   Recommended Action: {code.recommended_action}")
-        
+
         # Send alert with full info
         print(f"\n📧 Sending enhanced alert...")
         result = send_dtc_alert(
@@ -91,32 +92,30 @@ def test_warning_dtc():
     print("\n" + "=" * 80)
     print("TEST 2: WARNING DTC - SPN 597.4 (Cruise Control Shorted to Low)")
     print("=" * 80)
-    
+
     truck_id = "TEST-CO0681"
     dtc_string = "597.4"
-    
+
     alerts = process_dtc_from_sensor_data(
-        truck_id=truck_id,
-        dtc_value=dtc_string,
-        timestamp=datetime.now(timezone.utc)
+        truck_id=truck_id, dtc_value=dtc_string, timestamp=datetime.now(timezone.utc)
     )
-    
+
     if not alerts:
         print("❌ No alerts generated")
         return
-    
+
     alert = alerts[0]
     print(f"\n✅ Alert generated:")
     print(f"   Severity: {alert.severity.value}")
     print(f"   Message: {alert.message}")
-    
+
     if alert.codes:
         code = alert.codes[0]
         print(f"\n📋 DTC Code Details:")
         print(f"   Code: {code.code}")
         print(f"   Spanish Name: {code.name_es or 'N/A'}")
         print(f"   FMI Description (ES): {code.fmi_description_es or 'N/A'}")
-        
+
         print(f"\n📧 Sending warning alert (email only)...")
         result = send_dtc_alert(
             truck_id=truck_id,
@@ -138,25 +137,23 @@ def test_multiple_dtcs():
     print("\n" + "=" * 80)
     print("TEST 3: MULTIPLE DTCs - SPN 100.4,1761.0 (Oil + DEF)")
     print("=" * 80)
-    
+
     truck_id = "TEST-FF7702"
     dtc_string = "100.4,1761.0"
-    
+
     alerts = process_dtc_from_sensor_data(
-        truck_id=truck_id,
-        dtc_value=dtc_string,
-        timestamp=datetime.now(timezone.utc)
+        truck_id=truck_id, dtc_value=dtc_string, timestamp=datetime.now(timezone.utc)
     )
-    
+
     if not alerts:
         print("❌ No alerts generated")
         return
-    
+
     for i, alert in enumerate(alerts, 1):
         print(f"\n✅ Alert {i}:")
         print(f"   Severity: {alert.severity.value}")
         print(f"   Codes: {', '.join(c.code for c in alert.codes)}")
-        
+
         if alert.codes:
             for code in alert.codes:
                 print(f"\n   📋 {code.code}:")
@@ -171,15 +168,15 @@ def test_dtc_report_endpoint():
     print("\n" + "=" * 80)
     print("TEST 4: DTC REPORT ENDPOINT - API Response Format")
     print("=" * 80)
-    
+
     from dtc_analyzer import get_dtc_analyzer
-    
+
     truck_id = "TEST-DR6664"
     dtc_string = "100.4,110.0,1761.1"
-    
+
     analyzer = get_dtc_analyzer()
     report = analyzer.get_dtc_analysis_report(truck_id, dtc_string)
-    
+
     print(f"\n📊 Report Summary:")
     print(f"   Truck: {report['truck_id']}")
     print(f"   Status: {report['status']}")
@@ -187,9 +184,9 @@ def test_dtc_report_endpoint():
     print(f"   Critical: {report['summary']['critical']}")
     print(f"   Warning: {report['summary']['warning']}")
     print(f"   Systems Affected: {', '.join(report['systems_affected'])}")
-    
+
     print(f"\n📋 Codes Detail:")
-    for code_info in report['codes']:
+    for code_info in report["codes"]:
         print(f"\n   {code_info['code']}:")
         print(f"      Severity: {code_info['severity'].upper()}")
         print(f"      Component: {code_info['component']}")
@@ -203,14 +200,14 @@ if __name__ == "__main__":
     print("🧪 DTC ALERT SYSTEM TESTING - v5.8.0")
     print("Testing enhanced Spanish descriptions from dtc_database.py")
     print("=" * 80)
-    
+
     try:
         # Run all tests
         test_single_critical_dtc()
         test_warning_dtc()
         test_multiple_dtcs()
         test_dtc_report_endpoint()
-        
+
         print("\n" + "=" * 80)
         print("✅ ALL TESTS COMPLETED")
         print("=" * 80)
@@ -221,8 +218,9 @@ if __name__ == "__main__":
         print("  🔍 Componente: [Spanish name from database]")
         print("  ❌ Falla: [Spanish FMI description]")
         print("  ✅ Acción Recomendada: [Spanish action]")
-        
+
     except Exception as e:
         print(f"\n❌ Test failed with error: {e}")
         import traceback
+
         traceback.print_exc()
