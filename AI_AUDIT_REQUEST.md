@@ -25,15 +25,135 @@ We need an **exhaustive external audit** of our fuel analytics system focusing o
 
 ## 📊 Codebase Statistics
 
-**Total Lines of Code (Top 10 Critical Files):** 10,771 lines  
+**Total Lines of Code (Top 11 Critical Files):** 17,151 lines  
 **Programming Language:** Python 3.11+  
 **Frameworks:** FastAPI, SQLAlchemy, Pandas, NumPy  
-**Database:** MySQL 8.0  
-**AI/ML Libraries:** scikit-learn, scipy, statsmodels
+**Database:** MySQL 8.0 + Redis  
+**AI/ML Libraries:** scikit-learn, scipy, statsmodels, isolation forest, DTW
 
 ---
 
 ## 🎯 Priority 1: BUSINESS-CRITICAL FILES (Must Review)
+
+### 🎛️ 0. Fleet Command Center - THE BRAIN
+
+#### **`fleet_command_center.py`** (5,522 lines) ⭐⭐⭐ **HIGHEST PRIORITY - SYSTEM CORE**
+**Business Impact:** Unified intelligence hub - combines ALL subsystems into single decision engine
+
+**What to Audit:**
+```python
+SYSTEM ARCHITECTURE (CRITICAL):
+1. Unified Health Score Calculation (lines 200-400)
+   - Multi-source data aggregation (10+ engines)
+   - Weighted scoring: 30% predictive, 20% driver, 30% components, 20% DTC
+   - Score normalization across different metrics
+   - Edge case: conflicting signals from different systems
+
+2. Wialon Data Loader Service (lines 500-800)
+   - Centralized data loading with caching
+   - 51,589+ DEF readings integration
+   - MySQL + Redis persistence
+   - Data freshness validation
+   - Memory management with large datasets
+
+3. Risk Scoring Engine (lines 1000-1400)
+   - 0-100 risk score per truck
+   - Top 10 at-risk trucks prioritization
+   - Temporal persistence (avoid sensor glitches)
+   - Adaptive time windows: oil=seconds, DEF=hours, MPG=days
+   - YAML-based threshold configuration
+
+4. EWMA/CUSUM Trend Detection (lines 1500-2000)
+   - Exponentially Weighted Moving Average
+   - Cumulative Sum control charts
+   - Subtle change detection in trends
+   - Statistical process control
+   - Numerical stability in cumulative calculations
+
+5. DEF Predictor Integration (lines 2100-2500)
+   - DEF depletion forecasting
+   - EPA derate prevention (critical!)
+   - Consumption rate: gallons/mile, gallons/hour
+   - Days/miles/hours until empty
+   - Alert levels: good/low/warning/critical/emergency
+
+6. DTW Pattern Analysis (lines 2600-3000)
+   - Dynamic Time Warping algorithm
+   - Fleet behavior clustering
+   - Anomaly detection by pattern comparison
+   - Computational complexity (O(n²) - optimize!)
+   - Pattern similarity scoring
+
+7. Automatic Failure Correlation (lines 3100-3500)
+   - Multi-sensor correlation analysis
+   - Systemic failure detection (coolant↑ + oil_temp↑)
+   - Causal relationship inference
+   - False correlation filtering
+   - J1939 SPN normalization
+
+8. ML Data Persistence (lines 3600-4200)
+   - 6 MySQL history tables (cc_risk_history, cc_anomaly_history, etc.)
+   - Batch persistence optimization
+   - Algorithm state restoration after restart
+   - Data retention strategy
+   - Training data quality for ML
+
+9. Comprehensive Health Endpoint (lines 4300-4800)
+   - /truck/{truck_id}/comprehensive API
+   - Combines: Predictive + Driver + Components + DTC
+   - Response time optimization (<500ms target)
+   - Caching strategy
+   - Real-time data freshness
+
+10. Integration Points (lines 4900-5522)
+    - driver_scoring_engine.py integration
+    - component_health_predictors.py integration
+    - dtc_analyzer.py v4.0 integration (112 SPNs)
+    - predictive_maintenance_engine.py integration
+    - def_predictor.py integration
+    - Data flow consistency across modules
+
+CRITICAL ARCHITECTURE REVIEW:
+- Is the weighted scoring methodology sound? (30/20/30/20 split)
+- Are there race conditions with Redis/MySQL dual persistence?
+- Can EWMA/CUSUM diverge numerically over time?
+- Is DTW algorithm optimized for real-time use?
+- Memory leaks with 51K+ DEF readings?
+- API response time under load (100+ trucks)?
+
+SPECIFIC BUGS TO LOOK FOR:
+- State management with algorithm persistence/restore
+- Timezone handling across 6 history tables
+- Null handling when subsystems unavailable
+- Deadlocks with Redis + MySQL transactions
+- Float overflow in cumulative calculations (CUSUM)
+- Pattern matching false positives (DTW threshold)
+- Memory growth with continuous operation (24/7)
+
+PERFORMANCE CRITICAL:
+- Batch operations vs. real-time processing trade-offs
+- Database query optimization (6 new tables)
+- Redis cache hit rate monitoring
+- API endpoint latency (<500ms for comprehensive)
+- Background job scheduling (EWMA/CUSUM updates)
+
+QUESTIONS TO ANSWER:
+- Can we reduce comprehensive endpoint latency by 50%?
+- Is the risk scoring algorithm predictive of actual failures?
+- Are EWMA/CUSUM parameters optimal (α, β, k, h)?
+- Should DTW be replaced with faster similarity metric?
+- Is MySQL persistence causing bottlenecks?
+- Can we auto-tune weights (30/20/30/20) with ML?
+```
+
+**Expected Output:**
+- Architecture review: design patterns, modularity, coupling
+- Performance profiling: bottlenecks, optimization opportunities
+- Algorithm validation: EWMA, CUSUM, DTW mathematical correctness
+- Integration testing: subsystem compatibility, data consistency
+- Scalability analysis: 100 trucks → 1000 trucks capability
+
+---
 
 ### 🚨 1. Fuel Theft Detection System
 
@@ -449,6 +569,12 @@ CRITICAL BUGS TO FIND:
 ---
 
 ## 📋 Priority 2: SUPPORTING SYSTEMS (Review if Time Permits)
+
+### **`fleet_utilization_engine.py`** (929 lines)
+- Truck utilization analysis (active hours, idle time, revenue hours)
+- Fleet capacity optimization
+- Route efficiency metrics
+- Driver productivity scoring
 
 ### **`engine_health_engine.py`** (1,488 lines)
 - Multi-sensor health monitoring
