@@ -777,6 +777,24 @@ class DEFPredictor:
         }
 
 
+# =============================================================================
+# SINGLETON ACCESSOR
+# =============================================================================
+
+_def_predictor_instance: Optional[DEFPredictor] = None
+
+
+def get_def_predictor() -> DEFPredictor:
+    """
+    Get the singleton DEFPredictor instance.
+    Creates the instance if it doesn't exist.
+    """
+    global _def_predictor_instance
+    if _def_predictor_instance is None:
+        _def_predictor_instance = DEFPredictor()
+    return _def_predictor_instance
+
+
 # Example usage
 if __name__ == "__main__":
     # Demo with sample data

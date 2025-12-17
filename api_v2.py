@@ -1099,3 +1099,127 @@ async def get_sensor_trend(truck_id: str, sensor_name: str):
         )
 
     return trend
+
+
+# =============================================================================
+# DEF (DIESEL EXHAUST FLUID) ENDPOINTS
+# =============================================================================
+
+
+@router.get("/def/fleet-status", summary="DEF Fleet Status", tags=["DEF Analytics"])
+async def get_def_fleet_status():
+    """
+    Get DEF status summary for entire fleet.
+
+    Returns:
+    - Fleet status (good/attention/warning/critical/emergency)
+    - Average DEF level across fleet
+    - Level distribution by status
+    - Trucks needing attention with recommendations
+    """
+    from def_predictor import get_def_predictor
+
+    predictor = get_def_predictor()
+    status = predictor.get_fleet_def_status()
+
+    return status
+
+
+@router.get("/def/predictions", summary="DEF Predictions", tags=["DEF Analytics"])
+async def get_def_predictions(
+    alert_level: Optional[str] = Query(
+        None,
+        description="Filter by alert level: good, low, warning, critical, emergency",
+    )
+):
+    """
+    Get DEF predictions for all trucks.
+
+    Optionally filter by alert level.
+
+    Returns predictions sorted by urgency (most urgent first).
+    """
+    from def_predictor import get_def_predictor
+
+    predictor = get_def_predictor()
+    predictions = predictor.predict_all()
+
+    # Filter by alert level if specified
+    if alert_level:
+        predictions = [p for p in predictions if p.alert_level.value == alert_level]
+
+    return {
+        "predictions": [predictor.to_dict(p) for p in predictions],
+        "count": len(predictions),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get(
+    "/def/predictions/{truck_id}",
+    summary="DEF Prediction for Truck",
+    tags=["DEF Analytics"],
+)
+async def get_def_prediction(truck_id: str):
+    """
+    Get DEF prediction for a specific truck.
+
+    Returns:
+    - Current DEF level (percent and gallons)
+    - Alert level
+    - Predictions (miles/hours/days until empty)
+    - Consumption rates
+    - Recommendation
+    """
+    from def_predictor import get_def_predictor
+
+    predictor = get_def_predictor()
+    prediction = predictor.predict(truck_id)
+
+    if prediction is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No DEF data available for truck {truck_id}",
+        )
+
+    return {"prediction": predictor.to_dict(prediction)}
+
+
+@router.get("/def/alerts", summary="DEF Alerts", tags=["DEF Analytics"])
+async def get_def_alerts():
+    """
+    Get list of trucks with DEF alerts (needing attention).
+
+    Returns only trucks with alert_level warning, critical, or emergency.
+    Sorted by urgency score (most urgent first).
+    """
+    from def_predictor import get_def_predictor, DEFAlertLevel
+
+    predictor = get_def_predictor()
+    predictions = predictor.predict_all()
+
+    # Filter for trucks needing attention
+    alert_levels = {
+        DEFAlertLevel.WARNING,
+        DEFAlertLevel.CRITICAL,
+        DEFAlertLevel.EMERGENCY,
+    }
+    alerts = [
+        {
+            "truck_id": p.truck_id,
+            "level_percent": p.current_level_percent,
+            "alert_level": p.alert_level.value,
+            "miles_until_empty": p.miles_until_empty,
+            "days_until_empty": p.days_until_empty,
+            "urgency_score": p.urgency_score,
+            "recommendation": p.recommended_action,
+        }
+        for p in predictions
+        if p.alert_level in alert_levels
+    ]
+
+    return {
+        "alerts": alerts,
+        "count": len(alerts),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
