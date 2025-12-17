@@ -3978,12 +3978,36 @@ class FleetCommandCenter:
                     )
                 )
 
-            # Add DTC alerts
+            # Add DTC alerts with decoded descriptions
             dtc_trucks = truck_issues.get("dtc_active", [])
             if dtc_trucks:
+                from dtc_analyzer import DTCAnalyzer
+                analyzer = DTCAnalyzer()
+                
+                # Get detailed DTC info for each truck
+                dtc_details = []
+                for truck_data in dtc_trucks[:5]:
+                    truck_id = truck_data["truck_id"]
+                    dtc_code = truck_data.get("dtc_code", "")
+                    
+                    if dtc_code:
+                        result = analyzer.analyze_dtc(dtc_code)
+                        if result["status"] == "error":
+                            dtc_details.append(f"{truck_id}: {dtc_code} (sin decodificar)")
+                        else:
+                            codes = result.get("codes", [])
+                            if codes:
+                                first_code = codes[0]
+                                component = first_code.get("component_name_es", dtc_code)
+                                severity = first_code.get("severity", "warning")
+                                dtc_details.append(f"{truck_id}: {component}")
+                
+                description = ", ".join(dtc_details) if dtc_details else f"Ver detalles en dashboard para cada camión"
+                
                 truck_list = ", ".join([t["truck_id"] for t in dtc_trucks[:5]])
                 if len(dtc_trucks) > 5:
                     truck_list += f" (+{len(dtc_trucks) - 5} más)"
+                
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
@@ -3995,7 +4019,7 @@ class FleetCommandCenter:
                         category=IssueCategory.SENSOR,
                         component="Códigos DTC",
                         title=f"🔧 {len(dtc_trucks)} Camiones con DTC Activos",
-                        description=f"Camiones afectados: {truck_list}",
+                        description=description,
                         days_to_critical=None,
                         cost_if_ignored=None,
                         current_value=None,
@@ -4004,9 +4028,10 @@ class FleetCommandCenter:
                         confidence="HIGH",
                         action_type=ActionType.INSPECT,
                         action_steps=[
-                            f"🔧 Escanear DTCs en: {truck_list}",
-                            "📋 Identificar causa raíz",
-                            "✅ Reparar y borrar códigos",
+                            f"🔍 Revisar DTCs decodificados en dashboard",
+                            f"📋 Camiones: {truck_list}",
+                            "🔧 Reparar según diagnóstico específico",
+                            "✅ Verificar y borrar códigos tras reparación",
                         ],
                         icon="🔧",
                         sources=["DTC Monitor"],
