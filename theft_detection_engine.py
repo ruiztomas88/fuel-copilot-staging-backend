@@ -49,6 +49,17 @@ except ImportError:
     def get_local_engine():
         return None
 
+# 🆕 v6.2.2: Circuit Breaker for database resilience (BUG-002 fix)
+try:
+    from circuit_breaker import CircuitBreaker, CircuitBreakerOpenError, get_circuit_breaker
+    db_main_breaker = get_circuit_breaker("db_main", None)
+    CircuitBreakerOpen = CircuitBreakerOpenError  # Alias
+    CIRCUIT_BREAKER_AVAILABLE = True
+except ImportError:
+    CIRCUIT_BREAKER_AVAILABLE = False
+    CircuitBreakerOpen = Exception
+    db_main_breaker = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -221,85 +232,135 @@ class TheftPatternAnalyzer:
         self._loaded_from_db = False
 
     def _load_from_db(self):
-        """Load theft history from database on first access."""
+        """
+        🔧 v6.2.2: Load theft history from database with circuit breaker protection.
+        
+        BUG-002 FIX: Prevents silent failures when DB is down.
+        """
         if self._loaded_from_db:
             return
 
         try:
-            engine = get_local_engine()
-            if engine:
-                with engine.connect() as conn:
-                    # Try to load from theft_events table if it exists
-                    result = conn.execute(
-                        text(
-                            """
-                            SELECT truck_id, timestamp, drop_gallons, confidence
-                            FROM theft_events
-                            WHERE timestamp > NOW() - INTERVAL :days DAY
-                            AND classification IN ('ROBO CONFIRMADO', 'ROBO SOSPECHOSO')
-                            ORDER BY truck_id, timestamp
-                        """
-                        ),
-                        {"days": self.history_days},
-                    )
-
-                    for row in result:
-                        truck_id = row[0]
-                        timestamp = row[1]
-                        drop_gal = float(row[2]) if row[2] else 0
-                        confidence = float(row[3]) if row[3] else 70.0
-
-                        if truck_id not in self._theft_history:
-                            self._theft_history[truck_id] = []
-
-                        self._theft_history[truck_id].append(
-                            {
-                                "timestamp": timestamp,
-                                "drop_gal": drop_gal,
-                                "confidence": confidence,
-                                "day_of_week": timestamp.weekday(),
-                                "hour": timestamp.hour,
-                            }
-                        )
-
-                    total_events = sum(len(v) for v in self._theft_history.values())
-                    if total_events > 0:
-                        logger.info(
-                            f"🔄 TheftPatternAnalyzer: Loaded {total_events} events "
-                            f"for {len(self._theft_history)} trucks from DB"
-                        )
+            # 🆕 Use circuit breaker if available
+            if CIRCUIT_BREAKER_AVAILABLE:
+                db_main_breaker.execute(self._do_load_from_db)
+            else:
+                self._do_load_from_db()
+                
+        except CircuitBreakerOpen as e:
+            logger.warning(
+                f"⛔ Circuit breaker OPEN - cannot load theft history: {e}. "
+                f"Using empty history (system will still work but without pattern analysis)"
+            )
         except Exception as e:
-            # Table might not exist yet - that's OK
             logger.debug(f"Could not load theft history from DB: {e}")
 
         self._loaded_from_db = True
 
-    def _persist_event(
-        self, truck_id: str, timestamp: datetime, drop_gal: float, confidence: float
-    ):
-        """Persist a theft event to database."""
+    def _do_load_from_db(self):
+        """Internal method to actually load data (wrapped by circuit breaker)"""
+        engine = get_local_engine()
+        if not engine:
+            logger.debug("No database engine available for theft history")
+            return
+        
         try:
-            engine = get_local_engine()
-            if engine:
-                with engine.connect() as conn:
-                    # Insert into theft_events table (create if not exists)
-                    conn.execute(
-                        text(
-                            """
-                            INSERT INTO theft_events 
-                            (truck_id, timestamp, drop_gallons, confidence, classification, created_at)
-                            VALUES (:truck_id, :timestamp, :drop_gal, :confidence, 'ROBO SOSPECHOSO', NOW())
-                            ON DUPLICATE KEY UPDATE confidence = :confidence
+            with engine.connect() as conn:
+                # Try to load from theft_events table if it exists
+                result = conn.execute(
+                    text(
                         """
-                        ),
+                        SELECT truck_id, timestamp, drop_gallons, confidence
+                        FROM theft_events
+                        WHERE timestamp > NOW() - INTERVAL :days DAY
+                        AND classification IN ('ROBO CONFIRMADO', 'ROBO SOSPECHOSO')
+                        ORDER BY truck_id, timestamp
+                    """
+                    ),
+                    {"days": self.history_days},
+                )
+
+                for row in result:
+                    truck_id = row[0]
+                    timestamp = row[1]
+                    drop_gal = float(row[2]) if row[2] else 0
+                    confidence = float(row[3]) if row[3] else 70.0
+
+                    if truck_id not in self._theft_history:
+                        self._theft_history[truck_id] = []
+
+                    self._theft_history[truck_id].append(
                         {
-                            "truck_id": truck_id,
                             "timestamp": timestamp,
                             "drop_gal": drop_gal,
                             "confidence": confidence,
-                        },
+                            "day_of_week": timestamp.weekday(),
+                            "hour": timestamp.hour,
+                        }
                     )
-                    conn.commit()
+
+                total_events = sum(len(v) for v in self._theft_history.values())
+                if total_events > 0:
+                    logger.info(
+                        f"🔄 TheftPatternAnalyzer: Loaded {total_events} events "
+                        f"for {len(self._theft_history)} trucks from DB"
+                    )
+        except Exception as e:
+            # Table might not exist yet - that's OK
+            logger.debug(f"Could not load theft history from DB: {e}")
+
+    def _persist_event(
+        self, truck_id: str, timestamp: datetime, drop_gal: float, confidence: float
+    ):
+        """
+        🔧 v6.2.2: Persist theft event to database with circuit breaker protection.
+        
+        BUG-002 FIX: Graceful degradation if DB fails.
+        """
+        try:
+            if CIRCUIT_BREAKER_AVAILABLE:
+                db_main_breaker.execute(
+                    lambda: self._do_persist_event(truck_id, timestamp, drop_gal, confidence)
+                )
+            else:
+                self._do_persist_event(truck_id, timestamp, drop_gal, confidence)
+                
+        except CircuitBreakerOpen as e:
+            logger.error(
+                f"⛔ Circuit breaker OPEN - cannot persist theft event for {truck_id}. "
+                f"Event will be lost but system continues operating."
+            )
+        except Exception as e:
+            logger.error(f"Failed to persist theft event for {truck_id}: {e}")
+
+    def _do_persist_event(
+        self, truck_id: str, timestamp: datetime, drop_gal: float, confidence: float
+    ):
+        """Internal method to actually persist data (wrapped by circuit breaker)"""
+        engine = get_local_engine()
+        if not engine:
+            return
+        
+        try:
+            with engine.connect() as conn:
+                # Insert into theft_events table (create if not exists)
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO theft_events 
+                        (truck_id, timestamp, drop_gallons, confidence, classification, created_at)
+                        VALUES (:truck_id, :timestamp, :drop_gal, :confidence, 'ROBO SOSPECHOSO', NOW())
+                        ON DUPLICATE KEY UPDATE confidence = :confidence
+                    """
+                    ),
+                    {
+                        "truck_id": truck_id,
+                        "timestamp": timestamp,
+                        "drop_gal": drop_gal,
+                        "confidence": confidence,
+                    },
+                )
+                conn.commit()
         except Exception as e:
             # Log but don't fail - in-memory still works
             logger.debug(f"Could not persist theft event to DB: {e}")

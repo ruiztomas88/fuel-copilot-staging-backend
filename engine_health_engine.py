@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import statistics
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -1283,9 +1284,112 @@ class EngineHealthAnalyzer:
     # ───────────────────────────────────────────────────────────────────────────
 
     def _get_baselines(self, truck_id: str) -> Dict[str, SensorBaseline]:
-        """Get or calculate baselines for a truck (placeholder for DB implementation)."""
-        # This would be implemented to fetch from database
-        return self._baselines_cache.get(truck_id, {})
+        """
+        🔧 v6.2.2: BUG-001 FIX - Load baselines from database with caching.
+        
+        Baselines are now persisted to prevent loss on server restart.
+        """
+        # Check memory cache first
+        if truck_id in self._baselines_cache:
+            return self._baselines_cache[truck_id]
+        
+        # Try to load from database
+        baselines = {}
+        try:
+            if self.db:  # If we have a database connection
+                from database_pool import get_local_engine
+                engine = get_local_engine()
+                if engine:
+                    with engine.connect() as conn:
+                        result = conn.execute(
+                            text("""
+                                SELECT sensor_name, mean_value, std_dev, min_value, max_value,
+                                       median_value, sample_count, days_analyzed, last_updated
+                                FROM engine_health_baselines
+                                WHERE truck_id = :truck_id
+                                AND last_updated > NOW() - INTERVAL :days DAY
+                            """),
+                            {"truck_id": truck_id, "days": 60}  # Use baselines up to 60 days old
+                        )
+                        
+                        for row in result:
+                            sensor_name = row[0]
+                            baselines[sensor_name] = SensorBaseline(
+                                sensor_name=sensor_name,
+                                truck_id=truck_id,
+                                mean_30d=float(row[1]) if row[1] else None,
+                                std_30d=float(row[2]) if row[2] else None,
+                                min_30d=float(row[3]) if row[3] else None,
+                                max_30d=float(row[4]) if row[4] else None,
+                                sample_count=int(row[6]) if row[6] else 0,
+                                last_updated=row[8] if row[8] else datetime.now(timezone.utc)
+                            )
+                        
+                        if baselines:
+                            logger.info(f"📥 Loaded {len(baselines)} baselines for {truck_id} from DB")
+                            # Cache the loaded baselines
+                            self._baselines_cache[truck_id] = baselines
+        except Exception as e:
+            logger.debug(f"Could not load baselines from DB for {truck_id}: {e}")
+        
+        return baselines
+
+    def _save_baselines(self, truck_id: str, baselines: Dict[str, SensorBaseline]):
+        """
+        🔧 v6.2.2: BUG-001 FIX - Persist baselines to database.
+        
+        Uses INSERT ... ON DUPLICATE KEY UPDATE for upsert behavior.
+        """
+        if not baselines:
+            return
+        
+        try:
+            from database_pool import get_local_engine
+            engine = get_local_engine()
+            if not engine:
+                logger.debug("No database engine - baselines not persisted")
+                return
+            
+            with engine.connect() as conn:
+                for sensor_name, baseline in baselines.items():
+                    conn.execute(
+                        text("""
+                            INSERT INTO engine_health_baselines 
+                            (truck_id, sensor_name, mean_value, std_dev, min_value, max_value,
+                             median_value, sample_count, days_analyzed, last_updated)
+                            VALUES 
+                            (:truck_id, :sensor_name, :mean_value, :std_dev, :min_value, :max_value,
+                             :median_value, :sample_count, :days, NOW())
+                            ON DUPLICATE KEY UPDATE
+                                mean_value = VALUES(mean_value),
+                                std_dev = VALUES(std_dev),
+                                min_value = VALUES(min_value),
+                                max_value = VALUES(max_value),
+                                median_value = VALUES(median_value),
+                                sample_count = VALUES(sample_count),
+                                days_analyzed = VALUES(days_analyzed),
+                                last_updated = NOW()
+                        """),
+                        {
+                            "truck_id": truck_id,
+                            "sensor_name": sensor_name,
+                            "mean_value": baseline.mean_30d,
+                            "std_dev": baseline.std_30d,
+                            "min_value": baseline.min_30d,
+                            "max_value": baseline.max_30d,
+                            "median_value": baseline.mean_30d,  # Use mean as median approximation
+                            "sample_count": baseline.sample_count,
+                            "days": 30
+                        }
+                    )
+                conn.commit()
+                logger.info(f"💾 Saved {len(baselines)} baselines for {truck_id} to DB")
+                
+                # Update cache
+                self._baselines_cache[truck_id] = baselines
+                
+        except Exception as e:
+            logger.error(f"Failed to save baselines for {truck_id}: {e}")
 
     def _filter_alerts_by_cooldown(
         self, alerts: List[EngineHealthAlert]

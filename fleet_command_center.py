@@ -3981,31 +3981,40 @@ class FleetCommandCenter:
             # Add DTC alerts with decoded descriptions
             dtc_trucks = truck_issues.get("dtc_active", [])
             if dtc_trucks:
-                from dtc_analyzer import DTCAnalyzer
+                from dtc_analyzer import get_dtc_analyzer
 
-                analyzer = DTCAnalyzer()
+                analyzer = get_dtc_analyzer()
 
                 # Get detailed DTC info for each truck
                 dtc_details = []
+                severity_icons = {"critical": "⛔", "warning": "⚠️", "info": "ℹ️"}
+
                 for truck_data in dtc_trucks[:5]:
                     truck_id = truck_data["truck_id"]
                     dtc_code = truck_data.get("dtc_code", "")
 
                     if dtc_code:
-                        result = analyzer.analyze_dtc(dtc_code)
-                        if result["status"] == "error":
+                        # Use get_dtc_analysis_report instead of analyze_dtc
+                        result = analyzer.get_dtc_analysis_report(truck_id, dtc_code)
+
+                        if result.get("status") == "error" or not result.get("codes"):
                             dtc_details.append(
-                                f"{truck_id}: {dtc_code} (sin decodificar)"
+                                f"❓ {truck_id}: DTC {dtc_code} (sin decodificar)"
                             )
                         else:
                             codes = result.get("codes", [])
                             if codes:
                                 first_code = codes[0]
-                                component = first_code.get(
-                                    "component_name_es", dtc_code
-                                )
+                                component = first_code.get("component", dtc_code)
                                 severity = first_code.get("severity", "warning")
-                                dtc_details.append(f"{truck_id}: {component}")
+                                icon = severity_icons.get(severity.lower(), "🔧")
+                                spn = first_code.get("spn", "")
+                                fmi = first_code.get("fmi", "")
+
+                                # Formato: "⛔ CO0681: SPN 5444.1 - Calidad del Fluido DEF"
+                                dtc_details.append(
+                                    f"{icon} {truck_id}: SPN {spn}.{fmi} - {component}"
+                                )
 
                 description = (
                     ", ".join(dtc_details)

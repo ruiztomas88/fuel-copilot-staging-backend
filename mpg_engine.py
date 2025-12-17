@@ -1045,9 +1045,10 @@ def predict_maintenance_timing(
     warning_threshold: float,
     critical_threshold: float,
     is_higher_worse: bool = True,
+    readings_per_day: float = 1.0,  # 🆕 v6.2.2: BUG-024 FIX - Explicit parameter
 ) -> dict:
     """
-    🆕 v5.7.8: Comprehensive maintenance timing prediction for a sensor.
+    🆕 v5.7.8 / 🔧 v6.2.2: Comprehensive maintenance timing prediction for a sensor.
 
     Analyzes recent history to determine trend and predicts when
     maintenance will be needed.
@@ -1060,10 +1061,34 @@ def predict_maintenance_timing(
         critical_threshold: Threshold for critical state
         is_higher_worse: If True, increasing values are bad (e.g., temperature)
                         If False, decreasing values are bad (e.g., battery voltage)
+        readings_per_day: 🆕 Number of readings per day in history data.
+                         1.0 = daily aggregated (default)
+                         24.0 = hourly readings
+                         96.0 = 15-min readings
+                         5760.0 = raw sensor data (15-second intervals)
 
     Returns:
         Dict with prediction details
+
+    ⚠️ CRITICAL (BUG-024): Always specify readings_per_day if using non-daily data!
+    If readings are hourly and you pass 1.0, predictions will be off by 24x.
+    If readings are raw (15s) and you pass 1.0, predictions will be off by 5760x!
     """
+    # 🆕 v6.2.2: Validate readings_per_day parameter
+    if not (0.1 <= readings_per_day <= 10000):
+        logger.error(
+            f"Invalid readings_per_day={readings_per_day} for {sensor_name}. "
+            f"Must be between 0.1 and 10000. Using default 1.0."
+        )
+        readings_per_day = 1.0
+    
+    # Warn if suspicious value
+    if readings_per_day > 100 and len(history) < 10:
+        logger.warning(
+            f"⚠️ {sensor_name}: readings_per_day={readings_per_day} but only "
+            f"{len(history)} data points. Are you sure this is correct? "
+            f"This suggests <1 day of data with high-frequency sampling."
+        )
     result = {
         "sensor": sensor_name,
         "current_value": round(current_value, 2),
@@ -1097,23 +1122,24 @@ def predict_maintenance_timing(
 
     # Convert slope from "per reading" to "per day"
     # ═══════════════════════════════════════════════════════════════════════════
-    # 🔧 v5.7.9: IMPORTANT - readings_per_day assumption
+    # 🔧 v6.2.2: BUG-024 FIX - Use explicit readings_per_day parameter
     # ═══════════════════════════════════════════════════════════════════════════
-    # This value assumes the `history` list contains DAILY aggregated values,
-    # NOT raw sensor readings (which come every ~15 seconds = 5760/day).
+    # readings_per_day now comes from the parameter, NOT hardcoded.
+    # Callers MUST specify the correct frequency:
+    # - Daily aggregated data: readings_per_day=1.0 (default)
+    # - Hourly rollups: readings_per_day=24.0
+    # - 15-minute data: readings_per_day=96.0
+    # - Raw sensor (15s): readings_per_day=5760.0
     #
-    # The callers of this function should pass pre-aggregated daily data:
-    # - voltage_history.py: Uses daily AVG from fuel_metrics
-    # - sensor_health_router.py: Uses daily rollup queries
-    # - predictive_maintenance.py: Uses daily trend data
-    #
-    # If you pass raw sensor data, multiply result by 5760 or pass hourly
-    # data and set readings_per_day=24 in a future version.
+    # If wrong value is passed, predictions will be catastrophically wrong:
+    # Example: Hourly data with readings_per_day=1.0
+    #   → slope=0.5°F/hour becomes 0.5°F/day (should be 12°F/day)
+    #   → "30 days to critical" becomes "1.25 days to critical" (HUGE ERROR!)
     # ═══════════════════════════════════════════════════════════════════════════
-    readings_per_day = 1.0  # Assumes daily aggregated history values
     trend_slope_per_day = slope * readings_per_day
 
     result["trend_slope_per_day"] = round(trend_slope_per_day, 4)
+    result["readings_frequency"] = f"{readings_per_day} readings/day"  # 🆕 Add to output
 
     # Determine trend direction relative to "worse"
     if is_higher_worse:

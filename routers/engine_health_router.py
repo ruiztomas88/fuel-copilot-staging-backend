@@ -159,11 +159,16 @@ async def get_truck_health_detail(
                 columns = result.keys()
                 historical_data = [dict(zip(columns, row)) for row in rows]
 
+            # 🔧 v6.2.2: BUG-001 FIX - Calculate and persist baselines
             for sensor in ["oil_pressure_psi", "coolant_temp_f", "battery_voltage"]:
                 baseline = BaselineCalculator.calculate_baseline(
                     truck_id, sensor, historical_data
                 )
                 baselines[sensor] = baseline
+            
+            # Save baselines to database for persistence (BUG-001 fix)
+            if baselines:
+                analyzer._save_baselines(truck_id, baselines)
 
         status = analyzer.analyze_truck_health(
             truck_id, current_data, historical_data, baselines

@@ -1330,14 +1330,20 @@ async def get_truck_detail(truck_id: str):
     - Engine status and sensor health
 
     🔧 FIX v3.10.3: Returns basic info if truck exists in config but has no recent data
+    🔧 FIX v6.2.2: Improved error handling to prevent 502 errors
     """
     import pandas as pd
     import numpy as np
 
     try:
         logger.info(f"[get_truck_detail] Fetching data for {truck_id}")
-        record = db.get_truck_latest_record(truck_id)
-        logger.info(f"[get_truck_detail] Record retrieved: {record is not None}")
+        record = None
+        try:
+            record = db.get_truck_latest_record(truck_id)
+            logger.info(f"[get_truck_detail] Record retrieved: {record is not None}")
+        except Exception as db_error:
+            logger.error(f"[get_truck_detail] DB error for {truck_id}: {db_error}")
+            # Continue to fallback logic
 
         if not record:
             # 🔧 FIX v3.10.3: Check if truck exists in tanks.yaml config
@@ -1462,9 +1468,17 @@ async def get_truck_detail(truck_id: str):
         except Exception as fallback_error:
             logger.error(f"[get_truck_detail] Fallback also failed: {fallback_error}")
 
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching truck data: {str(e)}"
-        )
+        # Last resort: return minimal error response instead of 500
+        logger.error(f"[get_truck_detail] All fallbacks failed for {truck_id}")
+        return {
+            "truck_id": truck_id,
+            "status": "ERROR",
+            "truck_status": "ERROR",
+            "message": f"Error fetching truck data: {str(e)[:100]}",
+            "data_available": False,
+            "health_score": 0,
+            "health_category": "error",
+        }
 
 
 @app.get(
@@ -1485,6 +1499,8 @@ async def get_truck_refuel_history(
     - Timestamp of the refuel
     - Gallons and liters added
     - Fuel level before and after
+
+    🔧 FIX v6.2.2: Never throw 500, always return valid response
     """
     try:
         refuels = db.get_refuel_history(truck_id, days)
@@ -1504,7 +1520,9 @@ async def get_truck_refuel_history(
 
         return refuels
     except Exception as e:
-        logger.error(f"❌ Error in get_truck_refuel_history for {truck_id}: {e}")
+        logger.error(
+            f"❌ Error in get_truck_refuel_history for {truck_id}: {e}", exc_info=True
+        )
         # Return empty list instead of error to prevent dashboard crash
         return []
 
@@ -1537,15 +1555,16 @@ async def get_truck_history(
         truck_id: Truck identifier
         hours: Number of hours of history (default 24, max 168)
 
+    🔧 FIX v6.2.2: Never throw 500, always return empty list on error
+
     Returns:
         List of historical data points
     """
     try:
         records = db.get_truck_history(truck_id, hours)
         if not records:
-            raise HTTPException(
-                status_code=404, detail=f"No history found for {truck_id}"
-            )
+            logger.info(f"📭 No history found for {truck_id} (last {hours} hours)")
+            return []  # Return empty list instead of 404
 
         # Convert to HistoricalRecord models with NaN sanitization and MPG validation
         history = []
@@ -1571,12 +1590,16 @@ async def get_truck_history(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching history: {str(e)}")
+        logger.error(
+            f"❌ Error in get_truck_history for {truck_id}: {e}", exc_info=True
+        )
+        return []  # Return empty list instead of 500
 
 
 # ============================================================================
 # V2 API ALIASES (for frontend compatibility)
 # ============================================================================
+
 
 @app.get("/fuelAnalytics/api/v2/trucks/{truck_id}", tags=["Trucks v2"])
 async def get_truck_detail_v2(truck_id: str):
@@ -1587,7 +1610,7 @@ async def get_truck_detail_v2(truck_id: str):
 @app.get(
     "/fuelAnalytics/api/v2/trucks/{truck_id}/history",
     response_model=List[HistoricalRecord],
-    tags=["Trucks v2"]
+    tags=["Trucks v2"],
 )
 async def get_truck_history_v2(
     truck_id: str,
@@ -1599,10 +1622,7 @@ async def get_truck_history_v2(
     return await get_truck_history(truck_id, hours)
 
 
-@app.get(
-    "/fuelAnalytics/api/v2/trucks/{truck_id}/refuels",
-    tags=["Trucks v2"]
-)
+@app.get("/fuelAnalytics/api/v2/trucks/{truck_id}/refuels", tags=["Trucks v2"])
 async def get_truck_refuels_v2(
     truck_id: str,
     days: int = Query(
@@ -1613,62 +1633,71 @@ async def get_truck_refuels_v2(
     return await get_truck_refuel_history(truck_id, days)
 
 
-@app.get(
-    "/fuelAnalytics/api/v2/trucks/{truck_id}/sensors",
-    tags=["Trucks v2"]
-)
+@app.get("/fuelAnalytics/api/v2/trucks/{truck_id}/sensors", tags=["Trucks v2"])
 async def get_truck_sensors_v2(truck_id: str):
     """
     V2 API endpoint for truck sensor data.
-    
+
     Returns real-time sensor data including:
     - Fuel level, RPM, speed, odometer
     - Engine sensors (coolant temp, oil pressure, etc.)
     - GPS location and status
+
+    🔧 FIX v6.2.2: Improved error handling to prevent 500/502 errors
     """
     try:
         # Get latest sensor data from truck_sensors_cache
         import pymysql
         from database_mysql import get_db_connection
-        
+
         conn = get_db_connection()
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-        
-        cursor.execute("""
+
+        cursor.execute(
+            """
             SELECT *
             FROM truck_sensors_cache
             WHERE truck_id = %s
             ORDER BY last_updated DESC
             LIMIT 1
-        """, (truck_id,))
-        
+        """,
+            (truck_id,),
+        )
+
         sensor_data = cursor.fetchone()
         cursor.close()
         conn.close()
-        
+
         if not sensor_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No sensor data found for truck {truck_id}"
-            )
-        
+            logger.info(f"📭 No sensor data found for {truck_id}")
+            return {
+                "truck_id": truck_id,
+                "timestamp": None,
+                "sensors": {},
+                "message": "No recent sensor data available",
+            }
+
         return {
             "truck_id": truck_id,
-            "timestamp": sensor_data.get('last_updated'),
+            "timestamp": sensor_data.get("last_updated"),
             "sensors": {
-                k: v for k, v in sensor_data.items()
-                if k not in ['truck_id', 'last_updated', 'created_at'] and v is not None
-            }
+                k: v
+                for k, v in sensor_data.items()
+                if k not in ["truck_id", "last_updated", "created_at"] and v is not None
+            },
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching sensors for {truck_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching sensor data: {str(e)}"
-        )
+        logger.error(f"❌ Error fetching sensors for {truck_id}: {e}", exc_info=True)
+        # Return empty sensors instead of 500
+        return {
+            "truck_id": truck_id,
+            "timestamp": None,
+            "sensors": {},
+            "error": str(e)[:100],
+        }
 
 
 # ============================================================================

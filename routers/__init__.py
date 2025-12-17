@@ -62,6 +62,9 @@ from .mpg_baseline_router import router as mpg_baseline_router
 # 🆕 v5.8.3: Alerts router (diagnostics, predictive)
 from .alerts_router import router as alerts_router
 
+# 🆕 v6.2.1: Driver Alerts router (driver scoring, DTCs)
+from .driver_alerts_router import router as driver_alerts_router
+
 # 🆕 v5.11.0: API v2 router (predictive maintenance endpoints)
 try:
     from api_v2 import router as api_v2_router
@@ -100,6 +103,7 @@ __all__ = [
     "sensor_health_router",  # 🆕 v5.7.6
     "mpg_baseline_router",  # 🆕 v5.7.6
     "alerts_router",  # 🆕 v5.8.3
+    "driver_alerts_router",  # 🆕 v6.2.1
 ]
 
 
@@ -153,6 +157,9 @@ def include_all_routers(app, auth_dependency=None):
 
     # 🆕 v5.7.6: MPG Baseline router
     app.include_router(mpg_baseline_router)  # /mpg-baseline/* (5 endpoints)
+
+    # 🆕 v6.2.1: Driver Alerts router (driver scoring, DTCs, component health)
+    app.include_router(driver_alerts_router)  # /driver-alerts/* (4 endpoints)
 
     # 🆕 v5.11.0: API v2 router (predictive maintenance)
     if API_V2_AVAILABLE and api_v2_router:
