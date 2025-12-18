@@ -4415,20 +4415,30 @@ class FleetCommandCenter:
                         """
                     SELECT 
                         truck_id,
-                        oil_press, oil_temp,
-                        cool_temp, trams_t,
-                        engine_load, rpm,
-                        def_level, voltage,
-                        intk_t, fuel_lvl,
-                        total_idle_fuel, total_fuel_used,
-                        idle_hours, engine_hours
+                        oil_pressure_psi as oil_press,
+                        oil_temp_f as oil_temp,
+                        coolant_temp_f as cool_temp,
+                        trans_temp_f as trams_t,
+                        battery_voltage as voltage,
+                        engine_load_pct as engine_load,
+                        rpm,
+                        def_level_pct as def_level,
+                        intake_air_temp_f as intk_t,
+                        fuel_temp_f,
+                        intercooler_temp_f,
+                        intake_press_kpa,
+                        sensor_pct as fuel_lvl,
+                        consumption_gph as total_idle_fuel,
+                        consumption_lph as total_fuel_used,
+                        idle_hours_ecu as idle_hours,
+                        engine_hours
                     FROM (
                         SELECT *,
                             ROW_NUMBER() OVER (
                                 PARTITION BY truck_id 
                                 ORDER BY timestamp_utc DESC
                             ) as rn
-                        FROM real_time_data
+                        FROM fuel_metrics
                         WHERE timestamp_utc > DATE_SUB(NOW(), INTERVAL 2 HOUR)
                     ) latest
                     WHERE rn = 1

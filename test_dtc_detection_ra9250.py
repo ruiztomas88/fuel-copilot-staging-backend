@@ -178,7 +178,10 @@ def test_ra9250_dtc():
             else:
                 print(f"   ⚠️  DTC decoded but missing Spanish descriptions")
 
-            if code.severity == code.severity.CRITICAL or code.severity == code.severity.WARNING:
+            if (
+                code.severity == code.severity.CRITICAL
+                or code.severity == code.severity.WARNING
+            ):
                 print(f"   ✅ Severity assigned: {code.severity.value}")
             else:
                 print(f"   ⚠️  Unexpected severity: {code.severity.value}")

@@ -1424,6 +1424,14 @@ def process_truck(
     intake_air_temp = sensor_data.get("intake_air_temp")  # Intake Air Temp (°F)
     # 🆕 v5.3.3: Ambient temperature for weather-adjusted alerts
     ambient_temp = sensor_data.get("ambient_temp")  # Outside Air Temp (°F)
+    # 🆕 v5.12.2: Additional temperature sensors for predictive maintenance
+    trans_temp = sensor_data.get("trans_temp")  # Transmission Oil Temp (°F)
+    fuel_temp = sensor_data.get("fuel_temp")  # Fuel Temperature (°F)
+    intercooler_temp = sensor_data.get("intercooler_temp")  # Intercooler Temp (°F)
+    # 🆕 v5.12.2: Intake pressure for turbo monitoring
+    intake_press = sensor_data.get("intake_press")  # Intake Manifold Pressure (kPa)
+    # 🆕 v5.12.2: Retarder status for brake wear analysis
+    retarder = sensor_data.get("retarder")  # Retarder level/status
     # 🆕 v5.3.3: ECU idle fuel counter (most accurate idle measurement)
     total_idle_fuel = sensor_data.get("total_idle_fuel")  # Gallons (ECU idle counter)
     # 🆕 v3.12.28: New sensors for GPS quality and voltage monitoring
@@ -1795,6 +1803,12 @@ def process_truck(
         "engine_load_pct": engine_load,
         "def_level_pct": def_level,
         "intake_air_temp_f": intake_air_temp,
+        # 🆕 v5.12.2: Additional temp/pressure sensors for predictive maintenance
+        "trans_temp_f": trans_temp,
+        "fuel_temp_f": fuel_temp,
+        "intercooler_temp_f": intercooler_temp,
+        "intake_press_kpa": intake_press,
+        "retarder_level": retarder,
         # 🆕 v5.3.3: Ambient temperature for weather-adjusted alerts
         "ambient_temp_f": ambient_temp,
         # 🆕 v3.12.28: Terrain factor for grade-adjusted consumption
@@ -1921,9 +1935,10 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  oil_pressure_psi, oil_temp_f, battery_voltage, 
                  engine_load_pct, def_level_pct,
                  ambient_temp_f, intake_air_temp_f,
+                 trans_temp_f, fuel_temp_f, intercooler_temp_f, intake_press_kpa, retarder_level,
                  sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu,
                  dtc, dtc_code)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -1957,6 +1972,11 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     def_level_pct = VALUES(def_level_pct),
                     ambient_temp_f = VALUES(ambient_temp_f),
                     intake_air_temp_f = VALUES(intake_air_temp_f),
+                    trans_temp_f = VALUES(trans_temp_f),
+                    fuel_temp_f = VALUES(fuel_temp_f),
+                    intercooler_temp_f = VALUES(intercooler_temp_f),
+                    intake_press_kpa = VALUES(intake_press_kpa),
+                    retarder_level = VALUES(retarder_level),
                     sats = VALUES(sats),
                     pwr_int = VALUES(pwr_int),
                     terrain_factor = VALUES(terrain_factor),
@@ -2007,6 +2027,12 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 # 🆕 v5.3.3: Temperature sensors for weather-adjusted alerts
                 metrics.get("ambient_temp_f"),
                 metrics.get("intake_air_temp_f"),
+                # 🆕 v5.12.2: Additional temperature/pressure sensors for predictive maintenance
+                metrics.get("trans_temp_f"),
+                metrics.get("fuel_temp_f"),
+                metrics.get("intercooler_temp_f"),
+                metrics.get("intake_press_kpa"),
+                metrics.get("retarder_level"),
                 # 🆕 v5.7.1: New sensor columns for ML and diagnostics
                 metrics.get("sats"),
                 metrics.get("pwr_int"),

@@ -768,7 +768,9 @@ class WialonReader:
                         if param_name == "fuel_lvl":
                             max_age = 14400  # 4 hours for fuel level
                         elif param_name in ("j1939_spn", "j1939_fmi"):
-                            max_age = 172800  # 48 hours for DTC sensors (update infrequently)
+                            max_age = (
+                                172800  # 48 hours for DTC sensors (update infrequently)
+                            )
                         elif param_name in (
                             "barometer",
                             "idle_hours",

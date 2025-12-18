@@ -1,17 +1,19 @@
 """
 🔍 TEST FF7702 - Verificar que ahora lee correctamente todos los sensores
 """
+
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from wialon_reader import WialonReader, TRUCK_UNIT_MAPPING, WialonConfig
 from datetime import datetime
 import pytz
 
-print("="*100)
+print("=" * 100)
 print("🔍 TEST FF7702 - Lectura de sensores corregida")
-print("="*100)
+print("=" * 100)
 
 # Crear reader
 config = WialonConfig()
@@ -73,7 +75,15 @@ fields_with_data = 0
 fields_null = []
 
 for attr in dir(ff7702_data):
-    if not attr.startswith('_') and attr not in ['truck_id', 'unit_id', 'timestamp', 'epoch_time', 'capacity_gallons', 'capacity_liters', 'dtc_code']:
+    if not attr.startswith("_") and attr not in [
+        "truck_id",
+        "unit_id",
+        "timestamp",
+        "epoch_time",
+        "capacity_gallons",
+        "capacity_liters",
+        "dtc_code",
+    ]:
         total_fields += 1
         value = getattr(ff7702_data, attr)
         if value is not None and not callable(value):
