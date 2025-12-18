@@ -1541,6 +1541,7 @@ def process_truck(
             dt_hours=dt_hours,
             consumption_lph=consumption_lph,
             speed_mph=speed,
+            rpm=rpm,  # 🔧 v5.15.1: Pass RPM to detect engine-off state
         )
 
     # Check for refuel before update

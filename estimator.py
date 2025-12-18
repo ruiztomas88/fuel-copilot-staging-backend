@@ -564,6 +564,7 @@ class FuelEstimator:
         consumption_lph: float = None,
         rate_lph: float = None,
         speed_mph: float = None,
+        rpm: float = None,  # 🆕 v5.15.1: Added to detect engine-off state
     ):
         """Predict next state based on consumption"""
         if not self.initialized:
@@ -595,9 +596,13 @@ class FuelEstimator:
             )
             consumption_lph = None  # Force fallback
 
-        # Idle fallback if no consumption provided
+        # 🔧 v5.15.1: Check RPM before consuming fuel (fix engine-off drift)
+        # If engine is off (rpm=0), consumption should be ZERO
         if consumption_lph is None:
-            if speed_mph is not None and speed_mph < 5:
+            # First check if engine is running
+            if rpm is not None and rpm == 0:
+                consumption_lph = 0.0  # Engine off - no consumption
+            elif speed_mph is not None and speed_mph < 5:
                 consumption_lph = 2.0  # Idle fallback
             else:
                 consumption_lph = 15.0  # City fallback
