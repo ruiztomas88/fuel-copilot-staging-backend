@@ -391,7 +391,7 @@ def determine_truck_status(
         rpm_val > 0
         or fuel_rate_val > 0.3
         or engine_load_val > 0
-        or coolant_temp_val > 120  # Engine at operating temperature
+        or coolant_temp_val > 120
     )
 
     # If engine is running and speed is low/none = STOPPED (idling)
