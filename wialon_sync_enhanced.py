@@ -386,12 +386,13 @@ def determine_truck_status(
     pwr_ext_val = pwr_ext or 0
     speed_val = speed or 0
 
-    # Engine ON indicators (any one = engine running)
+    # Engine ON detection - RPM is primary indicator
+    # Secondary indicators only valid if they show ACTIVE consumption/load
+    # (coolant_temp alone is NOT reliable - stays hot after engine off)
     engine_running = (
         rpm_val > 0
-        or fuel_rate_val > 0.3
-        or engine_load_val > 0
-        or coolant_temp_val > 120
+        or fuel_rate_val > 0.5  # Active fuel consumption
+        or (engine_load_val > 0 and coolant_temp_val > 120)  # Load + temp together
     )
 
     # If engine is running and speed is low/none = STOPPED (idling)
