@@ -80,9 +80,9 @@ class WialonConfig:
         "def_level": "def_level",  # DEF Level (%) - Fixed: was def_lvl
         "intake_air_temp": "intake_air_temp",  # Intake Air Temperature (°F)
         # 🆕 v3.12.28: New sensors for DTC alerts, GPS quality, idle validation
-        "dtc": "dtc",  # DTC flag (0/1) or comma-separated codes
-        "dtc_code": "dtc_code",  # 🆕 v5.7.5: Actual DTC code (SPN.FMI format)
-        "active_dtc": "active_dtc",  # 🆕 v5.7.5: Alternative DTC code parameter
+        "dtc": "dtc",  # DTC count (number of active codes)
+        "j1939_spn": "j1939_spn",  # 🔧 v5.12.1: J1939 SPN code (Suspect Parameter Number)
+        "j1939_fmi": "j1939_fmi",  # 🔧 v5.12.1: J1939 FMI code (Failure Mode Identifier)
         "idle_hours": "idle_hours",  # ECU Idle Hours counter
         "sats": "sats",  # GPS Satellites count
         "pwr_int": "pwr_int",  # GPS tracker internal battery (~3-4V)
@@ -170,9 +170,9 @@ class TruckSensorData:
     def_level: Optional[float] = None  # DEF Level %
     intake_air_temp: Optional[float] = None  # Intake Air Temperature °F
     # 🆕 v3.12.28: New sensors for DTC, GPS quality, idle validation
-    dtc: Optional[str] = None  # DTC flag (0/1) or codes
-    dtc_code: Optional[str] = None  # 🆕 v5.7.5: Actual DTC code (SPN.FMI)
-    active_dtc: Optional[str] = None  # 🆕 v5.7.5: Alternative DTC code param
+    dtc: Optional[float] = None  # DTC count (number of active codes)
+    j1939_spn: Optional[float] = None  # 🔧 v5.12.1: J1939 SPN code
+    j1939_fmi: Optional[float] = None  # 🔧 v5.12.1: J1939 FMI code
     idle_hours: Optional[float] = None  # ECU Idle Hours counter
     sats: Optional[int] = None  # GPS Satellites count
     pwr_int: Optional[float] = None  # GPS tracker internal battery (~3-4V)
@@ -225,6 +225,18 @@ class TruckSensorData:
             # Convert naive datetime to UTC
             self.timestamp = self.timestamp.replace(tzinfo=timezone.utc)
             logger.warning(f"[{self.truck_id}] Converted naive datetime to UTC")
+
+    @property
+    def dtc_code(self) -> Optional[str]:
+        """
+        🔧 v5.12.1: Combine j1939_spn + j1939_fmi into DTC code format
+        
+        Returns DTC code in format "SPN.FMI" (e.g., "100.3")
+        Returns None if either SPN or FMI is missing
+        """
+        if self.j1939_spn is not None and self.j1939_fmi is not None:
+            return f"{int(self.j1939_spn)}.{int(self.j1939_fmi)}"
+        return None
 
 
 class WialonReader:
@@ -622,6 +634,41 @@ class WialonReader:
                 except Exception as fuel_e:
                     logger.warning(f"Deep fuel_lvl search failed: {fuel_e}")
 
+                # 🔧 v5.12.1: DEEP SEARCH for j1939_spn and j1939_fmi (DTC codes)
+                # These sensors update VERY infrequently (only when DTCs change)
+                # Extend search to 48 hours to capture active DTCs
+                dtc_cutoff_epoch = int(time.time()) - 172800  # 48 hours
+                try:
+                    dtc_query = f"""
+                        SELECT unit, p as param_name, value, m as epoch_time
+                        FROM sensors
+                        WHERE unit IN ({unit_placeholders})
+                            AND m >= %s
+                            AND p IN ('j1939_spn', 'j1939_fmi')
+                        ORDER BY m DESC
+                    """
+                    dtc_query_args = unit_ids + [dtc_cutoff_epoch]
+                    cursor.execute(dtc_query, dtc_query_args)
+                    dtc_results = cursor.fetchall()
+
+                    # Add j1939_spn and j1939_fmi data to unit_data if not already present
+                    for row in dtc_results:
+                        unit_id = row["unit"]
+                        param = row["param_name"]
+                        # Check if this truck already has this DTC sensor
+                        has_sensor = any(
+                            r.get("param_name") == param
+                            for r in unit_data.get(unit_id, [])
+                        )
+                        if not has_sensor:
+                            unit_data[unit_id].append(row)
+                            hours_ago = (int(time.time()) - row['epoch_time']) / 3600
+                            logger.debug(
+                                f"[{unit_id}] 🔍 Deep {param} found: {row['value']} (age={hours_ago:.1f}h)"
+                            )
+                except Exception as dtc_e:
+                    logger.warning(f"Deep DTC search failed: {dtc_e}")
+
                 # Process each truck's data
                 trucks_with_data = set()
                 for unit_id, rows in unit_data.items():
@@ -654,6 +701,8 @@ class WialonReader:
                         max_age = 900  # 15 min default
                         if param_name == "fuel_lvl":
                             max_age = 14400  # 4 hours for fuel level
+                        elif param_name in ("j1939_spn", "j1939_fmi"):
+                            max_age = 172800  # 48 hours for DTC sensors (update infrequently)
 
                         if age_sec > max_age:
                             continue
@@ -676,6 +725,15 @@ class WialonReader:
                         truck_config = TRUCK_CONFIG.get(truck_id, {})
                         capacity_gallons = truck_config.get("capacity_gallons", 200)
                         capacity_liters = truck_config.get("capacity_liters", 757.08)
+
+                        # 🔧 v5.12.1: Combine j1939_spn + j1939_fmi into dtc_code format
+                        # Wialon stores these as separate sensors, we need to combine them
+                        dtc_code_combined = None
+                        if sensor_data.get("j1939_spn") and sensor_data.get("j1939_fmi"):
+                            spn = int(sensor_data["j1939_spn"])
+                            fmi = int(sensor_data["j1939_fmi"])
+                            dtc_code_combined = f"{spn}.{fmi}"
+                            logger.debug(f"🔍 {truck_id}: Combined DTC = {dtc_code_combined} (SPN={spn}, FMI={fmi})")
 
                         truck_data = TruckSensorData(
                             truck_id=truck_id,
@@ -705,10 +763,10 @@ class WialonReader:
                             oil_temp=sensor_data.get("oil_temp"),
                             def_level=sensor_data.get("def_level"),
                             intake_air_temp=sensor_data.get("intake_air_temp"),
-                            # 🆕 v3.12.28: DTC, GPS quality, idle validation sensors
+                            # 🆕 v3.12.28 / v5.12.1: DTC sensors (j1939_spn + j1939_fmi)
                             dtc=sensor_data.get("dtc"),
-                            dtc_code=sensor_data.get("dtc_code"),
-                            active_dtc=sensor_data.get("active_dtc"),
+                            j1939_spn=sensor_data.get("j1939_spn"),
+                            j1939_fmi=sensor_data.get("j1939_fmi"),
                             idle_hours=sensor_data.get("idle_hours"),
                             sats=sensor_data.get("sats"),
                             pwr_int=sensor_data.get("pwr_int"),
