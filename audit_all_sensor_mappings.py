@@ -1,0 +1,199 @@
+"""
+🔍 AUDITORÍA COMPLETA DE MAPEO DE SENSORES
+Verificar que TODOS los sensores en SENSOR_PARAMS existan en Wialon
+"""
+
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from wialon_reader import TRUCK_UNIT_MAPPING, WialonConfig
+import pymysql
+from collections import defaultdict
+
+# Camiones de muestra para verificar (diferentes modelos/configuraciones)
+SAMPLE_TRUCKS = ["FF7702", "RA9250", "VD3579", "JC1282", "RC6625", "JP3281", "PC1280"]
+
+print("=" * 100)
+print("🔍 AUDITORÍA COMPLETA DE MAPEO DE SENSORES")
+print("=" * 100)
+
+# Obtener SENSOR_PARAMS
+config = WialonConfig()
+SENSOR_PARAMS = config.SENSOR_PARAMS
+
+print(f"\n📋 Total de sensores esperados en SENSOR_PARAMS: {len(SENSOR_PARAMS)}")
+
+# Conectar a Wialon
+conn = pymysql.connect(
+    host=config.host,
+    port=config.port,
+    user=config.user,
+    password=config.password,
+    database=config.database,
+)
+
+cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+# Recopilar sensores disponibles por camión
+truck_sensors = {}
+for truck_id in SAMPLE_TRUCKS:
+    if truck_id not in TRUCK_UNIT_MAPPING:
+        print(f"⚠️ {truck_id} no está en TRUCK_UNIT_MAPPING")
+        continue
+
+    unit_id = TRUCK_UNIT_MAPPING[truck_id]
+    cursor.execute(
+        """
+        SELECT DISTINCT p
+        FROM sensors
+        WHERE unit = %s
+        ORDER BY p
+    """,
+        (unit_id,),
+    )
+
+    sensors = [row["p"] for row in cursor.fetchall()]
+    truck_sensors[truck_id] = sensors
+    print(f"   {truck_id}: {len(sensors)} sensores en Wialon")
+
+# Analizar mapeos
+print(f"\n{'='*100}")
+print("📊 ANÁLISIS DE MAPEOS")
+print(f"{'='*100}")
+
+problems = []
+warnings = []
+ok_count = 0
+
+for internal_name, wialon_name in sorted(SENSOR_PARAMS.items()):
+    # Ver cuántos camiones tienen este sensor con el nombre mapeado
+    trucks_with_mapped = []
+    trucks_with_internal = []
+    trucks_with_neither = []
+
+    for truck_id, sensors in truck_sensors.items():
+        if wialon_name in sensors:
+            trucks_with_mapped.append(truck_id)
+        elif internal_name in sensors:
+            trucks_with_internal.append(truck_id)
+        else:
+            trucks_with_neither.append(truck_id)
+
+    total_sample = len(truck_sensors)
+
+    # Clasificar
+    if len(trucks_with_mapped) == total_sample:
+        # ✅ Perfecto - todos los camiones tienen el sensor con el nombre mapeado
+        ok_count += 1
+        status = "✅"
+    elif len(trucks_with_internal) > 0:
+        # ❌ ERROR - el mapeo está mal, existe con el nombre interno
+        problems.append(
+            {
+                "internal": internal_name,
+                "mapped": wialon_name,
+                "trucks_with_mapped": trucks_with_mapped,
+                "trucks_with_internal": trucks_with_internal,
+                "type": "WRONG_MAPPING",
+            }
+        )
+        status = "❌ MAPEO INCORRECTO"
+    elif len(trucks_with_neither) == total_sample:
+        # ⚠️ WARNING - ningún camión tiene este sensor
+        warnings.append(
+            {"internal": internal_name, "mapped": wialon_name, "type": "NOT_FOUND"}
+        )
+        status = "⚠️ NO EXISTE"
+    elif len(trucks_with_mapped) > 0 and len(trucks_with_neither) > 0:
+        # ⚠️ PARTIAL - algunos camiones lo tienen, otros no
+        warnings.append(
+            {
+                "internal": internal_name,
+                "mapped": wialon_name,
+                "trucks_with": trucks_with_mapped,
+                "trucks_without": trucks_with_neither,
+                "type": "PARTIAL",
+            }
+        )
+        status = f"⚠️ PARCIAL ({len(trucks_with_mapped)}/{total_sample})"
+    else:
+        status = "❓ REVISAR"
+
+    print(f"   {status:30s} {internal_name:25s} → {wialon_name}")
+
+# Reporte detallado de problemas
+if problems:
+    print(f"\n{'='*100}")
+    print("❌ ERRORES CRÍTICOS DE MAPEO")
+    print(f"{'='*100}")
+    for p in problems:
+        print(f"\n🔴 {p['internal']} → {p['mapped']}")
+        print(
+            f"   ERROR: Código busca '{p['mapped']}' pero en Wialon existe como '{p['internal']}'"
+        )
+        print(
+            f"   Camiones con nombre mapeado '{p['mapped']}': {p['trucks_with_mapped'] or 'NINGUNO'}"
+        )
+        print(
+            f"   Camiones con nombre interno '{p['internal']}': {p['trucks_with_internal']}"
+        )
+        print(f"   🔧 FIX: Cambiar mapeo a: \"{p['internal']}\": \"{p['internal']}\"")
+
+if warnings:
+    print(f"\n{'='*100}")
+    print("⚠️ ADVERTENCIAS")
+    print(f"{'='*100}")
+    for w in warnings:
+        if w["type"] == "NOT_FOUND":
+            print(f"\n🟡 {w['internal']} → {w['mapped']}")
+            print(f"   WARNING: No encontrado en ningún camión de muestra")
+            print(f"   Puede ser sensor opcional o no disponible en estos modelos")
+        elif w["type"] == "PARTIAL":
+            print(f"\n🟡 {w['internal']} → {w['mapped']}")
+            print(
+                f"   WARNING: Solo {len(w['trucks_with'])}/{len(truck_sensors)} camiones tienen este sensor"
+            )
+            print(f"   Con sensor: {w['trucks_with']}")
+            print(f"   Sin sensor: {w['trucks_without']}")
+
+# Buscar sensores en Wialon que NO estén mapeados
+print(f"\n{'='*100}")
+print("🔍 SENSORES EN WIALON NO MAPEADOS")
+print(f"{'='*100}")
+
+all_wialon_sensors = set()
+for sensors in truck_sensors.values():
+    all_wialon_sensors.update(sensors)
+
+mapped_wialon_names = set(SENSOR_PARAMS.values())
+unmapped = all_wialon_sensors - mapped_wialon_names
+
+if unmapped:
+    print(
+        f"\n   Encontrados {len(unmapped)} sensores en Wialon que NO están en SENSOR_PARAMS:"
+    )
+    for sensor in sorted(unmapped):
+        # Ver en cuántos camiones está
+        count = sum(1 for sensors in truck_sensors.values() if sensor in sensors)
+        print(f"   📌 {sensor:30s} (en {count}/{len(truck_sensors)} camiones)")
+else:
+    print("\n   ✅ Todos los sensores en Wialon están mapeados")
+
+# Resumen
+print(f"\n{'='*100}")
+print("📊 RESUMEN")
+print(f"{'='*100}")
+print(f"   Total sensores en SENSOR_PARAMS: {len(SENSOR_PARAMS)}")
+print(f"   ✅ Correctos: {ok_count}")
+print(f"   ❌ Errores críticos: {len(problems)}")
+print(f"   ⚠️ Advertencias: {len(warnings)}")
+print(f"   📌 Sensores no mapeados en Wialon: {len(unmapped)}")
+
+if problems:
+    print(f"\n🚨 ACCIÓN REQUERIDA: {len(problems)} mapeos incorrectos deben corregirse")
+    print(f"\n📝 Archivo a modificar: wialon_reader.py → WialonConfig.SENSOR_PARAMS")
+
+cursor.close()
+conn.close()
