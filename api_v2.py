@@ -334,6 +334,106 @@ async def compare_drivers(
     return comparison
 
 
+@router.get("/cost/per-mile", summary="Fleet Cost Per Mile Analysis", tags=["Costs"])
+async def get_cost_per_mile(
+    days: int = Query(default=30, ge=1, le=90),
+):
+    """
+    Get detailed cost per mile analysis for the fleet.
+    
+    Returns comprehensive breakdown including:
+    - Fleet average cost per mile
+    - Per-truck cost per mile with rankings
+    - Industry benchmark comparisons
+    - Cost breakdown (fuel, maintenance, tires, depreciation)
+    - Potential savings opportunities
+    """
+    from cost_per_mile_engine import CostPerMileEngine
+    from database_mysql import MySQLDatabase
+    
+    try:
+        db = MySQLDatabase()
+        engine = CostPerMileEngine(db)
+        
+        # Get truck metrics from database for the specified period
+        query = f"""
+        SELECT 
+            truck_id,
+            SUM(miles_traveled) as miles,
+            SUM(fuel_consumed_gallons) as gallons,
+            SUM(engine_hours_delta) as engine_hours,
+            AVG(mpg) as avg_mpg
+        FROM daily_truck_metrics
+        WHERE date >= DATE_SUB(CURDATE(), INTERVAL {days} DAY)
+        AND miles_traveled > 0
+        GROUP BY truck_id
+        HAVING miles > 0 AND gallons > 0
+        """
+        
+        trucks_data = []
+        with db.get_connection() as conn:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(query)
+            trucks_data = cursor.fetchall()
+            
+        logger.info(f"Fetched {len(trucks_data)} trucks for cost per mile analysis ({days} days)")
+        
+        # Get fleet analysis
+        fleet_summary = engine.analyze_fleet_costs(trucks_data=trucks_data, period_days=days)
+        
+        # Format response to match frontend expectations
+        return {
+            "status": "success",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "data": {
+                "period": {
+                    "start": fleet_summary.period_start.isoformat(),
+                    "end": fleet_summary.period_end.isoformat(),
+                    "days": fleet_summary.period_days
+                },
+                "fleet_summary": {
+                    "total_trucks": fleet_summary.total_trucks,
+                    "total_miles": fleet_summary.total_miles,
+                    "total_fuel_gallons": fleet_summary.total_fuel_gallons,
+                    "total_fuel_cost": fleet_summary.total_fuel_cost
+                },
+                "cost_per_mile": {
+                    "fleet_average": fleet_summary.fleet_avg_cost_per_mile,
+                    "breakdown": fleet_summary.cost_breakdown.to_dict(),
+                    "vs_industry_benchmark_percent": fleet_summary.vs_industry_benchmark_percent,
+                    "industry_benchmark": 2.26
+                },
+                "performance": {
+                    "best": {
+                        "truck_id": fleet_summary.best_truck,
+                        "cost_per_mile": fleet_summary.best_cost_per_mile
+                    },
+                    "worst": {
+                        "truck_id": fleet_summary.worst_truck,
+                        "cost_per_mile": fleet_summary.worst_cost_per_mile
+                    }
+                },
+                "savings": {
+                    "potential_per_month": fleet_summary.total_potential_savings_per_month
+                },
+                "trucks": [
+                    {
+                        "truck_id": t.truck_id,
+                        "cost_per_mile": t.cost_breakdown.total_cost_per_mile,
+                        "miles": t.total_miles,
+                        "gallons": t.total_fuel_gallons,
+                        "engine_hours": t.total_engine_hours,
+                        "avg_mpg": t.avg_mpg
+                    }
+                    for t in fleet_summary.truck_analyses
+                ]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error generating cost per mile analysis: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # SENSOR ANOMALY ENDPOINTS (#21)
 # =============================================================================

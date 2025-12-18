@@ -434,8 +434,8 @@ class CommandCenterData:
     critical_actions: List[ActionItem] = field(default_factory=list)
     high_priority_actions: List[ActionItem] = field(default_factory=list)
 
-    # Insights (AI-generated recommendations)
-    insights: List[str] = field(default_factory=list)
+    # Insights (AI-generated recommendations) - v1.8.1: Now structured dicts
+    insights: List[Dict[str, str]] = field(default_factory=list)
 
     # Data quality indicators
     data_quality: Dict[str, Any] = field(default_factory=dict)
@@ -3435,7 +3435,7 @@ class FleetCommandCenter:
         self,
         action_items: List[ActionItem],
         urgency: UrgencySummary,
-    ) -> List[str]:
+    ) -> List[Dict[str, str]]:
         """
         Generate AI-style insights for the fleet manager.
 
@@ -3444,13 +3444,17 @@ class FleetCommandCenter:
         - Added trend detection (multiple trucks same issue)
         - Improved pattern detection with percentage thresholds
         - Added severity escalation warnings
+        
+        v1.8.1 Changes:
+        - Return structured dict instead of strings for frontend compatibility
+        - Format: {type, title, message, icon}
 
         Args:
             action_items: List of all action items
             urgency: UrgencySummary counts
 
         Returns:
-            List of insight strings for display
+            List of structured insight objects
         """
         insights = []
 
@@ -3462,13 +3466,19 @@ class FleetCommandCenter:
                 if item.priority == Priority.CRITICAL
             )
             if len(trucks) == 1:
-                insights.append(
-                    f"🚨 {list(trucks)[0]} requiere atención inmediata - revisar antes de operar"
-                )
+                insights.append({
+                    "type": "warning",
+                    "title": "Atención Inmediata Requerida",
+                    "message": f"{list(trucks)[0]} requiere atención inmediata - revisar antes de operar",
+                    "icon": "🚨"
+                })
             else:
-                insights.append(
-                    f"🚨 {len(trucks)} camiones requieren atención inmediata"
-                )
+                insights.append({
+                    "type": "warning",
+                    "title": "Múltiples Camiones Críticos",
+                    "message": f"{len(trucks)} camiones requieren atención inmediata",
+                    "icon": "🚨"
+                })
 
         # v1.3.0: Cost impact analysis
         # NOTE: cost_if_ignored is a string like "$8,000 - $15,000", not a number
@@ -3500,9 +3510,12 @@ class FleetCommandCenter:
 
             if common[0][1] >= pattern_threshold:
                 pct = (common[0][1] / fleet_size) * 100 if fleet_size > 0 else 0
-                insights.append(
-                    f"📊 Patrón detectado: {common[0][1]} camiones ({pct:.0f}% de flota) con problemas en {common[0][0]}"
-                )
+                insights.append({
+                    "type": "trend",
+                    "title": "Patrón Detectado en la Flota",
+                    "message": f"{common[0][1]} camiones ({pct:.0f}% de flota) tienen problemas con {common[0][0]}",
+                    "icon": "📊"
+                })
 
         # v1.3.0: Trend detection - issues about to escalate
         near_critical = [
@@ -3514,9 +3527,12 @@ class FleetCommandCenter:
         ]
         if near_critical:
             trucks_escalating = set(item.truck_id for item in near_critical)
-            insights.append(
-                f"⏰ {len(trucks_escalating)} camión(es) con problemas que escalarán a crítico en ≤3 días"
-            )
+            insights.append({
+                "type": "warning",
+                "title": "Problemas Escalando",
+                "message": f"{len(trucks_escalating)} camión(es) con problemas que escalarán a crítico en ≤3 días",
+                "icon": "⏰"
+            })
 
         # Transmission warnings (expensive!)
         trans_issues = [
@@ -3526,9 +3542,12 @@ class FleetCommandCenter:
             and i.priority in [Priority.CRITICAL, Priority.HIGH]
         ]
         if trans_issues:
-            insights.append(
-                f"⚠️ {len(trans_issues)} problema(s) de transmisión detectado(s) - reparación costosa si no se atiende"
-            )
+            insights.append({
+                "type": "warning",
+                "title": "Problemas de Transmisión",
+                "message": f"{len(trans_issues)} problema(s) de transmisión detectado(s) - reparación costosa si no se atiende",
+                "icon": "⚠️"
+            })
 
         # DEF warnings
         def_issues = [
@@ -3538,15 +3557,21 @@ class FleetCommandCenter:
             and i.priority in [Priority.CRITICAL, Priority.HIGH]
         ]
         if def_issues:
-            insights.append(
-                f"💎 {len(def_issues)} camión(es) con DEF bajo - derate inminente si no se llena"
-            )
+            insights.append({
+                "type": "warning",
+                "title": "DEF Bajo",
+                "message": f"{len(def_issues)} camión(es) con DEF bajo - derate inminente si no se llena",
+                "icon": "💎"
+            })
 
         # Positive insight if fleet is healthy
         if urgency.critical == 0 and urgency.high == 0:
-            insights.append(
-                "✅ No hay problemas críticos o de alta prioridad - la flota está operando bien"
-            )
+            insights.append({
+                "type": "success",
+                "title": "Flota Saludable",
+                "message": "No hay problemas críticos o de alta prioridad - la flota está operando bien",
+                "icon": "✅"
+            })
 
         return insights
 
