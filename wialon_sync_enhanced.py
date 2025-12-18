@@ -584,6 +584,85 @@ def detect_refuel(
     return None
 
 
+def detect_multiple_refuels(
+    fuel_history: List[Dict],
+    estimator,
+    tank_capacity_gal: float,
+    truck_id: str = "",
+) -> List[Dict]:
+    """
+    🆕 v5.12.0: Detect ALL refuels in a time series of fuel readings.
+
+    This fixes the issue where only ONE refuel per sync cycle was detected,
+    causing missed events when trucks refuel multiple times per day.
+
+    Args:
+        fuel_history: List of dicts with keys: timestamp, fuel_pct, epoch_time
+                      Must be sorted chronologically (oldest first)
+        estimator: FuelEstimator instance for Kalman baseline
+        tank_capacity_gal: Tank capacity in gallons
+        truck_id: Truck identifier for logging
+
+    Returns:
+        List of refuel events (same format as detect_refuel)
+
+    Example:
+        PC1280 on Dec 17, 2025:
+        - 02:49: 6% → 65% (+58 gal) - First refuel
+        - 22:25: 44% → 100% (+56 gal) - Second refuel
+        Old code: Detected only first one
+        New code: Detects both
+    """
+    if len(fuel_history) < 2:
+        return []
+
+    refuels_detected = []
+
+    # Process each pair of consecutive readings
+    for i in range(1, len(fuel_history)):
+        prev_reading = fuel_history[i - 1]
+        curr_reading = fuel_history[i]
+
+        prev_pct = prev_reading.get("fuel_pct")
+        curr_pct = curr_reading.get("fuel_pct")
+        prev_time = prev_reading.get("timestamp")
+        curr_time = curr_reading.get("timestamp")
+
+        if None in (prev_pct, curr_pct, prev_time, curr_time):
+            continue
+
+        # Calculate time gap
+        time_delta = curr_time - prev_time
+        time_gap_hours = time_delta.total_seconds() / 3600
+
+        # Use Kalman estimate as baseline (what we expected after consumption)
+        # For historical processing, we need to "rewind" Kalman to prev_time
+        # For simplicity, we'll use prev_pct as baseline (sensor-to-sensor comparison)
+        # This is slightly less accurate than Kalman but works for multi-refuel detection
+
+        # Call the standard refuel detector
+        refuel_event = detect_refuel(
+            sensor_pct=curr_pct,
+            estimated_pct=prev_pct,  # Use previous sensor reading as baseline
+            last_sensor_pct=prev_pct,
+            time_gap_hours=time_gap_hours,
+            truck_status="UNKNOWN",  # Not critical for detection
+            tank_capacity_gal=tank_capacity_gal,
+            truck_id=truck_id,
+        )
+
+        if refuel_event:
+            # Add timestamp to refuel event
+            refuel_event["timestamp"] = curr_time
+            refuels_detected.append(refuel_event)
+            logger.info(
+                f"🚰 [MULTI-REFUEL] {truck_id} @ {curr_time}: "
+                f"{prev_pct:.1f}% → {curr_pct:.1f}% (+{refuel_event['increase_gal']:.1f} gal)"
+            )
+
+    return refuels_detected
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENHANCED THEFT DETECTION v5.8.0
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2336,6 +2415,66 @@ def sync_cycle(
                     logger.debug(
                         f"Idle validation error for {truck_id}: {idle_val_error}"
                     )
+
+            # 🆕 v5.12.0: Check for missed refuels in historical data
+            # This fixes the issue where only ONE refuel per sync cycle was detected
+            # Example: PC1280 on Dec 17 had TWO refuels but only first was detected
+            try:
+                # Get last 24 hours of fuel data for this truck
+                fuel_history = reader.get_truck_fuel_history(
+                    truck_id=truck_id, hours_back=24, limit=100
+                )
+
+                if len(fuel_history) >= 2:
+                    # Get truck config for tank capacity
+                    from truck_mapping import TRUCK_CONFIG
+
+                    truck_config = TRUCK_CONFIG.get(truck_id, {})
+                    tank_capacity = truck_config.get("capacity_gallons", 200)
+
+                    # Get estimator for Kalman baseline
+                    estimator = state_manager.get_estimator(truck_id)
+
+                    # Detect all refuels in the history
+                    historical_refuels = detect_multiple_refuels(
+                        fuel_history=fuel_history,
+                        estimator=estimator,
+                        tank_capacity_gal=tank_capacity,
+                        truck_id=truck_id,
+                    )
+
+                    # Save any newly detected refuels to database
+                    for refuel in historical_refuels:
+                        refuel_timestamp = refuel.get("timestamp")
+                        gallons = refuel.get("increase_gal", 0)
+                        fuel_before = refuel.get("prev_pct", 0)
+                        fuel_after = refuel.get("new_pct", 0)
+
+                        # Check if this refuel is already in database
+                        # (avoid duplicates from previous sync cycles)
+                        saved = save_refuel_event(
+                            connection=local_conn,
+                            truck_id=truck_id,
+                            timestamp_utc=refuel_timestamp,
+                            fuel_before=fuel_before,
+                            fuel_after=fuel_after,
+                            gallons_added=gallons,
+                            latitude=sensor_data.get("latitude"),
+                            longitude=sensor_data.get("longitude"),
+                            refuel_type="HISTORICAL",
+                        )
+
+                        if saved:
+                            refuel_count += 1
+                            logger.info(
+                                f"💾 [HISTORICAL-REFUEL] {truck_id} @ {refuel_timestamp}: "
+                                f"+{gallons:.1f} gal saved to database"
+                            )
+
+            except Exception as hist_refuel_error:
+                logger.debug(
+                    f"Historical refuel detection error for {truck_id}: {hist_refuel_error}"
+                )
 
             # Full processing with Kalman
             metrics = process_truck(

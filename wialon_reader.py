@@ -897,6 +897,78 @@ logger.info(f"📋 Truck mapping: {len(TRUCK_UNIT_MAPPING)} trucks configured")
 if __name__ == "__main__":
     """Test the Wialon reader"""
     print("=" * 70)
+
+    def get_truck_fuel_history(
+        self, truck_id: str, hours_back: int = 24, limit: int = 100
+    ) -> List[Dict]:
+        """
+        Get historical fuel level readings for a specific truck.
+
+        Args:
+            truck_id: Truck identifier (e.g., 'PC1280')
+            hours_back: How many hours back to fetch data (default 24)
+            limit: Maximum number of readings to return (default 100)
+
+        Returns:
+            List of dicts with keys: timestamp, fuel_pct, epoch_time
+            Sorted chronologically (oldest first)
+
+        🆕 v5.12.0: Added for multi-refuel detection - processes all gaps
+        """
+        if not self.ensure_connection():
+            logger.error("❌ Cannot establish database connection")
+            return []
+
+        unit_id = self.truck_unit_mapping.get(truck_id)
+        if not unit_id:
+            logger.error(f"❌ Truck {truck_id} not found in mapping")
+            return []
+
+        try:
+            with self.connection.cursor() as cursor:
+                cutoff_epoch = int(time.time()) - (hours_back * 3600)
+                fuel_param = self.config.SENSOR_PARAMS.get("fuel_lvl", "fuel_lvl")
+
+                query = """
+                    SELECT measure_datetime, value, m as epoch_time
+                    FROM sensors
+                    WHERE unit = %s
+                      AND p = %s
+                      AND m >= %s
+                    ORDER BY m ASC
+                    LIMIT %s
+                """
+                cursor.execute(query, (unit_id, fuel_param, cutoff_epoch, limit))
+                results = cursor.fetchall()
+
+                history = []
+                for row in results:
+                    # Convert measure_datetime to timezone-aware UTC
+                    dt = row["measure_datetime"]
+                    if dt.tzinfo is None:
+                        dt = pytz.utc.localize(dt)
+                    elif dt.tzinfo != pytz.utc:
+                        dt = dt.astimezone(pytz.utc)
+
+                    history.append(
+                        {
+                            "timestamp": dt,
+                            "fuel_pct": float(row["value"]) if row["value"] else None,
+                            "epoch_time": int(row["epoch_time"]),
+                        }
+                    )
+
+                logger.info(
+                    f"📊 Retrieved {len(history)} fuel readings for {truck_id} (last {hours_back}h)"
+                )
+                return history
+
+        except Exception as e:
+            logger.error(f"❌ Error fetching fuel history for {truck_id}: {e}")
+            return []
+
+
+if __name__ == "__main__":
     print("WIALON DATABASE READER - CONNECTION TEST")
     print("=" * 70)
 
