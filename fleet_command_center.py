@@ -4119,9 +4119,7 @@ class FleetCommandCenter:
                     )
                 )
 
-            # 🆕 v6.3.0: Engine overload alerts - NOW WITH TRUCK IDs
-            overload_trucks = truck_issues.get("engine_overload", [])
-            if overloa1: Engine overload alerts - INDIVIDUAL items per truck
+            # 🆕 v6.3.1: Engine overload alerts - INDIVIDUAL items per truck
             overload_trucks = truck_issues.get("engine_overload", [])
             for overload_truck in overload_trucks:
                 action_items.append(
@@ -4142,7 +4140,7 @@ class FleetCommandCenter:
                         confidence="MEDIUM",
                         action_type=ActionType.MONITOR,
                         action_steps=[
-                            f"📊 Revisar carga del motor en {overload_truck['truck_id']
+                            f"📊 Revisar carga del motor en {overload_truck['truck_id']}",
                             "🔧 Inspeccionar filtros de aire",
                         ],
                         icon="🔥",
