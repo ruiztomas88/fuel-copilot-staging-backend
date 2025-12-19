@@ -34,27 +34,42 @@ CREATE TABLE IF NOT EXISTS fuel_metrics (
     latitude DOUBLE,
     longitude DOUBLE,
     speed DOUBLE,
+    speed_mph DOUBLE COMMENT 'Speed in miles per hour',
     
-    -- Fuel Data
+    -- Fuel Data (Kalman-filtered estimates)
+    estimated_liters DOUBLE COMMENT 'Kalman-filtered fuel level in liters',
+    estimated_gallons DOUBLE COMMENT 'Kalman-filtered fuel level in gallons',
+    estimated_pct DOUBLE COMMENT 'Kalman-filtered fuel level percentage',
+    
+    -- Fuel Data (Raw sensor readings)
+    sensor_pct DOUBLE COMMENT 'Raw sensor fuel percentage',
+    sensor_liters DOUBLE COMMENT 'Raw sensor fuel in liters',
+    sensor_gallons DOUBLE COMMENT 'Raw sensor fuel in gallons',
+    
+    -- Legacy fuel columns (for backward compatibility)
     fuel_level_raw DOUBLE,
     fuel_level_filtered DOUBLE,
     fuel_capacity INT,
     fuel_percent DOUBLE,
     
     -- Consumption
-    consumption_gph DOUBLE,
+    consumption_lph DOUBLE COMMENT 'Fuel consumption in liters per hour',
+    consumption_gph DOUBLE COMMENT 'Fuel consumption in gallons per hour',
     consumption_rate DOUBLE,
     mpg_current DOUBLE,
     mpg_avg_24h DOUBLE,
     
     -- Engine Data
+    rpm INT COMMENT 'Engine RPM',
     engine_rpm INT,
     engine_hours DOUBLE,
+    odometer_mi DOUBLE COMMENT 'Odometer in miles',
     odometer DOUBLE,
     mileage_delta DOUBLE,
     
     -- Idle Detection
     idle_method VARCHAR(30),
+    idle_mode VARCHAR(20) COMMENT 'Idle detection mode: RPM_BASED, SPEED_BASED, etc.',
     idle_duration_minutes INT,
     idle_gph DOUBLE COMMENT 'Idle fuel consumption rate (GPH) - v5.7.6',
     
@@ -62,9 +77,20 @@ CREATE TABLE IF NOT EXISTS fuel_metrics (
     kalman_estimate DOUBLE,
     kalman_uncertainty DOUBLE,
     
+    -- Fuel Drift Detection
+    drift_pct DECIMAL(5,2) COMMENT 'Fuel drift percentage from expected',
+    drift_warning VARCHAR(100) COMMENT 'Drift warning message if threshold exceeded',
+    
     -- Anchors
+    anchor_detected TINYINT(1) DEFAULT 0 COMMENT 'Whether an anchor point was detected',
     anchor_type VARCHAR(20),
     anchor_fuel_level DOUBLE,
+    
+    -- Data Quality
+    data_age_min INT COMMENT 'Age of sensor data in minutes',
+    altitude_ft DOUBLE COMMENT 'Altitude in feet',
+    hdop DOUBLE COMMENT 'Horizontal dilution of precision (GPS accuracy)',
+    coolant_temp_f DECIMAL(5,2) COMMENT 'Coolant temperature in Fahrenheit',
     
     -- Refuel Detection
     refuel_detected TINYINT(1) DEFAULT 0,
@@ -147,6 +173,44 @@ CREATE TABLE IF NOT EXISTS refuel_events (
     INDEX idx_truck_time (truck_id, timestamp_utc),
     INDEX idx_timestamp (timestamp_utc),
     INDEX idx_unit (unit_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================
+-- TABLE: dtc_events (Diagnostic Trouble Codes)
+-- ============================================
+CREATE TABLE IF NOT EXISTS dtc_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    timestamp_utc DATETIME NOT NULL,
+    truck_id VARCHAR(20) NOT NULL,
+    carrier_id VARCHAR(50) DEFAULT 'skylord',
+    
+    -- DTC Details
+    spn INT COMMENT 'Suspect Parameter Number (J1939)',
+    fmi INT COMMENT 'Failure Mode Identifier (J1939)',
+    dtc_code VARCHAR(20) COMMENT 'Full DTC code (e.g., SPN.FMI)',
+    raw_value VARCHAR(100) COMMENT 'Raw DTC value from sensor',
+    
+    -- Severity & Classification
+    severity VARCHAR(20) COMMENT 'DTC severity: CRITICAL, HIGH, MEDIUM, LOW',
+    system VARCHAR(50) COMMENT 'Affected system: ENGINE, TRANSMISSION, BRAKE, etc.',
+    description TEXT COMMENT 'DTC description',
+    recommended_action TEXT COMMENT 'Recommended action for this DTC',
+    
+    -- Context Data
+    latitude DOUBLE,
+    longitude DOUBLE,
+    speed_mph DOUBLE,
+    engine_hours DOUBLE,
+    odometer_mi DOUBLE,
+    
+    -- Metadata
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_truck_time (truck_id, timestamp_utc),
+    INDEX idx_timestamp (timestamp_utc),
+    INDEX idx_severity (severity),
+    INDEX idx_spn (spn),
+    INDEX idx_dtc_code (dtc_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================
