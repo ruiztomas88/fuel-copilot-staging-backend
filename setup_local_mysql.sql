@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS fuel_metrics (
     drift_warning VARCHAR(100) COMMENT 'Drift warning message if threshold exceeded',
     
     -- Anchors
-    anchor_detected TINYINT(1) DEFAULT 0 COMMENT 'Whether an anchor point was detected',
+    anchor_detected VARCHAR(10) COMMENT 'Whether an anchor point was detected: YES/NO',
     anchor_type VARCHAR(20),
     anchor_fuel_level DOUBLE,
     
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS dtc_events (
     
     -- Severity & Classification
     severity VARCHAR(20) COMMENT 'DTC severity: CRITICAL, HIGH, MEDIUM, LOW',
-    system VARCHAR(50) COMMENT 'Affected system: ENGINE, TRANSMISSION, BRAKE, etc.',
+    system_type VARCHAR(50) COMMENT 'Affected system: ENGINE, TRANSMISSION, BRAKE, etc.',
     description TEXT COMMENT 'DTC description',
     recommended_action TEXT COMMENT 'Recommended action for this DTC',
     
