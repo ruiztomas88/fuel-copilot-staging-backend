@@ -66,18 +66,12 @@ def get_sensor_data_from_wialon(unit_id: int) -> Optional[Dict[str, Any]]:
     """
     Get latest sensor data for a unit from Wialon.
     Uses same logic as the API endpoint (Last Known Value strategy).
-
-    🔧 v5.12.2: Extended to 12-hour deep search for slow sensors
-    (barometer, idle_hours, coolant_temp, rpm, etc. update infrequently)
     """
     try:
         conn = pymysql.connect(**WIALON_CONFIG)
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
-        # 🔧 Changed from 1 hour to 12 hours to catch slow sensors
-        cutoff_epoch = (
-            int(time.time()) - 43200
-        )  # Last 12 hours (same as wialon_reader.py)
+        cutoff_epoch = int(time.time()) - 3600  # Last hour
 
         query = """
             SELECT 
@@ -90,7 +84,7 @@ def get_sensor_data_from_wialon(unit_id: int) -> Optional[Dict[str, Any]]:
             WHERE unit = %s
                 AND m >= %s
             ORDER BY m DESC
-            LIMIT 5000
+            LIMIT 2000
         """
 
         cursor.execute(query, (unit_id, cutoff_epoch))
@@ -116,12 +110,10 @@ def get_sensor_data_from_wialon(unit_id: int) -> Optional[Dict[str, Any]]:
             if row["epoch_time"] == latest_epoch and param and value is not None:
                 sensor_dict[param] = value
 
-        # 🔧 Fill missing values from deep history (up to 12 hours)
-        # Many sensors update slowly: barometer, idle_hours, coolant_temp, rpm, engine_hours,
-        # oil_temp, def_level, gear, oil_press, engine_load, total_fuel_used, etc.
+        # Fill missing values from recent history (within 15 minutes)
         for row in results:
             age_sec = latest_epoch - row["epoch_time"]
-            if age_sec > 43200:  # 12 hours max
+            if age_sec > 900:  # 15 minutes
                 break
 
             param = row["param_name"]

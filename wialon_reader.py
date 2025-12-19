@@ -78,7 +78,7 @@ class WialonConfig:
         # 🆕 v3.12.26: Engine Health sensors from Pacific Track
         "oil_temp": "oil_temp",  # Oil Temperature (°F)
         "def_level": "def_level",  # DEF Level (%) - Fixed: was def_lvl
-        "intake_air_temp": "intk_t",  # 🔧 v5.12.2: Fixed - Wialon uses abbreviated name
+        "intake_air_temp": "intake_air_temp",  # Intake Air Temperature (°F)
         # 🆕 v3.12.28: New sensors for DTC alerts, GPS quality, idle validation
         "dtc": "dtc",  # DTC count (number of active codes)
         "j1939_spn": "j1939_spn",  # 🔧 v5.12.1: J1939 SPN code (Suspect Parameter Number)
@@ -93,12 +93,12 @@ class WialonConfig:
         "barometer": "barometer",  # Barometric pressure - engine load correlation
         # 🆕 v5.10.1: Full Pacific Track sensor suite
         # Temperatures (Page 2)
-        "fuel_temp": "fuel_t",  # 🔧 v5.12.2: Fixed - Wialon uses abbreviated name
-        "intercooler_temp": "intrclr_t",  # 🔧 v5.12.2: Fixed - Wialon uses abbreviated name
+        "fuel_temp": "fuel_temp",  # Fuel temperature (°F) - density correction
+        "intercooler_temp": "intercooler_temp",  # Intercooler temperature (°F)
         "turbo_temp": "turbo_temp",  # Turbo temperature (°F) - turbo health
-        "trans_temp": "trams_t",  # 🔧 v5.12.2: Fixed - Wialon uses typo name "trams_t"
+        "trans_temp": "trans_temp",  # Transmission oil temperature (°F)
         # Pressures (Page 2)
-        "intake_press": "intake_pressure",  # 🔧 v5.12.2: Fixed - full name in Wialon
+        "intake_press": "intake_press",  # Intake manifold pressure (boost) - kPa
         "boost": "boost",  # Alternative name for intake pressure/boost
         # Counters (Page 4)
         "pto_hours": "pto_hours",  # PTO Hours counter
@@ -128,11 +128,6 @@ class WialonConfig:
         "event_id": "event_id",  # Pacific Track event identifier
         "bus": "bus",  # CAN bus status/identifier
         "mode": "mode",  # Device operation mode
-        # 🆕 v5.12.2: Additional sensors found in audit (Dec 17, 2025)
-        "retarder": "actual_retarder",  # Retarder status/level
-        "lac": "lac",  # Location Area Code (cellular network)
-        "mcc": "mcc",  # Mobile Country Code (cellular network)
-        "mnc": "mnc",  # Mobile Network Code (cellular network)
     }
 
 
@@ -223,11 +218,6 @@ class TruckSensorData:
     event_id: Optional[str] = None  # Pacific Track event identifier
     bus: Optional[int] = None  # CAN bus status/identifier
     mode: Optional[int] = None  # Device operation mode
-    # 🆕 v5.12.2: Additional sensors found in audit (Dec 17, 2025)
-    retarder: Optional[float] = None  # Retarder status/level
-    lac: Optional[int] = None  # Location Area Code (cellular network)
-    mcc: Optional[int] = None  # Mobile Country Code (cellular network)
-    mnc: Optional[int] = None  # Mobile Network Code (cellular network)
 
     def __post_init__(self):
         """Ensure timestamp is timezone-aware"""
@@ -240,7 +230,7 @@ class TruckSensorData:
     def dtc_code(self) -> Optional[str]:
         """
         🔧 v5.12.1: Combine j1939_spn + j1939_fmi into DTC code format
-
+        
         Returns DTC code in format "SPN.FMI" (e.g., "100.3")
         Returns None if either SPN or FMI is missing
         """
@@ -672,68 +662,12 @@ class WialonReader:
                         )
                         if not has_sensor:
                             unit_data[unit_id].append(row)
-                            hours_ago = (int(time.time()) - row["epoch_time"]) / 3600
+                            hours_ago = (int(time.time()) - row['epoch_time']) / 3600
                             logger.debug(
                                 f"[{unit_id}] 🔍 Deep {param} found: {row['value']} (age={hours_ago:.1f}h)"
                             )
                 except Exception as dtc_e:
                     logger.warning(f"Deep DTC search failed: {dtc_e}")
-
-                # 🔧 v5.12.2: DEEP SEARCH for slow-updating sensors
-                # Many sensors (barometer, idle_hours, coolant_temp, etc.) update infrequently
-                # Extend search to 12 hours to capture last known values
-                slow_sensors_cutoff = int(time.time()) - (12 * 3600)  # 12 hours
-                slow_sensors = [
-                    "barometer",
-                    "idle_hours",
-                    "cool_temp",  # coolant_temp
-                    "rpm",
-                    "engine_hours",
-                    "oil_temp",
-                    "def_level",
-                    "gear",
-                    "intk_t",  # intake_air_temp
-                    "fuel_t",  # fuel_temp
-                    "intrclr_t",  # intercooler_temp
-                    "trams_t",  # trans_temp
-                    "intake_pressure",
-                    "oil_press",
-                    "engine_load",
-                    "total_fuel_used",
-                    "total_idle_fuel",
-                    "dtc",  # DTC count
-                ]
-                try:
-                    slow_placeholders = ", ".join(["%s"] * len(slow_sensors))
-                    slow_query = f"""
-                        SELECT unit, p as param_name, value, m as epoch_time
-                        FROM sensors
-                        WHERE unit IN ({unit_placeholders})
-                            AND m >= %s
-                            AND p IN ({slow_placeholders})
-                        ORDER BY m DESC
-                    """
-                    slow_query_args = unit_ids + [slow_sensors_cutoff] + slow_sensors
-                    cursor.execute(slow_query, slow_query_args)
-                    slow_results = cursor.fetchall()
-
-                    # Add slow sensor data to unit_data if not already present
-                    for row in slow_results:
-                        unit_id = row["unit"]
-                        param = row["param_name"]
-                        # Check if this truck already has this sensor
-                        has_sensor = any(
-                            r.get("param_name") == param
-                            for r in unit_data.get(unit_id, [])
-                        )
-                        if not has_sensor:
-                            unit_data[unit_id].append(row)
-                            hours_ago = (int(time.time()) - row["epoch_time"]) / 3600
-                            logger.debug(
-                                f"[{unit_id}] 🐢 Deep {param} found: {row['value']} (age={hours_ago:.1f}h)"
-                            )
-                except Exception as slow_e:
-                    logger.warning(f"Deep slow sensors search failed: {slow_e}")
 
                 # Process each truck's data
                 trucks_with_data = set()
@@ -768,30 +702,7 @@ class WialonReader:
                         if param_name == "fuel_lvl":
                             max_age = 14400  # 4 hours for fuel level
                         elif param_name in ("j1939_spn", "j1939_fmi"):
-                            max_age = (
-                                172800  # 48 hours for DTC sensors (update infrequently)
-                            )
-                        elif param_name in (
-                            "barometer",
-                            "idle_hours",
-                            "cool_temp",
-                            "rpm",
-                            "engine_hours",
-                            "oil_temp",
-                            "def_level",
-                            "gear",
-                            "intk_t",
-                            "fuel_t",
-                            "intrclr_t",
-                            "trams_t",
-                            "intake_pressure",
-                            "oil_press",
-                            "engine_load",
-                            "total_fuel_used",
-                            "total_idle_fuel",
-                            "dtc",
-                        ):
-                            max_age = 43200  # 🔧 v5.12.2: 12 hours for slow sensors
+                            max_age = 172800  # 48 hours for DTC sensors (update infrequently)
 
                         if age_sec > max_age:
                             continue
@@ -818,15 +729,11 @@ class WialonReader:
                         # 🔧 v5.12.1: Combine j1939_spn + j1939_fmi into dtc_code format
                         # Wialon stores these as separate sensors, we need to combine them
                         dtc_code_combined = None
-                        if sensor_data.get("j1939_spn") and sensor_data.get(
-                            "j1939_fmi"
-                        ):
+                        if sensor_data.get("j1939_spn") and sensor_data.get("j1939_fmi"):
                             spn = int(sensor_data["j1939_spn"])
                             fmi = int(sensor_data["j1939_fmi"])
                             dtc_code_combined = f"{spn}.{fmi}"
-                            logger.debug(
-                                f"🔍 {truck_id}: Combined DTC = {dtc_code_combined} (SPN={spn}, FMI={fmi})"
-                            )
+                            logger.debug(f"🔍 {truck_id}: Combined DTC = {dtc_code_combined} (SPN={spn}, FMI={fmi})")
 
                         truck_data = TruckSensorData(
                             truck_id=truck_id,
@@ -864,46 +771,6 @@ class WialonReader:
                             sats=sensor_data.get("sats"),
                             pwr_int=sensor_data.get("pwr_int"),
                             course=sensor_data.get("course"),
-                            # 🆕 v5.10.0: Driver behavior & MPG cross-validation
-                            fuel_economy=sensor_data.get("fuel_economy"),
-                            gear=sensor_data.get("gear"),
-                            barometer=sensor_data.get("barometer"),
-                            # 🆕 v5.10.1 / v5.12.2: Full Pacific Track sensor suite (fixed names)
-                            fuel_temp=sensor_data.get("fuel_temp"),
-                            intercooler_temp=sensor_data.get("intercooler_temp"),
-                            turbo_temp=sensor_data.get("turbo_temp"),
-                            trans_temp=sensor_data.get("trans_temp"),
-                            intake_press=sensor_data.get("intake_press"),
-                            boost=sensor_data.get("boost"),
-                            pto_hours=sensor_data.get("pto_hours"),
-                            brake_app_press=sensor_data.get("brake_app_press"),
-                            brake_primary_press=sensor_data.get("brake_primary_press"),
-                            brake_secondary_press=sensor_data.get(
-                                "brake_secondary_press"
-                            ),
-                            brake_switch=sensor_data.get("brake_switch"),
-                            parking_brake=sensor_data.get("parking_brake"),
-                            abs_status=sensor_data.get("abs_status"),
-                            rpm_hi_res=sensor_data.get("rpm_hi_res"),
-                            seatbelt=sensor_data.get("seatbelt"),
-                            vin=sensor_data.get("vin"),
-                            harsh_accel=sensor_data.get("harsh_accel"),
-                            harsh_brake=sensor_data.get("harsh_brake"),
-                            harsh_corner=sensor_data.get("harsh_corner"),
-                            # 🆕 v5.11.0 / v5.12.2: Additional sensors
-                            rssi=sensor_data.get("rssi"),
-                            coolant_level=sensor_data.get("coolant_level"),
-                            oil_level=sensor_data.get("oil_level"),
-                            gps_locked=sensor_data.get("gps_locked"),
-                            battery=sensor_data.get("battery"),
-                            roaming=sensor_data.get("roaming"),
-                            event_id=sensor_data.get("event_id"),
-                            bus=sensor_data.get("bus"),
-                            mode=sensor_data.get("mode"),
-                            retarder=sensor_data.get("retarder"),
-                            lac=sensor_data.get("lac"),
-                            mcc=sensor_data.get("mcc"),
-                            mnc=sensor_data.get("mnc"),
                         )
                         all_data.append(truck_data)
                         trucks_with_data.add(truck_id)
