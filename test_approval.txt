@@ -1,2 +1,0 @@
-Test de auto-approval de git - Dec 19, 2025
-Este archivo sera eliminado inmediatamente.
