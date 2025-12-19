@@ -66,7 +66,7 @@ def get_sensor_data_from_wialon(unit_id: int) -> Optional[Dict[str, Any]]:
     """
     Get latest sensor data for a unit from Wialon.
     Uses same logic as the API endpoint (Last Known Value strategy).
-    
+
     🔧 v5.12.2: Extended to 12-hour deep search for slow sensors
     (barometer, idle_hours, coolant_temp, rpm, etc. update infrequently)
     """
@@ -75,7 +75,9 @@ def get_sensor_data_from_wialon(unit_id: int) -> Optional[Dict[str, Any]]:
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
         # 🔧 Changed from 1 hour to 12 hours to catch slow sensors
-        cutoff_epoch = int(time.time()) - 43200  # Last 12 hours (same as wialon_reader.py)
+        cutoff_epoch = (
+            int(time.time()) - 43200
+        )  # Last 12 hours (same as wialon_reader.py)
 
         query = """
             SELECT 
