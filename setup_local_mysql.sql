@@ -82,18 +82,29 @@ CREATE TABLE IF NOT EXISTS fuel_metrics (
     dtc_severity VARCHAR(20) COMMENT 'Highest DTC severity: CRITICAL, HIGH, MEDIUM, LOW',
     
     -- Predictive Maintenance Sensors (added v5.12.2)
-    trans_temp_f DOUBLE COMMENT 'Transmission oil temperature (°F)',
-    fuel_temp_f DOUBLE COMMENT 'Fuel temperature (°F)',
-    intercooler_temp_f DOUBLE COMMENT 'Intercooler outlet temperature (°F)',
-    intake_press_kpa DOUBLE COMMENT 'Intake manifold pressure (kPa)',
-    retarder_level DOUBLE COMMENT 'Retarder/Jake brake level (%)',
+    trans_temp_f DECIMAL(5,2) COMMENT 'Transmission oil temperature (°F)',
+    fuel_temp_f DECIMAL(5,2) COMMENT 'Fuel temperature (°F)',
+    intercooler_temp_f DECIMAL(5,2) COMMENT 'Intercooler outlet temperature (°F)',
+    intake_press_kpa DECIMAL(6,2) COMMENT 'Intake manifold pressure (kPa)',
+    retarder_level DECIMAL(5,2) COMMENT 'Retarder/Jake brake level (%)',
     
     -- Additional Sensors (added v5.12.3)
-    oil_pressure_psi DOUBLE COMMENT 'Engine oil pressure (PSI)',
+    oil_pressure_psi DECIMAL(5,1) COMMENT 'Engine oil pressure (PSI)',
+    oil_temp_f DECIMAL(5,1) COMMENT 'Engine oil temperature (°F)',
     boost_pressure_psi DOUBLE COMMENT 'Turbo boost pressure (PSI)',
     exhaust_temp_f DOUBLE COMMENT 'Exhaust gas temperature (°F)',
-    def_level_pct DOUBLE COMMENT 'DEF tank level (%)',
-    battery_voltage DOUBLE COMMENT 'Battery voltage (V)',
+    def_level_pct DECIMAL(5,2) COMMENT 'DEF tank level (%)',
+    battery_voltage DECIMAL(4,2) COMMENT 'Battery voltage (V)',
+    engine_load_pct DECIMAL(5,2) COMMENT 'Engine load percentage (0-100%)',
+    ambient_temp_f DECIMAL(5,2) COMMENT 'Ambient air temperature (°F)',
+    intake_air_temp_f DECIMAL(5,2) COMMENT 'Intake manifold air temperature (°F)',
+    sats INT COMMENT 'Number of GPS satellites in view',
+    gps_quality VARCHAR(100) COMMENT 'GPS quality descriptor',
+    pwr_int DECIMAL(4,2) COMMENT 'Internal power voltage',
+    terrain_factor DECIMAL(6,3) DEFAULT 1.000 COMMENT 'Terrain difficulty multiplier (1.0 = flat)',
+    idle_hours_ecu DECIMAL(10,2) COMMENT 'Total engine idle hours from ECU',
+    dtc INT DEFAULT 0 COMMENT 'Number of active DTCs (legacy)',
+    dtc_code VARCHAR(500) COMMENT 'Comma-separated DTC codes in SPN.FMI format',
     
     -- Metadata
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
