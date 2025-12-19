@@ -1874,28 +1874,20 @@ def save_dtc_event(connection, truck_id: str, alert, sensor_data: Dict) -> bool:
                 cursor.execute(
                     """
                     INSERT INTO dtc_events 
-                    (truck_id, carrier_id, timestamp_utc, spn, fmi, dtc_code, raw_value,
-                     severity, system, description, recommended_action,
-                     latitude, longitude, speed_mph, engine_hours, odometer_mi)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (truck_id, unit_id, timestamp_utc, dtc_code, component,
+                     severity, status, description, action_required)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                     (
                         truck_id,
-                        sensor_data.get("carrier_id"),
+                        sensor_data.get("unit_id"),
                         datetime.now(timezone.utc),
-                        code.spn,
-                        code.fmi,
                         code.code,
-                        code.raw,
+                        getattr(code, "component", None) or code.description,
                         alert.severity.value,
-                        getattr(code, "system", "UNKNOWN"),
+                        'NEW',
                         code.description or alert.message,
                         getattr(code, "recommended_action", None),
-                        sensor_data.get("lat"),
-                        sensor_data.get("lon"),
-                        sensor_data.get("speed"),
-                        sensor_data.get("engine_hours"),
-                        sensor_data.get("odometer"),
                     ),
                 )
 
