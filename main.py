@@ -1643,22 +1643,48 @@ async def get_truck_sensors_v2(truck_id: str):
     - Engine sensors (coolant temp, oil pressure, etc.)
     - GPS location and status
 
-    🔧 FIX v6.2.2: Improved error handling to prevent 500/502 errors
+    🔧 FIX v6.2.3: Use fuel_metrics instead of non-existent truck_sensors_cache
     """
     try:
-        # Get latest sensor data from truck_sensors_cache
         import pymysql
         from database_mysql import get_db_connection
 
         conn = get_db_connection()
         cursor = conn.cursor(pymysql.cursors.DictCursor)
 
+        # Get latest data from fuel_metrics
         cursor.execute(
             """
-            SELECT *
-            FROM truck_sensors_cache
+            SELECT 
+                timestamp_utc,
+                speed_mph,
+                rpm,
+                estimated_gallons,
+                estimated_pct,
+                sensor_pct,
+                consumption_gph,
+                mpg_current,
+                engine_hours,
+                odometer_mi,
+                idle_gph,
+                idle_mode,
+                coolant_temp_f,
+                oil_pressure_psi,
+                oil_temp_f,
+                battery_voltage,
+                engine_load_pct,
+                def_level_pct,
+                ambient_temp_f,
+                intake_air_temp_f,
+                trans_temp_f,
+                fuel_temp_f,
+                altitude_ft,
+                latitude,
+                longitude,
+                truck_status
+            FROM fuel_metrics
             WHERE truck_id = %s
-            ORDER BY last_updated DESC
+            ORDER BY timestamp_utc DESC
             LIMIT 1
         """,
             (truck_id,),
@@ -1679,11 +1705,11 @@ async def get_truck_sensors_v2(truck_id: str):
 
         return {
             "truck_id": truck_id,
-            "timestamp": sensor_data.get("last_updated"),
+            "timestamp": sensor_data.get("timestamp_utc"),
             "sensors": {
                 k: v
                 for k, v in sensor_data.items()
-                if k not in ["truck_id", "last_updated", "created_at"] and v is not None
+                if k not in ["timestamp_utc"] and v is not None
             },
         }
 

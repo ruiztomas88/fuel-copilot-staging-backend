@@ -94,11 +94,15 @@ from driver_behavior_engine import get_behavior_engine, BehaviorEvent
 # 🆕 v5.11.0: Import predictive maintenance engine
 from predictive_maintenance_engine import get_predictive_maintenance_engine
 
-# Configure logging
+# Configure logging with file handler
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler("wialon_sync.log"),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -2504,6 +2508,11 @@ def sync_cycle(
                 mpg_config=mpg_config,
                 idle_config=idle_config,
             )
+
+            # Skip if processing failed
+            if metrics is None:
+                logger.warning(f"⚠️ {truck_id}: Processing returned None, skipping save")
+                continue
 
             # Save to database
             inserted = save_to_fuel_metrics(local_conn, metrics)
