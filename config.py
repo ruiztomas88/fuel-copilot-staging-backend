@@ -2,6 +2,7 @@
 Fuel Copilot Configuration
 🔧 FIX v3.9.2: Centralized configuration for constants
 🆕 v5.4.2: Added get_allowed_trucks() for centralized fleet filtering
+🔧 FIX Dec 19 2025: Load .env file for MySQL credentials
 
 This module contains all configurable constants used across the system.
 Modify these values to customize the behavior of the Fuel Copilot system.
@@ -14,6 +15,16 @@ from pathlib import Path
 from typing import Optional, Set
 
 import yaml
+
+# 🔧 FIX: Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+        # Loaded .env successfully
+except ImportError:
+    pass  # python-dotenv not installed, using system environment only
 
 logger = logging.getLogger(__name__)
 

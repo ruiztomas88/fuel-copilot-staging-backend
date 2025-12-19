@@ -164,8 +164,9 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
     Returns DataFrame with same structure as CSV data
 
     🔧 v3.12.14: Added altitude_ft, coolant_temp_f, consumption_lph for truck details
+    🔧 FIX Dec 19 2025: Removed non-existent columns (refuel_gallons, refuel_events_total, flags)
     Real columns: speed_mph, estimated_pct, estimated_liters, sensor_pct,
-    sensor_liters, rpm, drift_pct, idle_mode, refuel_gallons, etc.
+    sensor_liters, rpm, drift_pct, idle_mode, etc.
     """
     query = text(
         """
@@ -187,13 +188,10 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.odometer_mi,
             t1.anchor_type,
             t1.anchor_detected,
-            t1.refuel_gallons,
-            t1.refuel_events_total,
             t1.data_age_min,
             t1.idle_mode,
             t1.drift_pct,
             t1.drift_warning,
-            t1.flags,
             t1.altitude_ft,
             t1.coolant_temp_f,
             -- 🆕 v5.7.6: Diagnostic fields for Sensor Health dashboard
@@ -205,6 +203,18 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.dtc_code,
             t1.terrain_factor,
             t1.idle_hours_ecu,
+            t1.idle_gph,
+            t1.engine_hours,
+            t1.estimated_gallons,
+            t1.sensor_gallons,
+            t1.def_level_pct,
+            t1.oil_pressure_psi,
+            t1.oil_temp_f,
+            t1.engine_load_pct,
+            t1.ambient_temp_f,
+            t1.intake_air_temp_f,
+            t1.trans_temp_f,
+            t1.fuel_temp_f,
             -- 🆕 v3.12.14: Consumption in LPH (GPH * 3.78541)
             ROUND(t1.consumption_gph * 3.78541, 2) as consumption_lph,
             -- 🆕 24h averages for stable metrics
