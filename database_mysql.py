@@ -3068,7 +3068,6 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
             rpm,
             odometer_mi,
             consumption_gph,
-            refuel_gallons,
             LAG(estimated_pct) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as prev_pct,
             LAG(estimated_gallons) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as prev_gal,
             LAG(sensor_pct) OVER (PARTITION BY truck_id ORDER BY timestamp_utc) as prev_sensor_pct,
@@ -3109,20 +3108,19 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                 sensor_pct = row[4]  # Can be NULL
                 sensor_gal = row[5]  # Can be NULL
                 truck_status = row[6]
-                refuel_gallons = float(row[11] or 0)
-
-                prev_pct = float(row[12] or 0)
-                prev_gal = float(row[13] or 0)
-                prev_sensor_pct = row[14]  # Can be NULL
-                prev_sensor_gal = row[15]  # Can be NULL
-                prev_ts = row[16]
-                prev_odo = float(row[17] or 0)
-                prev_status = row[18]
+                # row[7] = speed_mph
+                # row[8] = rpm
+                # row[9] = odometer_mi
+                # row[10] = consumption_gph
+                
+                prev_pct = float(row[11] or 0)  # LAG(estimated_pct)
+                prev_gal = float(row[12] or 0)  # LAG(estimated_gallons)
+                prev_sensor_pct = row[13]  # LAG(sensor_pct) - Can be NULL
+                prev_sensor_gal = row[14]  # LAG(sensor_gallons) - Can be NULL
+                prev_ts = row[15]  # LAG(timestamp_utc)
+                prev_odo = float(row[16] or 0)  # LAG(odometer_mi)
+                prev_status = row[17]  # LAG(truck_status)
                 odometer = float(row[9] or 0)
-
-                # Skip refuel events - not theft
-                if refuel_gallons and refuel_gallons > 0:
-                    continue
 
                 # Skip if no valid previous data
                 if not prev_pct or not prev_gal or prev_gal <= 0:
@@ -3257,12 +3255,12 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
 
                 # 🆕 v3.12.27: CHECK FOR RECOVERY - If fuel recovers, it's a SENSOR ISSUE not theft
                 # Look at the next 3 readings to see if fuel recovered
-                next_pct_1 = float(row[19] or 0) if row[19] else None
-                next_pct_2 = float(row[20] or 0) if row[20] else None
-                next_pct_3 = float(row[21] or 0) if row[21] else None
-                next_ts_1 = row[22]
-                next_ts_2 = row[23]
-                next_ts_3 = row[24]
+                next_pct_1 = float(row[18] or 0) if row[18] else None  # LEAD(estimated_pct, 1)
+                next_pct_2 = float(row[19] or 0) if row[19] else None  # LEAD(estimated_pct, 2)
+                next_pct_3 = float(row[20] or 0) if row[20] else None  # LEAD(estimated_pct, 3)
+                next_ts_1 = row[21]  # LEAD(timestamp_utc, 1)
+                next_ts_2 = row[22]  # LEAD(timestamp_utc, 2)
+                next_ts_3 = row[23]  # LEAD(timestamp_utc, 3)
 
                 recovered = False
                 recovery_to_pct = None
