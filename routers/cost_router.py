@@ -51,16 +51,18 @@ async def get_fleet_cost_per_mile(
         cpm_engine = CostPerMileEngine()
 
         # 🔧 v6.2.9: Simplified query using data that actually exists
-        # Calculate from consumption_gph, mpg_current, and activity time
+        # Calculate from speed_mph, consumption_gph, and idle_gph without depending on odometer
         query = """
             SELECT 
                 fm.truck_id,
                 COUNT(*) as readings,
                 COUNT(DISTINCT DATE(fm.timestamp_utc)) as active_days,
-                -- Total fuel consumed (sum of consumption over time intervals)
-                SUM(CASE WHEN fm.consumption_gph > 0 THEN fm.consumption_gph * 0.25 / 60 ELSE 0 END) as estimated_gallons,
-                -- Average MPG when driving
-                AVG(CASE WHEN fm.speed_mph > 10 AND fm.mpg_current > 3 AND fm.mpg_current < 12 THEN fm.mpg_current END) as avg_mpg,
+                -- Total fuel consumed from consumption_gph (15-second intervals = 0.25/60 hours)
+                SUM(CASE WHEN fm.consumption_gph > 0 THEN fm.consumption_gph * (15.0/3600.0) ELSE 0 END) as estimated_gallons,
+                -- Fuel consumed while IDLE (engine on, not moving)
+                SUM(CASE WHEN fm.truck_status = 'STOPPED' AND fm.idle_gph > 0 THEN fm.idle_gph * (15.0/3600.0) ELSE 0 END) as idle_gallons,
+                -- Miles calculated from speed * time (15-second intervals)
+                SUM(CASE WHEN fm.speed_mph > 5 THEN fm.speed_mph * (15.0/3600.0) ELSE 0 END) as calculated_miles,
                 -- Time spent driving (15-second intervals = 0.25 minutes each)
                 SUM(CASE WHEN fm.speed_mph > 5 THEN 0.25 ELSE 0 END) as driving_minutes,
                 -- Average speed when driving
@@ -93,17 +95,14 @@ async def get_fleet_cost_per_mile(
                     readings = int(row[1] or 0)
                     active_days = int(row[2] or 0)
                     estimated_gallons = float(row[3] or 0)
-                    avg_mpg = float(row[4]) if row[4] else 6.0
-                    driving_minutes = float(row[5] or 0)
-                    avg_speed = float(row[6]) if row[6] else 40.0
-                    refuel_gallons = float(row[7] or 0)
+                    idle_gallons = float(row[4] or 0)
+                    calculated_miles = float(row[5] or 0)
+                    driving_minutes = float(row[6] or 0)
+                    avg_speed = float(row[7]) if row[7] else 40.0
+                    refuel_gallons = float(row[8] or 0)
 
-                    if avg_mpg < 3 or avg_mpg > 12:
-                        avg_mpg = 6.0
-
-                    # Calculate miles from driving time and average speed
-                    # driving_minutes / 60 * avg_speed = miles
-                    miles_from_driving = (driving_minutes / 60) * avg_speed
+                    # Use calculated miles directly from speed * time
+                    miles = calculated_miles if calculated_miles > 0 else 0
 
                     # Use refuel gallons if available, otherwise estimated consumption
                     if refuel_gallons > 0:
@@ -111,15 +110,13 @@ async def get_fleet_cost_per_mile(
                     elif estimated_gallons > 0:
                         gallons = estimated_gallons
                     else:
-                        # Estimate from miles and MPG
-                        gallons = miles_from_driving / avg_mpg if avg_mpg > 0 else 0
+                        # Minimal fallback
+                        gallons = 0
 
-                    # Use calculated miles
-                    miles = (
-                        miles_from_driving
-                        if miles_from_driving > 10
-                        else (gallons * avg_mpg)
-                    )
+                    # Calculate actual MPG from miles driven and fuel consumed
+                    actual_mpg = miles / gallons if gallons > 0 and miles > 0 else 6.0
+                    if actual_mpg < 3 or actual_mpg > 12:
+                        actual_mpg = 6.0
 
                     if miles < 10 and gallons < 5:
                         continue  # Skip trucks with minimal activity
@@ -136,7 +133,8 @@ async def get_fleet_cost_per_mile(
                             "miles": miles,
                             "gallons": gallons,
                             "engine_hours": engine_hours,
-                            "avg_mpg": avg_mpg,
+                            "avg_mpg": actual_mpg,
+                            "idle_gallons": idle_gallons,
                         }
                     )
                 except Exception as row_err:
@@ -224,14 +222,17 @@ async def get_truck_cost_per_mile(
 
         query = """
             SELECT 
-                (MAX(odometer_mi) - MIN(odometer_mi)) as miles,
-                (MAX(odometer_mi) - MIN(odometer_mi)) / NULLIF(AVG(CASE WHEN mpg_current > 0 THEN mpg_current END), 0) as gallons,
-                MAX(engine_hours) - MIN(engine_hours) as engine_hours,
-                AVG(CASE WHEN mpg_current > 0 THEN mpg_current END) as avg_mpg
+                -- Calculate miles from speed * time (15-second intervals)
+                SUM(CASE WHEN speed_mph > 5 THEN speed_mph * (15.0/3600.0) ELSE 0 END) as calculated_miles,
+                -- Total fuel consumed
+                SUM(CASE WHEN consumption_gph > 0 THEN consumption_gph * (15.0/3600.0) ELSE 0 END) as estimated_gallons,
+                -- Idle fuel
+                SUM(CASE WHEN truck_status = 'STOPPED' AND idle_gph > 0 THEN idle_gph * (15.0/3600.0) ELSE 0 END) as idle_gallons,
+                -- Count total records to estimate engine hours
+                COUNT(*) as total_records
             FROM fuel_metrics
             WHERE truck_id = :truck_id
                 AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
-                AND mpg_current > 0
         """
 
         with engine.connect() as conn:
@@ -243,11 +244,25 @@ async def get_truck_cost_per_mile(
                 status_code=404, detail=f"No data found for truck {truck_id}"
             )
 
+        miles = float(row[0] or 0)
+        gallons = float(row[1] or 0)
+        idle_gallons = float(row[2] or 0)
+        total_records = int(row[3] or 0)
+        
+        # Calculate MPG from actual data
+        avg_mpg = miles / gallons if gallons > 0 and miles > 0 else 6.0
+        if avg_mpg < 3 or avg_mpg > 12:
+            avg_mpg = 6.0
+        
+        # Estimate engine hours: total_records * 15 seconds / 3600
+        engine_hours = total_records * 15 / 3600
+
         truck_data = {
-            "miles": float(row[0] or 0),
-            "gallons": float(row[1] or 0),
-            "engine_hours": float(row[2] or 0),
-            "avg_mpg": float(row[3] or 0),
+            "miles": miles,
+            "gallons": gallons,
+            "engine_hours": engine_hours,
+            "avg_mpg": avg_mpg,
+            "idle_gallons": idle_gallons,
         }
 
         analysis = cpm_engine.analyze_truck_costs(
