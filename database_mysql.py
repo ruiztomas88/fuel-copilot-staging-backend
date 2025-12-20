@@ -5227,7 +5227,7 @@ def get_sensor_health_summary() -> Dict[str, Any]:
                     def_level_pct,
                     engine_load_pct,
                     coolant_temp_f,
-                    intake_temp_f,
+                    intake_air_temp_f as intake_temp_f,
                     speed_mph,
                     ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY timestamp_utc DESC) as rn
                 FROM fuel_metrics
@@ -5390,7 +5390,7 @@ def get_trucks_with_sensor_issues() -> Dict[str, Any]:
                     def_level_pct,
                     engine_load_pct,
                     coolant_temp_f,
-                    intake_temp_f,
+                    intake_air_temp_f as intake_temp_f,
                     ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY timestamp_utc DESC) as rn
                 FROM fuel_metrics
                 WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)

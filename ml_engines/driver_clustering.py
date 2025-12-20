@@ -495,7 +495,7 @@ def get_driver_data(truck_id: str, days: int = 30) -> pd.DataFrame:
             rpm,
             consumption_gph,
             engine_hours,
-            idle_hours,
+            idle_hours_ecu as idle_hours,
             truck_status,
             odometer_miles
         FROM fuel_metrics

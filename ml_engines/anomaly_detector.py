@@ -503,7 +503,7 @@ def get_truck_sensor_data(truck_id: str, days: int = 30) -> pd.DataFrame:
             speed_mph,
             consumption_gph,
             engine_hours,
-            idle_hours,
+            idle_hours_ecu as idle_hours,
             truck_status
         FROM fuel_metrics
         WHERE truck_id = :truck_id
