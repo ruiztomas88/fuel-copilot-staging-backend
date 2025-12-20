@@ -1020,11 +1020,10 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                 THEN 1 ELSE 0 
             END) as speeding_records,
             
-            -- 4. HIGH ALTITUDE: Altitude > 3000 ft affects efficiency
+            -- 4. HIGH ALTITUDE: Altitude > 3000 ft affects efficiency (~8% loss)
             SUM(CASE 
-                WHEN truck_status = 'MOVING' AND altitude_ft > 3000 
-                AND mpg_current > 0 AND mpg_current < :baseline_mpg
-                THEN (:baseline_mpg - mpg_current) / :baseline_mpg * consumption_gph
+                WHEN truck_status = 'MOVING' AND altitude_ft > 3000 AND consumption_gph > 0.5
+                THEN consumption_gph * 0.08
                 ELSE 0 
             END) as altitude_loss_sum,
             SUM(CASE 
@@ -1032,19 +1031,19 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                 THEN 1 ELSE 0 
             END) as altitude_records,
             
-            -- Moving stats for efficiency calculation
+            -- Moving stats for efficiency calculation (speed-based, not mpg_current)
+            -- Calculate miles from speed * time (15-second intervals)
             SUM(CASE 
-                WHEN truck_status = 'MOVING' AND mpg_current > 3.5 AND mpg_current < 12
-                THEN mpg_current ELSE 0 
-            END) as mpg_sum,
-            SUM(CASE 
-                WHEN truck_status = 'MOVING' AND mpg_current > 3.5 AND mpg_current < 12
-                THEN 1 ELSE 0 
-            END) as mpg_count,
+                WHEN truck_status = 'MOVING' AND speed_mph > 5
+                THEN speed_mph * (15.0/3600.0)
+                ELSE 0 
+            END) as calculated_miles,
+            -- Fuel consumed while moving
             SUM(CASE 
                 WHEN truck_status = 'MOVING' AND consumption_gph > 0.5
-                THEN consumption_gph ELSE 0 
-            END) as moving_consumption_sum,
+                THEN consumption_gph * (15.0/3600.0)
+                ELSE 0 
+            END) as moving_fuel_consumed,
             SUM(CASE 
                 WHEN truck_status = 'MOVING' AND consumption_gph > 0.5
                 THEN 1 ELSE 0 
@@ -1127,31 +1126,22 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                     else 0
                 )
 
-                # Calculate actual vs expected consumption (row[9-12]) - CHANGED FROM row[5-8]
-                mpg_sum = float(row[9] or 0)
-                mpg_count = int(row[10] or 0)
-                actual_mpg = mpg_sum / mpg_count if mpg_count > 0 else BASELINE_MPG
-
-                moving_consumption_sum = float(row[11] or 0)
-                moving_records = int(row[12] or 0)
-                moving_fuel = (
-                    moving_records
-                    * record_interval
-                    * (
-                        moving_consumption_sum / moving_records
-                        if moving_records > 0
-                        else 0
-                    )
-                )
+                # Calculate actual vs expected consumption (row[9-11]) - CHANGED FROM row[5-8]
+                # Now using speed-based miles calculation instead of mpg_current
+                calculated_miles = float(row[9] or 0)
+                moving_fuel_consumed = float(row[10] or 0)
+                moving_records = int(row[11] or 0)
+                
+                # Calculate actual MPG from miles/fuel
+                actual_mpg = calculated_miles / moving_fuel_consumed if moving_fuel_consumed > 0 else BASELINE_MPG
+                if actual_mpg < 3 or actual_mpg > 12:
+                    actual_mpg = BASELINE_MPG
 
                 # Expected fuel at baseline MPG
-                distance_traveled = moving_fuel * actual_mpg if actual_mpg > 0 else 0
-                expected_fuel = (
-                    distance_traveled / BASELINE_MPG if BASELINE_MPG > 0 else 0
-                )
+                expected_fuel = calculated_miles / BASELINE_MPG if BASELINE_MPG > 0 and calculated_miles > 0 else 0
 
                 # 5. MECHANICAL/OTHER LOSS = actual - expected - all other losses
-                total_actual = moving_fuel + idle_loss_gal
+                total_actual = moving_fuel_consumed + idle_loss_gal
                 total_excess = max(0, total_actual - expected_fuel)
                 mechanical_loss_gal = max(
                     0,
@@ -1194,10 +1184,10 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                 else:
                     probable_cause = "FALLA MECÁNICA/CONDUCCIÓN"
 
-                # Average metrics (row[13-15]) - CHANGED FROM row[9-11]
-                avg_altitude = float(row[13] or 0)
-                avg_speed = float(row[14] or 0)
-                avg_rpm = float(row[15] or 0)
+                # Average metrics (row[12-14]) - CHANGED FROM row[13-15]
+                avg_altitude = float(row[12] or 0)
+                avg_speed = float(row[13] or 0)
+                avg_rpm = float(row[14] or 0)
 
                 truck_analysis = {
                     "truck_id": truck_id,
