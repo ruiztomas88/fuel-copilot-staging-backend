@@ -1232,7 +1232,7 @@ def save_refuel_event(
             # Insert new refuel event
             query = """
                 INSERT INTO refuel_events 
-                (timestamp_utc, truck_id, carrier_id, fuel_before, fuel_after, 
+                (refuel_time, truck_id, carrier_id, before_pct, after_pct, 
                  gallons_added, refuel_type, latitude, longitude, confidence, validated)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
