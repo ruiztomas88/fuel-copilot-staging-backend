@@ -5,18 +5,19 @@ This module provides pure functions for MPG tracking with proper validation,
 windowing, and EMA smoothing. Designed for easy testing and reusability.
 
 Author: Fuel Copilot Team
-Version: v3.14.0
-Date: December 15, 2025
+Version: v3.15.0
+Date: December 20, 2025
 
 Changelog:
+- v3.15.0: Increased max_mpg from 9.0 to 12.0 - trucks were getting rejected with valid 9-11 MPG
 - v3.14.0: Improved filter_outliers_iqr (empty list on total corruption)
 - v3.14.0: Added auto-save/load for TruckBaselineManager
 - v3.14.0: Added shutdown_baseline_manager() for clean service shutdown
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,9 @@ class MPGConfig:
 
     # Physical limits for Class 8 trucks (realistic ranges)
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
-    max_mpg: float = 9.0  # 🔧 v3.10.7: Absolute maximum (empty, downhill, highway)
+    max_mpg: float = (
+        12.0  # 🔧 v3.15.0: Increased from 9.0 - trucks getting 9-11 MPG were being rejected
+    )
     ema_alpha: float = 0.4  # 🔧 v3.10.7: Reduced from 0.6 for smoother readings
     fallback_mpg: float = 5.7  # 🔧 v3.12.31: Updated to fleet average (was 5.8)
 
