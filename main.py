@@ -394,6 +394,14 @@ try:
 except ImportError:
     logger.warning("errors module not available - using default error handling")
 
+# 🔧 v6.3.1: Register Cost Analysis Router
+try:
+    from routers.cost_router import router as cost_router
+    app.include_router(cost_router)
+    logger.info("✅ Cost Analysis router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Cost router not available: {e}")
+
 # Prometheus metrics instrumentation
 if PROMETHEUS_AVAILABLE:
     from prometheus_client import REGISTRY
