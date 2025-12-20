@@ -333,6 +333,39 @@ git push -f origin main
 ---
 
 **Fecha:** December 20, 2025  
-**Commits:** bd6bbf2 → 2d5ec9f (6 commits)  
-**Estado:** ✅ Listo para deploy Mac  
-**Auto-update:** ✅ Corriendo en Windows, listo para Mac
+**Commits:** bd6bbf2 → 8243372 (7 commits)  
+**Estado:** ✅ COMPLETADO EN MAC  
+**Auto-update:** ✅ Corriendo en Mac + Windows
+
+---
+
+## ✅ **MAC DEPLOYMENT COMPLETADO (Dec 20, 2025)**
+
+### **Estado Final:**
+```
+📊 daily_truck_metrics: 295 registros, 40 camiones
+📈 fleet_summary: 11 días de resúmenes  
+⚠️  DTCs activos: 0 (estructura status = 'ACTIVE')
+⛽ Refuels (7 días): 4 eventos, 482.3 gal
+🔄 Auto-update service: RUNNING (updates every 10 min)
+```
+
+### **Fixes Aplicados en Mac (Commit 8243372):**
+1. ✅ `database_mysql.py` - Cambiar `cleared_at IS NULL` → `status = 'ACTIVE'`
+2. ✅ `fleet_command_center.py` - Cambiar `detected_at` → `timestamp_utc`
+3. ✅ `full_diagnostic.py` - Fix columnas DTCs y refuels
+4. ✅ `wialon_sync_enhanced.py` - Fix INSERT `refuel_time` → `timestamp_utc`
+5. ✅ `fix_missing_tables.py` - Ejecutado exitosamente (295 records)
+6. ✅ `auto_update_daily_metrics.py` - Servicio corriendo (PID 65303)
+
+### **Diferencias Mac vs Windows VM:**
+- ✅ Ambos usan `status = 'ACTIVE'` (no `cleared_at`)
+- ✅ Ambos usan `timestamp_utc` (no `detected_at` ni `refuel_time`)
+- ✅ Ambos tienen las 3 tablas nuevas creadas
+- ✅ Auto-update corriendo en ambos entornos
+
+### **Próximos Pasos:**
+- [ ] Verificar Loss Analysis endpoint funciona correctamente
+- [ ] Implementar algoritmo de detección de trips para `trip_data`
+- [ ] Monitor auto-update logs por 24h
+- [ ] Considerar migración completa de schema si hay más discrepancias
