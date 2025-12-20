@@ -2284,8 +2284,8 @@ def get_enhanced_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
             SUM(CASE WHEN truck_status = 'MOVING' THEN consumption_gph ELSE 0 END) as moving_consumption_sum,
             AVG(CASE WHEN mpg_current > 3.5 AND mpg_current < 12 THEN mpg_current END) as avg_mpg,
             
-            -- Distance
-            SUM(CASE WHEN odom_delta_mi > 0 AND odom_delta_mi < 10 THEN odom_delta_mi ELSE 0 END) as total_miles,
+            -- Distance (estimated from odometer readings when available)
+            MAX(odometer_mi) - MIN(odometer_mi) as total_miles,
             
             -- Total records
             COUNT(*) as total_records
