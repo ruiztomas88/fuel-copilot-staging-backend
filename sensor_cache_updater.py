@@ -10,15 +10,16 @@ Run as background service:
 Or with systemd/supervisor for auto-restart.
 """
 
-import pymysql
-import time
-import os
-import yaml
 import logging
+import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import pymysql
+import yaml
 from dotenv import load_dotenv
-from typing import Dict, List, Any, Optional
 
 load_dotenv()
 
@@ -310,8 +311,12 @@ def update_sensor_cache():
                     data.get("longitude"),
                     get_val("speed"),
                     get_val("altitude"),
-                    get_val("odometer"),
-                    get_val("heading"),
+                    get_val(
+                        "odom"
+                    ),  # 🔧 DEC20: Fixed - Wialon uses 'odom' not 'odometer'
+                    get_val(
+                        "course"
+                    ),  # 🔧 DEC20: Fixed - Wialon uses 'course' not 'heading'
                     # Performance
                     get_val("throttle_pos"),
                     get_val("turbo_press"),

@@ -13,22 +13,23 @@ Connects to Wialon MySQL and reads sensor data for 39 trucks every 15-20 seconds
 - Never hardcode passwords in code
 """
 
-import os
-import pymysql
-import pandas as pd
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple, Any
 import logging
-from dataclasses import dataclass, field
+import os
 import time
-import yaml
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import pandas as pd
+import pymysql
+import yaml
 from dotenv import load_dotenv
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
 
 # Load environment variables from .env file
@@ -78,7 +79,7 @@ class WialonConfig:
         # 🆕 v3.12.26: Engine Health sensors from Pacific Track
         "oil_temp": "oil_temp",  # Oil Temperature (°F)
         "def_level": "def_level",  # DEF Level (%) - Fixed: was def_lvl
-        "intake_air_temp": "intake_air_temp",  # Intake Air Temperature (°F)
+        "intake_air_temp": "intk_t",  # 🔧 DEC20: Fixed - Wialon truncates to intk_t
         # 🆕 v3.12.28: New sensors for DTC alerts, GPS quality, idle validation
         "dtc": "dtc",  # DTC count (number of active codes)
         "j1939_spn": "j1939_spn",  # 🔧 v5.12.1: J1939 SPN code (Suspect Parameter Number)
@@ -93,13 +94,13 @@ class WialonConfig:
         "barometer": "barometer",  # Barometric pressure - engine load correlation
         # 🆕 v5.10.1: Full Pacific Track sensor suite
         # Temperatures (Page 2)
-        "fuel_temp": "fuel_temp",  # Fuel temperature (°F) - density correction
-        "intercooler_temp": "intercooler_temp",  # Intercooler temperature (°F)
+        "fuel_temp": "fuel_t",  # 🔧 DEC20: Fixed - Wialon truncates to fuel_t
+        "intercooler_temp": "intrclr_t",  # 🔧 DEC20: Fixed - Wialon truncates to intrclr_t
         "turbo_temp": "turbo_temp",  # Turbo temperature (°F) - turbo health
         "trans_temp": "trans_temp",  # Transmission oil temperature (°F)
         # Pressures (Page 2)
-        "intake_press": "intake_press",  # Intake manifold pressure (boost) - kPa
-        "boost": "boost",  # Alternative name for intake pressure/boost
+        "intake_press": "intake_pressure",  # 🔧 DEC20: Fixed - Wialon uses intake_pressure
+        "boost": "intake_pressure",  # 🔧 DEC20: Fixed - alias for intake_pressure
         # Counters (Page 4)
         "pto_hours": "pto_hours",  # PTO Hours counter
         # Brake Info (Page 4) - 🔥 Critical for predictive maintenance
@@ -230,7 +231,7 @@ class TruckSensorData:
     def dtc_code(self) -> Optional[str]:
         """
         🔧 v5.12.1: Combine j1939_spn + j1939_fmi into DTC code format
-        
+
         Returns DTC code in format "SPN.FMI" (e.g., "100.3")
         Returns None if either SPN or FMI is missing
         """
@@ -662,7 +663,7 @@ class WialonReader:
                         )
                         if not has_sensor:
                             unit_data[unit_id].append(row)
-                            hours_ago = (int(time.time()) - row['epoch_time']) / 3600
+                            hours_ago = (int(time.time()) - row["epoch_time"]) / 3600
                             logger.debug(
                                 f"[{unit_id}] 🔍 Deep {param} found: {row['value']} (age={hours_ago:.1f}h)"
                             )
@@ -702,7 +703,9 @@ class WialonReader:
                         if param_name == "fuel_lvl":
                             max_age = 14400  # 4 hours for fuel level
                         elif param_name in ("j1939_spn", "j1939_fmi"):
-                            max_age = 172800  # 48 hours for DTC sensors (update infrequently)
+                            max_age = (
+                                172800  # 48 hours for DTC sensors (update infrequently)
+                            )
 
                         if age_sec > max_age:
                             continue
@@ -729,11 +732,15 @@ class WialonReader:
                         # 🔧 v5.12.1: Combine j1939_spn + j1939_fmi into dtc_code format
                         # Wialon stores these as separate sensors, we need to combine them
                         dtc_code_combined = None
-                        if sensor_data.get("j1939_spn") and sensor_data.get("j1939_fmi"):
+                        if sensor_data.get("j1939_spn") and sensor_data.get(
+                            "j1939_fmi"
+                        ):
                             spn = int(sensor_data["j1939_spn"])
                             fmi = int(sensor_data["j1939_fmi"])
                             dtc_code_combined = f"{spn}.{fmi}"
-                            logger.debug(f"🔍 {truck_id}: Combined DTC = {dtc_code_combined} (SPN={spn}, FMI={fmi})")
+                            logger.debug(
+                                f"🔍 {truck_id}: Combined DTC = {dtc_code_combined} (SPN={spn}, FMI={fmi})"
+                            )
 
                         truck_data = TruckSensorData(
                             truck_id=truck_id,

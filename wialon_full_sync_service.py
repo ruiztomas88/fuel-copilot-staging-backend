@@ -8,11 +8,12 @@ Syncs ALL data from Wialon database to local fuel_copilot cache:
 - Ignition events (every 60s)
 """
 
+import logging
 import sys
 import time
-import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 import pymysql
 from pymysql.cursors import DictCursor
 
@@ -225,7 +226,14 @@ class WialonFullSyncService:
                 local_conn.close()
 
     def sync_trips(self):
-        """Sync trip data from Wialon (every 60s)"""
+        """Sync trip data from Wialon (every 60s)
+        
+        🔧 FIX v6.4.3: Updated to use existing 'trips' table (not 'truck_trips')
+        - Local 'trips' table columns: truck_id, start_time, end_time, distance_mi, 
+          duration_minutes, avg_speed_mph, max_speed_mph
+        - Wialon 'trips' table columns: unit, from_timestamp, to_timestamp, 
+          distance_miles, avg_speed, max_speed
+        """
         wialon_conn = None
         local_conn = None
 
@@ -236,20 +244,21 @@ class WialonFullSyncService:
 
             with wialon_conn.cursor() as wialon_cursor:
                 # Get trips from last 7 days
+                # 🔧 FIX v6.4.2: Removed non-existent columns: driver, harsh_accel_count, harsh_brake_count, speeding_count
+                # 🔧 FIX v6.4.3: Map Wialon columns to local 'trips' table columns
                 query = """
                     SELECT 
-                        unit,
-                        from_timestamp,
-                        to_timestamp,
-                        TIMESTAMPDIFF(SECOND, from_timestamp, to_timestamp) / 3600.0 as duration_hours,
-                        distance_miles,
-                        avg_speed,
-                        max_speed,
-                        odometer,
-                        driver,
-                        harsh_accel_count,
-                        harsh_brake_count,
-                        speeding_count
+                        unit as truck_id,
+                        from_timestamp as start_time,
+                        to_timestamp as end_time,
+                        TIMESTAMPDIFF(MINUTE, from_timestamp, to_timestamp) as duration_minutes,
+                        distance_miles as distance_mi,
+                        avg_speed as avg_speed_mph,
+                        max_speed as max_speed_mph,
+                        from_latitude as start_latitude,
+                        from_longitude as start_longitude,
+                        to_latitude as end_latitude,
+                        to_longitude as end_longitude
                     FROM trips
                     WHERE from_timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)
                     ORDER BY from_timestamp DESC
@@ -263,34 +272,33 @@ class WialonFullSyncService:
                 if trips_data:
                     # Batch upsert to local database
                     with local_conn.cursor() as local_cursor:
+                        # 🔧 FIX v6.4.3: Use existing 'trips' table with correct column names
                         upsert_query = """
-                            INSERT INTO truck_trips (
-                                truck_id, start_time, end_time, duration_hours,
-                                distance_miles, avg_speed, max_speed, odometer,
-                                driver_name, harsh_accel_count, harsh_brake_count, speeding_count,
+                            INSERT INTO trips (
+                                truck_id, start_time, end_time, duration_minutes,
+                                distance_mi, avg_speed_mph, max_speed_mph,
+                                start_latitude, start_longitude, end_latitude, end_longitude,
                                 created_at
                             ) VALUES (
-                                %(unit)s, %(from_timestamp)s, %(to_timestamp)s, %(duration_hours)s,
-                                %(distance_miles)s, %(avg_speed)s, %(max_speed)s, %(odometer)s,
-                                %(driver)s, %(harsh_accel_count)s, %(harsh_brake_count)s, %(speeding_count)s,
+                                %(truck_id)s, %(start_time)s, %(end_time)s, %(duration_minutes)s,
+                                %(distance_mi)s, %(avg_speed_mph)s, %(max_speed_mph)s,
+                                %(start_latitude)s, %(start_longitude)s, %(end_latitude)s, %(end_longitude)s,
                                 NOW()
                             )
                             ON DUPLICATE KEY UPDATE
-                                duration_hours = VALUES(duration_hours),
-                                distance_miles = VALUES(distance_miles),
-                                avg_speed = VALUES(avg_speed),
-                                max_speed = VALUES(max_speed),
-                                odometer = VALUES(odometer),
-                                driver_name = VALUES(driver_name),
-                                harsh_accel_count = VALUES(harsh_accel_count),
-                                harsh_brake_count = VALUES(harsh_brake_count),
-                                speeding_count = VALUES(speeding_count)
+                                end_time = VALUES(end_time),
+                                duration_minutes = VALUES(duration_minutes),
+                                distance_mi = VALUES(distance_mi),
+                                avg_speed_mph = VALUES(avg_speed_mph),
+                                max_speed_mph = VALUES(max_speed_mph),
+                                end_latitude = VALUES(end_latitude),
+                                end_longitude = VALUES(end_longitude)
                         """
 
                         local_cursor.executemany(upsert_query, trips_data)
                         local_conn.commit()
 
-                        logger.info(f"✅ Synced {len(trips_data)} trips")
+                        logger.info(f"✅ Synced {len(trips_data)} trips to local 'trips' table")
 
             self.last_trips_sync = datetime.now()
 
