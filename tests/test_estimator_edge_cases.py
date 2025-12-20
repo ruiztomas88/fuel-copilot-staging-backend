@@ -7,23 +7,93 @@ Tests focus on:
 - Static anchor detection edge cases
 - GPS quality module integration
 - Voltage quality module integration
+- Invalid capacity handling
+- ECU consumption validation
 """
 
-import pytest
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from estimator import (
-    FuelEstimator,
     COMMON_CONFIG,
-    calculate_adaptive_Q_r,
-    AnchorType,
     AnchorDetector,
+    AnchorType,
+    FuelEstimator,
+    calculate_adaptive_Q_r,
+    get_kalman_confidence,
 )
+
+
+class TestKalmanConfidence:
+    """Test Kalman confidence calculation"""
+
+    def test_confidence_very_high(self):
+        """Should return high confidence for P < 0.5"""
+        conf = get_kalman_confidence(P=0.3)
+        assert conf["level"] == "HIGH"
+        assert conf["score"] == 95
+
+    def test_confidence_high(self):
+        """Should return medium confidence for 0.5 <= P < 2.0"""
+        conf = get_kalman_confidence(P=0.7)
+        assert conf["level"] == "MEDIUM"
+        assert conf["score"] == 75
+
+    def test_confidence_medium(self):
+        """Should return low confidence for 2.0 <= P < 5.0"""
+        conf = get_kalman_confidence(P=3.0)
+        assert conf["level"] == "LOW"
+        assert conf["score"] == 50
+
+    def test_confidence_low(self):
+        """Should return very low confidence for P >= 5.0"""
+        conf = get_kalman_confidence(P=10.0)
+        assert conf["level"] == "VERY_LOW"
+        assert conf["score"] == 25
+
+    def test_confidence_includes_metadata(self):
+        """Should include description and color"""
+        conf = get_kalman_confidence(P=0.8)
+        assert "description" in conf
+        assert "color" in conf
+        assert conf["color"] == "yellow"
+
+
+class TestInvalidCapacity:
+    """Test FuelEstimator with invalid capacity"""
+
+    def test_zero_capacity_raises_error(self):
+        """Should raise ValueError for zero capacity"""
+        with pytest.raises(ValueError, match="capacity_liters must be positive"):
+            FuelEstimator(
+                truck_id="TEST",
+                capacity_liters=0,
+                config=COMMON_CONFIG,
+            )
+
+    def test_negative_capacity_raises_error(self):
+        """Should raise ValueError for negative capacity"""
+        with pytest.raises(ValueError, match="capacity_liters must be positive"):
+            FuelEstimator(
+                truck_id="TEST",
+                capacity_liters=-100,
+                config=COMMON_CONFIG,
+            )
+
+    def test_none_capacity_raises_error(self):
+        """Should raise ValueError for None capacity"""
+        with pytest.raises(ValueError, match="capacity_liters must be positive"):
+            FuelEstimator(
+                truck_id="TEST",
+                capacity_liters=None,
+                config=COMMON_CONFIG,
+            )
 
 
 class MockTanksConfig:

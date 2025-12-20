@@ -1,0 +1,835 @@
+- """
+> DEF (Diesel Exhaust Fluid) Predictor Engine
+> ============================================
+> Version: 1.0.0
+> Created: December 2025
+  
+> Predicts DEF depletion based on real Wialon data (51,589+ records available).
+> Prevents EPA-mandated derating (5 MPH speed limit when DEF is critically low).
+  
+> Key Features:
+> - Consumption rate calculation per truck (gallons/mile, gallons/hour)
+> - Depletion prediction (days until empty, miles until empty)
+> - Alert thresholds with severity levels
+> - Historical analysis and trend detection
+> - Refill recommendations
+  
+> DEF Consumption Context:
+> - Typical consumption: 2-3% of diesel consumption (1 gal DEF per 50 gal diesel)
+> - Tank sizes: Usually 5-15 gallons on Class 8 trucks
+> - Warning light: ~10% remaining (~50-100 miles)
+> - Derating trigger: ~5% remaining (~25-50 miles)
+> - Complete derating: 0% - 5 MPH max speed (EPA mandate)
+  
+> ⚠️ CRITICAL: DEF depletion causes IMMEDIATE speed limit to 5 MPH!
+>    This is an EPA emission control requirement - cannot be bypassed.
+> """
+  
+> import logging
+> from datetime import datetime, timedelta
+> from typing import Dict, List, Optional, Any, Tuple
+> from dataclasses import dataclass, field
+> from enum import Enum
+> from collections import defaultdict
+> import statistics
+  
+> logger = logging.getLogger(__name__)
+  
+  
+> class DEFAlertLevel(Enum):
+>     """DEF alert severity levels"""
+  
+>     GOOD = "good"  # > 25% - No action needed
+>     LOW = "low"  # 15-25% - Plan refill
+>     WARNING = "warning"  # 10-15% - Refill soon
+>     CRITICAL = "critical"  # 5-10% - Refill immediately
+>     EMERGENCY = "emergency"  # < 5% - Derating imminent!
+  
+  
+> @dataclass
+> class DEFReading:
+>     """Single DEF level reading from sensor"""
+  
+>     timestamp: datetime
+>     unit_id: int
+>     truck_id: str
+>     level_percent: float  # 0-100%
+>     odometer: Optional[float] = None  # Miles
+>     engine_hours: Optional[float] = None
+  
+  
+> @dataclass
+> class DEFConsumptionProfile:
+>     """DEF consumption profile for a truck"""
+  
+>     truck_id: str
+>     unit_id: int
+  
+      # Tank capacity (estimated from config or detected)
+>     tank_capacity_gallons: float = 15.0  # Default for Class 8
+  
+      # Consumption rates (calculated from data)
+>     gallons_per_mile: float = 0.0
+>     gallons_per_hour: float = 0.0
+>     percent_per_mile: float = 0.0
+>     percent_per_hour: float = 0.0
+  
+      # Current state
+>     current_level_percent: float = 0.0
+>     current_level_gallons: float = 0.0
+>     last_reading: Optional[datetime] = None
+  
+      # Predictions
+>     miles_until_empty: float = 0.0
+>     hours_until_empty: float = 0.0
+>     days_until_empty: float = 0.0
+>     estimated_empty_date: Optional[datetime] = None
+  
+      # Miles/hours until warning thresholds
+>     miles_until_warning: float = 0.0  # Until 10%
+>     miles_until_critical: float = 0.0  # Until 5%
+  
+      # Alert level
+>     alert_level: DEFAlertLevel = DEFAlertLevel.GOOD
+  
+      # Statistics
+>     readings_count: int = 0
+>     data_quality_score: float = 0.0
+>     avg_daily_miles: float = 0.0
+  
+      # Refill history
+>     last_refill_date: Optional[datetime] = None
+>     refill_count: int = 0
+>     avg_refill_interval_days: float = 0.0
+  
+  
+> @dataclass
+> class DEFPrediction:
+>     """DEF prediction result"""
+  
+>     truck_id: str
+>     unit_id: int
+>     timestamp: datetime
+  
+      # Current state
+>     current_level_percent: float
+>     current_level_gallons: float
+>     alert_level: DEFAlertLevel
+  
+      # Predictions
+>     miles_until_empty: float
+>     hours_until_empty: float
+>     days_until_empty: float
+>     estimated_empty_date: Optional[datetime]
+  
+      # Warning thresholds
+>     miles_until_warning: float  # Until 10%
+>     miles_until_critical: float  # Until 5%
+  
+      # Consumption rates
+>     consumption_rate_gpm: float  # Gallons per mile
+>     consumption_rate_gph: float  # Gallons per hour
+  
+      # Recommendations
+>     recommended_action: str
+>     urgency_score: int  # 0-100
+  
+      # Confidence
+>     confidence_percent: float
+>     data_quality: str
+  
+  
+> import threading
+  
+  
+> class DEFPredictor:
+>     """
+>     Predicts DEF (Diesel Exhaust Fluid) depletion and generates alerts.
+  
+>     Uses historical consumption patterns to predict when each truck
+>     will need DEF refill, preventing EPA-mandated derating.
+  
+>     Thread-safe: Uses RLock for concurrent access protection (Fix C3).
+>     """
+  
+      # Alert thresholds (percent)
+>     THRESHOLD_LOW = 25.0
+>     THRESHOLD_WARNING = 15.0
+>     THRESHOLD_CRITICAL = 10.0
+>     THRESHOLD_EMERGENCY = 5.0
+  
+      # Default DEF tank capacity for Class 8 trucks (gallons)
+>     DEFAULT_TANK_CAPACITY = 15.0
+  
+      # Typical DEF consumption rate (% of diesel consumption)
+>     TYPICAL_DEF_RATE = 0.025  # 2.5%
+  
+>     def __init__(self, db_connection=None):
+>         self.db = db_connection
+>         self.profiles: Dict[str, DEFConsumptionProfile] = {}
+>         self.readings_cache: Dict[str, List[DEFReading]] = defaultdict(list)
+>         self._truck_mapping: Dict[int, str] = {}  # unit_id -> truck_id
+          # Fix C3: Thread lock for concurrent access protection
+>         self._lock = threading.RLock()
+  
+>     def load_truck_mapping(self, tanks_config: Dict[str, Any]) -> None:
+>         """Load truck ID mapping from tanks.yaml config"""
+!         trucks = tanks_config.get("trucks", {})
+!         for truck_id, config in trucks.items():
+!             unit_id = config.get("unit_id")
+!             if unit_id:
+!                 self._truck_mapping[unit_id] = truck_id
+  
+>     def get_truck_id(self, unit_id: int) -> str:
+>         """Get truck ID from unit ID"""
+!         return self._truck_mapping.get(unit_id, f"UNIT_{unit_id}")
+  
+>     def load_def_data_from_wialon(self, days: int = 30) -> int:
+>         """
+>         Load DEF level data from Wialon database.
+  
+>         Args:
+>             days: Number of days of history to load
+  
+>         Returns:
+>             Number of readings loaded
+>         """
+!         if not self.db:
+!             logger.warning("No database connection for DEF data loading")
+!             return 0
+  
+!         try:
+!             cursor = self.db.cursor()
+  
+!             query = """
+!                 SELECT 
+!                     timestamp,
+!                     unit_id,
+!                     def_level,
+!                     odometer,
+!                     engine_hours
+!                 FROM sensor_data
+!                 WHERE def_level IS NOT NULL
+!                   AND def_level > 0
+!                   AND def_level <= 100
+!                   AND timestamp >= NOW() - INTERVAL %s DAY
+!                 ORDER BY unit_id, timestamp
+!             """
+  
+!             cursor.execute(query, (days,))
+!             rows = cursor.fetchall()
+  
+              # Clear cache and reload
+!             self.readings_cache.clear()
+  
+!             for row in rows:
+!                 ts, unit_id, def_level, odometer, engine_hours = row
+!                 truck_id = self.get_truck_id(unit_id)
+  
+!                 reading = DEFReading(
+!                     timestamp=ts,
+!                     unit_id=unit_id,
+!                     truck_id=truck_id,
+!                     level_percent=float(def_level),
+!                     odometer=float(odometer) if odometer else None,
+!                     engine_hours=float(engine_hours) if engine_hours else None,
+!                 )
+  
+!                 self.readings_cache[truck_id].append(reading)
+  
+!             cursor.close()
+  
+!             total_readings = sum(len(r) for r in self.readings_cache.values())
+!             logger.info(
+!                 f"Loaded {total_readings} DEF readings for {len(self.readings_cache)} trucks"
+!             )
+  
+!             return total_readings
+  
+!         except Exception as e:
+!             logger.error(f"Error loading DEF data from Wialon: {e}")
+!             return 0
+  
+>     def add_reading(self, reading: DEFReading) -> None:
+>         """Add a single DEF reading (thread-safe)"""
+>         with self._lock:
+>             self.readings_cache[reading.truck_id].append(reading)
+  
+>     def add_readings(self, readings: List[DEFReading]) -> None:
+>         """Add multiple DEF readings (thread-safe)"""
+>         with self._lock:
+>             for reading in readings:
+>                 self.readings_cache[reading.truck_id].append(reading)
+  
+>     def calculate_consumption_profile(
+>         self, truck_id: str, tank_capacity: float = None
+>     ) -> Optional[DEFConsumptionProfile]:
+>         """
+>         Calculate DEF consumption profile for a truck based on historical data.
+>         Thread-safe operation.
+  
+>         Args:
+>             truck_id: Truck identifier
+>             tank_capacity: Optional tank capacity in gallons
+  
+>         Returns:
+>             DEFConsumptionProfile with consumption rates and predictions
+>         """
+>         with self._lock:
+>             readings = list(self.readings_cache.get(truck_id, []))
+  
+>         if len(readings) < 2:
+!             logger.warning(
+!                 f"Insufficient DEF data for {truck_id}: {len(readings)} readings"
+!             )
+!             return None
+  
+          # Sort by timestamp
+>         readings = sorted(readings, key=lambda r: r.timestamp)
+  
+          # Get unit_id from first reading
+>         unit_id = readings[0].unit_id
+  
+          # Use provided capacity or default
+>         capacity = tank_capacity or self.DEFAULT_TANK_CAPACITY
+  
+          # Calculate consumption rates
+>         consumption_rates = self._calculate_consumption_rates(readings)
+  
+          # Detect refills (level increases > 10%)
+>         refills = self._detect_refills(readings)
+  
+          # Get current state
+>         latest = readings[-1]
+>         current_level_percent = latest.level_percent
+>         current_level_gallons = (current_level_percent / 100.0) * capacity
+  
+          # Calculate predictions
+>         predictions = self._calculate_predictions(
+>             current_level_percent,
+>             current_level_gallons,
+>             consumption_rates,
+>             latest.timestamp,
+>         )
+  
+          # Calculate average daily miles
+>         avg_daily_miles = self._calculate_avg_daily_miles(readings)
+  
+          # Determine alert level
+>         alert_level = self._determine_alert_level(current_level_percent)
+  
+          # Calculate data quality
+>         data_quality = self._calculate_data_quality(readings)
+  
+          # Build profile
+>         profile = DEFConsumptionProfile(
+>             truck_id=truck_id,
+>             unit_id=unit_id,
+>             tank_capacity_gallons=capacity,
+>             gallons_per_mile=consumption_rates.get("gpm", 0.0),
+>             gallons_per_hour=consumption_rates.get("gph", 0.0),
+>             percent_per_mile=consumption_rates.get("ppm", 0.0),
+>             percent_per_hour=consumption_rates.get("pph", 0.0),
+>             current_level_percent=current_level_percent,
+>             current_level_gallons=current_level_gallons,
+>             last_reading=latest.timestamp,
+>             miles_until_empty=predictions.get("miles_until_empty", 0.0),
+>             hours_until_empty=predictions.get("hours_until_empty", 0.0),
+>             days_until_empty=predictions.get("days_until_empty", 0.0),
+>             estimated_empty_date=predictions.get("estimated_empty_date"),
+>             miles_until_warning=predictions.get("miles_until_warning", 0.0),
+>             miles_until_critical=predictions.get("miles_until_critical", 0.0),
+>             alert_level=alert_level,
+>             readings_count=len(readings),
+>             data_quality_score=data_quality,
+>             avg_daily_miles=avg_daily_miles,
+>             last_refill_date=refills[-1] if refills else None,
+>             refill_count=len(refills),
+>             avg_refill_interval_days=self._calculate_avg_refill_interval(refills),
+>         )
+  
+          # Cache profile
+>         self.profiles[truck_id] = profile
+  
+>         return profile
+  
+>     def _calculate_consumption_rates(
+>         self, readings: List[DEFReading]
+>     ) -> Dict[str, float]:
+>         """Calculate consumption rates from readings"""
+>         rates_per_mile = []
+>         rates_per_hour = []
+>         rates_percent_per_mile = []
+>         rates_percent_per_hour = []
+  
+>         for i in range(1, len(readings)):
+>             prev = readings[i - 1]
+>             curr = readings[i]
+  
+              # Skip if level increased (refill)
+>             if curr.level_percent > prev.level_percent + 2:  # 2% tolerance
+!                 continue
+  
+>             level_drop = prev.level_percent - curr.level_percent
+  
+              # Skip if no consumption or suspicious data
+>             if level_drop <= 0:
+!                 continue
+  
+>             time_delta = (curr.timestamp - prev.timestamp).total_seconds()
+  
+              # Skip if time gap too small or too large
+>             if time_delta < 60 or time_delta > 86400 * 7:  # 1 min to 7 days
+!                 continue
+  
+>             hours = time_delta / 3600
+  
+              # Calculate percent per hour
+>             if hours > 0:
+>                 pph = level_drop / hours
+>                 if 0 < pph < 10:  # Sanity check
+>                     rates_percent_per_hour.append(pph)
+  
+              # Calculate per mile if odometer available
+>             if curr.odometer and prev.odometer:
+>                 miles = curr.odometer - prev.odometer
+>                 if 0 < miles < 10000:  # Sanity check
+>                     ppm = level_drop / miles
+>                     if 0 < ppm < 1:  # Sanity check
+>                         rates_percent_per_mile.append(ppm)
+  
+          # Calculate averages
+>         result = {"gpm": 0.0, "gph": 0.0, "ppm": 0.0, "pph": 0.0}
+  
+>         if rates_percent_per_mile:
+>             result["ppm"] = statistics.median(rates_percent_per_mile)
+              # Convert to gallons (assuming 15 gal tank)
+>             result["gpm"] = result["ppm"] * self.DEFAULT_TANK_CAPACITY / 100
+  
+>         if rates_percent_per_hour:
+>             result["pph"] = statistics.median(rates_percent_per_hour)
+>             result["gph"] = result["pph"] * self.DEFAULT_TANK_CAPACITY / 100
+  
+>         return result
+  
+>     def _detect_refills(self, readings: List[DEFReading]) -> List[datetime]:
+>         """Detect DEF refill events from readings"""
+>         refills = []
+  
+>         for i in range(1, len(readings)):
+>             prev = readings[i - 1]
+>             curr = readings[i]
+  
+              # Refill detected if level increased by more than 10%
+>             if curr.level_percent > prev.level_percent + 10:
+!                 refills.append(curr.timestamp)
+  
+>         return refills
+  
+>     def _calculate_predictions(
+>         self,
+>         current_percent: float,
+>         current_gallons: float,
+>         rates: Dict[str, float],
+>         last_reading_time: datetime,
+>     ) -> Dict[str, Any]:
+>         """Calculate depletion predictions"""
+>         predictions = {
+>             "miles_until_empty": 0.0,
+>             "hours_until_empty": 0.0,
+>             "days_until_empty": 0.0,
+>             "estimated_empty_date": None,
+>             "miles_until_warning": 0.0,
+>             "miles_until_critical": 0.0,
+>         }
+  
+          # Calculate based on percent per mile
+>         ppm = rates.get("ppm", 0.0)
+>         pph = rates.get("pph", 0.0)
+  
+>         if ppm > 0:
+              # Miles until empty
+>             predictions["miles_until_empty"] = current_percent / ppm
+  
+              # Miles until warning (10%)
+>             if current_percent > self.THRESHOLD_CRITICAL:
+>                 predictions["miles_until_warning"] = (
+>                     current_percent - self.THRESHOLD_CRITICAL
+>                 ) / ppm
+  
+              # Miles until critical (5%)
+>             if current_percent > self.THRESHOLD_EMERGENCY:
+>                 predictions["miles_until_critical"] = (
+>                     current_percent - self.THRESHOLD_EMERGENCY
+>                 ) / ppm
+  
+>         if pph > 0:
+>             predictions["hours_until_empty"] = current_percent / pph
+  
+              # Estimate days (assuming 10 hours/day average operation)
+>             avg_hours_per_day = 10
+>             predictions["days_until_empty"] = (
+>                 predictions["hours_until_empty"] / avg_hours_per_day
+>             )
+  
+              # Estimated empty date
+>             hours_until_empty = predictions["hours_until_empty"]
+>             predictions["estimated_empty_date"] = last_reading_time + timedelta(
+>                 hours=hours_until_empty
+>             )
+  
+>         return predictions
+  
+>     def _calculate_avg_daily_miles(self, readings: List[DEFReading]) -> float:
+>         """Calculate average daily miles from odometer readings"""
+          # Find readings with odometer data
+>         odo_readings = [
+>             (r.timestamp, r.odometer) for r in readings if r.odometer and r.odometer > 0
+>         ]
+  
+>         if len(odo_readings) < 2:
+!             return 0.0
+  
+>         first = odo_readings[0]
+>         last = odo_readings[-1]
+  
+>         total_miles = last[1] - first[1]
+>         total_days = (last[0] - first[0]).total_seconds() / 86400
+  
+>         if total_days > 0:
+>             return total_miles / total_days
+  
+!         return 0.0
+  
+>     def _determine_alert_level(self, level_percent: float) -> DEFAlertLevel:
+>         """Determine alert level from current DEF level"""
+>         if level_percent < self.THRESHOLD_EMERGENCY:
+>             return DEFAlertLevel.EMERGENCY
+>         elif level_percent < self.THRESHOLD_CRITICAL:
+>             return DEFAlertLevel.CRITICAL
+>         elif level_percent < self.THRESHOLD_WARNING:
+>             return DEFAlertLevel.WARNING
+>         elif level_percent < self.THRESHOLD_LOW:
+>             return DEFAlertLevel.LOW
+>         else:
+>             return DEFAlertLevel.GOOD
+  
+>     def _calculate_data_quality(self, readings: List[DEFReading]) -> float:
+>         """Calculate data quality score (0-100)"""
+>         if not readings:
+!             return 0.0
+  
+>         score = 0.0
+  
+          # Factor 1: Number of readings (max 30 points)
+>         reading_score = min(len(readings) / 100, 1.0) * 30
+>         score += reading_score
+  
+          # Factor 2: Time coverage (max 30 points)
+>         if len(readings) >= 2:
+>             time_span = (readings[-1].timestamp - readings[0].timestamp).days
+>             coverage_score = min(time_span / 30, 1.0) * 30  # 30 days ideal
+>             score += coverage_score
+  
+          # Factor 3: Odometer data availability (max 20 points)
+>         odo_count = sum(1 for r in readings if r.odometer)
+>         odo_score = (odo_count / len(readings)) * 20
+>         score += odo_score
+  
+          # Factor 4: Data consistency (max 20 points)
+          # Check for gaps and anomalies
+>         gaps = 0
+>         for i in range(1, len(readings)):
+>             gap = (readings[i].timestamp - readings[i - 1].timestamp).total_seconds()
+>             if gap > 86400:  # More than 1 day gap
+!                 gaps += 1
+  
+>         gap_ratio = gaps / max(len(readings) - 1, 1)
+>         consistency_score = (1 - gap_ratio) * 20
+>         score += consistency_score
+  
+>         return round(score, 1)
+  
+>     def _calculate_avg_refill_interval(self, refills: List[datetime]) -> float:
+>         """Calculate average days between refills"""
+>         if len(refills) < 2:
+>             return 0.0
+  
+!         intervals = []
+!         for i in range(1, len(refills)):
+!             interval = (refills[i] - refills[i - 1]).days
+!             intervals.append(interval)
+  
+!         return statistics.mean(intervals) if intervals else 0.0
+  
+>     def predict(self, truck_id: str) -> Optional[DEFPrediction]:
+>         """
+>         Generate DEF prediction for a truck.
+  
+>         Args:
+>             truck_id: Truck identifier
+  
+>         Returns:
+>             DEFPrediction with current state, predictions, and recommendations
+>         """
+          # Ensure we have a profile
+>         profile = self.profiles.get(truck_id)
+>         if not profile:
+>             profile = self.calculate_consumption_profile(truck_id)
+  
+>         if not profile:
+!             return None
+  
+          # Generate recommendation
+>         recommendation, urgency = self._generate_recommendation(profile)
+  
+          # Determine confidence
+>         confidence = min(profile.data_quality_score, 100.0)
+>         data_quality = (
+>             "high" if confidence > 70 else "medium" if confidence > 40 else "low"
+>         )
+  
+>         return DEFPrediction(
+>             truck_id=truck_id,
+>             unit_id=profile.unit_id,
+>             timestamp=datetime.now(),
+>             current_level_percent=profile.current_level_percent,
+>             current_level_gallons=profile.current_level_gallons,
+>             alert_level=profile.alert_level,
+>             miles_until_empty=profile.miles_until_empty,
+>             hours_until_empty=profile.hours_until_empty,
+>             days_until_empty=profile.days_until_empty,
+>             estimated_empty_date=profile.estimated_empty_date,
+>             miles_until_warning=profile.miles_until_warning,
+>             miles_until_critical=profile.miles_until_critical,
+>             consumption_rate_gpm=profile.gallons_per_mile,
+>             consumption_rate_gph=profile.gallons_per_hour,
+>             recommended_action=recommendation,
+>             urgency_score=urgency,
+>             confidence_percent=confidence,
+>             data_quality=data_quality,
+>         )
+  
+>     def _generate_recommendation(
+>         self, profile: DEFConsumptionProfile
+>     ) -> Tuple[str, int]:
+>         """Generate recommendation and urgency score"""
+>         level = profile.current_level_percent
+>         miles = profile.miles_until_empty
+  
+>         if profile.alert_level == DEFAlertLevel.EMERGENCY:
+!             return (
+!                 f"⚠️ ¡EMERGENCIA! DEF al {level:.0f}%. "
+!                 f"¡Recargar INMEDIATAMENTE para evitar límite de 5 MPH!",
+!                 100,
+!             )
+  
+>         elif profile.alert_level == DEFAlertLevel.CRITICAL:
+!             return (
+!                 f"🔴 DEF CRÍTICO al {level:.0f}%. "
+!                 f"Solo {miles:.0f} millas restantes. Recargar hoy.",
+!                 90,
+!             )
+  
+>         elif profile.alert_level == DEFAlertLevel.WARNING:
+!             return (
+!                 f"🟠 DEF bajo al {level:.0f}%. "
+!                 f"Aproximadamente {miles:.0f} millas restantes. Programar recarga.",
+!                 70,
+!             )
+  
+>         elif profile.alert_level == DEFAlertLevel.LOW:
+!             days = profile.days_until_empty
+!             return (
+!                 f"🟡 DEF al {level:.0f}%. "
+!                 f"Quedan ~{days:.0f} días de operación. Planificar recarga.",
+!                 40,
+!             )
+  
+>         else:
+>             return (f"✅ DEF al {level:.0f}%. Nivel adecuado.", 10)
+  
+>     def predict_all(self) -> List[DEFPrediction]:
+>         """Generate predictions for all trucks with data"""
+>         predictions = []
+  
+>         for truck_id in self.readings_cache.keys():
+>             pred = self.predict(truck_id)
+>             if pred:
+>                 predictions.append(pred)
+  
+          # Sort by urgency (most urgent first)
+>         predictions.sort(key=lambda p: p.urgency_score, reverse=True)
+  
+>         return predictions
+  
+>     def get_fleet_def_status(self) -> Dict[str, Any]:
+>         """Get DEF status summary for entire fleet"""
+>         predictions = self.predict_all()
+  
+>         if not predictions:
+!             return {
+!                 "fleet_status": "unknown",
+!                 "message": "No hay datos DEF disponibles",
+!                 "truck_count": 0,
+!                 "alerts": [],
+!             }
+  
+          # Count by alert level
+>         level_counts = defaultdict(int)
+>         for pred in predictions:
+>             level_counts[pred.alert_level.value] += 1
+  
+          # Determine fleet status
+>         if level_counts.get("emergency", 0) > 0:
+!             fleet_status = "emergency"
+!             status_icon = "🚨"
+>         elif level_counts.get("critical", 0) > 0:
+!             fleet_status = "critical"
+!             status_icon = "🔴"
+>         elif level_counts.get("warning", 0) > 0:
+!             fleet_status = "warning"
+!             status_icon = "🟠"
+>         elif level_counts.get("low", 0) > 0:
+!             fleet_status = "attention"
+!             status_icon = "🟡"
+>         else:
+>             fleet_status = "good"
+>             status_icon = "✅"
+  
+          # Get trucks needing attention
+>         attention_needed = [
+>             {
+>                 "truck_id": p.truck_id,
+>                 "level_percent": p.current_level_percent,
+>                 "alert_level": p.alert_level.value,
+>                 "miles_until_empty": p.miles_until_empty,
+>                 "days_until_empty": p.days_until_empty,
+>                 "recommendation": p.recommended_action,
+>             }
+>             for p in predictions
+>             if p.alert_level
+>             in [DEFAlertLevel.WARNING, DEFAlertLevel.CRITICAL, DEFAlertLevel.EMERGENCY]
+>         ]
+  
+          # Calculate averages
+>         avg_level = statistics.mean(p.current_level_percent for p in predictions)
+>         avg_days = statistics.mean(
+>             p.days_until_empty for p in predictions if p.days_until_empty > 0
+>         )
+  
+>         return {
+>             "fleet_status": fleet_status,
+>             "status_icon": status_icon,
+>             "message": self._get_fleet_message(fleet_status, level_counts),
+>             "truck_count": len(predictions),
+>             "average_level_percent": round(avg_level, 1),
+>             "average_days_until_empty": round(avg_days, 1) if avg_days else None,
+>             "level_distribution": dict(level_counts),
+>             "trucks_needing_attention": attention_needed,
+>             "timestamp": datetime.now().isoformat(),
+>         }
+  
+>     def _get_fleet_message(self, status: str, counts: Dict) -> str:
+>         """Generate fleet status message"""
+>         messages = {
+>             "emergency": f"🚨 ¡{counts.get('emergency', 0)} camión(es) en EMERGENCIA! Riesgo de derating.",
+>             "critical": f"🔴 {counts.get('critical', 0)} camión(es) con DEF crítico. Acción inmediata requerida.",
+>             "warning": f"🟠 {counts.get('warning', 0)} camión(es) con DEF bajo. Programar recargas.",
+>             "attention": f"🟡 {counts.get('low', 0)} camión(es) necesitan recarga pronto.",
+>             "good": "✅ Todos los camiones tienen niveles de DEF adecuados.",
+>         }
+>         return messages.get(status, "Estado desconocido")
+  
+>     def to_dict(self, prediction: DEFPrediction) -> Dict[str, Any]:
+>         """Convert prediction to dictionary"""
+!         return {
+!             "truck_id": prediction.truck_id,
+!             "unit_id": prediction.unit_id,
+!             "timestamp": prediction.timestamp.isoformat(),
+!             "current_level": {
+!                 "percent": round(prediction.current_level_percent, 1),
+!                 "gallons": round(prediction.current_level_gallons, 2),
+!             },
+!             "alert_level": prediction.alert_level.value,
+!             "predictions": {
+!                 "miles_until_empty": round(prediction.miles_until_empty, 0),
+!                 "hours_until_empty": round(prediction.hours_until_empty, 1),
+!                 "days_until_empty": round(prediction.days_until_empty, 1),
+!                 "estimated_empty_date": (
+!                     prediction.estimated_empty_date.isoformat()
+!                     if prediction.estimated_empty_date
+!                     else None
+!                 ),
+!                 "miles_until_warning": round(prediction.miles_until_warning, 0),
+!                 "miles_until_critical": round(prediction.miles_until_critical, 0),
+!             },
+!             "consumption_rates": {
+!                 "gallons_per_mile": round(prediction.consumption_rate_gpm, 4),
+!                 "gallons_per_hour": round(prediction.consumption_rate_gph, 4),
+!             },
+!             "recommendation": prediction.recommended_action,
+!             "urgency_score": prediction.urgency_score,
+!             "confidence": {
+!                 "percent": round(prediction.confidence_percent, 1),
+!                 "quality": prediction.data_quality,
+!             },
+!         }
+  
+  
+  # =============================================================================
+  # SINGLETON ACCESSOR
+  # =============================================================================
+  
+> _def_predictor_instance: Optional[DEFPredictor] = None
+  
+  
+> def get_def_predictor() -> DEFPredictor:
+>     """
+>     Get the singleton DEFPredictor instance.
+>     Creates the instance if it doesn't exist.
+>     """
+>     global _def_predictor_instance
+!     if _def_predictor_instance is None:
+!         _def_predictor_instance = DEFPredictor()
+!     return _def_predictor_instance
+  
+  
+  # Example usage
+- if __name__ == "__main__":
+      # Demo with sample data
+-     predictor = DEFPredictor()
+  
+      # Add sample readings
+-     base_time = datetime.now() - timedelta(days=7)
+-     readings = []
+  
+-     for i in range(100):
+          # Simulate decreasing DEF level
+-         level = 80 - (i * 0.5)  # Drops ~0.5% per reading
+-         if level < 10:
+-             level = 80  # Refill
+  
+-         readings.append(
+!             DEFReading(
+!                 timestamp=base_time + timedelta(hours=i * 2),
+!                 unit_id=401849345,
+!                 truck_id="VD3579",
+!                 level_percent=level,
+!                 odometer=100000 + (i * 50),  # 50 miles per reading
+!                 engine_hours=5000 + i,
+!             )
+!         )
+  
+-     predictor.add_readings(readings)
+  
+      # Calculate prediction
+-     prediction = predictor.predict("VD3579")
+  
+-     if prediction:
+-         print(f"\n📊 DEF Prediction for {prediction.truck_id}")
+-         print(f"   Current Level: {prediction.current_level_percent:.1f}%")
+-         print(f"   Alert Level: {prediction.alert_level.value}")
+-         print(f"   Miles Until Empty: {prediction.miles_until_empty:.0f}")
+-         print(f"   Days Until Empty: {prediction.days_until_empty:.1f}")
+-         print(f"   Recommendation: {prediction.recommended_action}")

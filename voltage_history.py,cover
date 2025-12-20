@@ -1,0 +1,456 @@
+> """
+> ╔═══════════════════════════════════════════════════════════════════════════════╗
+> ║                     VOLTAGE HISTORY v5.7.6                                     ║
+> ║              Battery/Alternator Trending & Prediction                          ║
+> ╚═══════════════════════════════════════════════════════════════════════════════╝
+  
+> Stores voltage readings in a dedicated table for:
+> - Long-term trending (weeks/months)
+> - Battery degradation prediction
+> - Alternator failure prediction
+  
+> 🆕 v5.7.6: New module for dedicated voltage history tracking
+> """
+  
+> from datetime import datetime, timezone, timedelta
+> from typing import Dict, List, Optional, Any
+> from dataclasses import dataclass
+> from enum import Enum
+> import logging
+  
+> try:
+>     from database_mysql import get_db_connection, get_sqlalchemy_engine
+! except ImportError:
+!     get_db_connection = None
+!     get_sqlalchemy_engine = None
+  
+> logger = logging.getLogger(__name__)
+  
+  
+> class VoltageStatus(Enum):
+>     """Voltage status categories"""
+  
+>     CRITICAL_LOW = "CRITICAL_LOW"  # < 11.5V - Won't start
+>     LOW = "LOW"  # 11.5-12.2V - Battery draining
+>     NORMAL = "NORMAL"  # 12.2-14.8V - OK
+>     HIGH = "HIGH"  # 14.8-15.5V - Alternator high
+>     CRITICAL_HIGH = "CRITICAL_HIGH"  # > 15.5V - Risk of damage
+  
+  
+> @dataclass
+> class VoltageReading:
+>     """Single voltage reading"""
+  
+>     truck_id: str
+>     timestamp: datetime
+>     voltage: float
+>     rpm: Optional[float]
+>     engine_running: bool
+>     status: VoltageStatus
+>     source: str = "fuel_metrics"  # or "voltage_history"
+  
+  
+> class VoltageHistoryManager:
+>     """
+>     Manages voltage history for trending and prediction.
+  
+>     Uses a dedicated voltage_history table for efficient queries
+>     on long time ranges.
+>     """
+  
+>     TABLE_NAME = "voltage_history"
+  
+      # Sampling: store 1 reading per truck per hour (reduce storage)
+>     SAMPLE_INTERVAL_MINUTES = 60
+  
+>     def __init__(self):
+>         self._last_sample: Dict[str, datetime] = {}  # truck_id -> last sample time
+>         self._ensure_table_exists()
+  
+>     def _ensure_table_exists(self) -> None:
+>         """Create voltage_history table if it doesn't exist."""
+>         if not get_db_connection:
+!             logger.warning("Database connection not available")
+!             return
+  
+>         create_sql = """
+>         CREATE TABLE IF NOT EXISTS voltage_history (
+>             id BIGINT AUTO_INCREMENT PRIMARY KEY,
+>             truck_id VARCHAR(20) NOT NULL,
+>             timestamp_utc DATETIME NOT NULL,
+              
+>             -- Voltage data
+>             voltage DOUBLE NOT NULL,
+>             rpm DOUBLE,
+>             engine_running TINYINT(1) DEFAULT 0,
+>             status VARCHAR(20),
+              
+>             -- Context
+>             truck_status VARCHAR(20),
+>             temperature_f DOUBLE,
+              
+>             -- Metadata
+>             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              
+>             -- Indexes for efficient queries
+>             UNIQUE KEY unique_truck_hour (truck_id, timestamp_utc),
+>             INDEX idx_voltage_truck (truck_id, timestamp_utc DESC),
+>             INDEX idx_voltage_status (status, timestamp_utc DESC),
+>             INDEX idx_voltage_level (voltage, timestamp_utc DESC)
+>         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+>         """
+  
+>         try:
+>             with get_db_connection() as conn:
+>                 with conn.cursor() as cursor:
+>                     cursor.execute(create_sql)
+>                     conn.commit()
+>                     logger.info("✅ voltage_history table ready")
+>         except Exception as e:
+>             logger.warning(f"⚠️ Could not create voltage_history table: {e}")
+  
+>     def _classify_voltage(self, voltage: float, engine_running: bool) -> VoltageStatus:
+>         """Classify voltage based on thresholds"""
+>         if engine_running:
+              # Engine running - expect 13.5-14.8V
+>             if voltage < 12.5:
+>                 return VoltageStatus.CRITICAL_LOW
+>             elif voltage < 13.2:
+>                 return VoltageStatus.LOW
+>             elif voltage > 15.5:
+>                 return VoltageStatus.CRITICAL_HIGH
+>             elif voltage > 15.0:
+>                 return VoltageStatus.HIGH
+>             else:
+>                 return VoltageStatus.NORMAL
+>         else:
+              # Engine off - expect 12.2-12.8V
+>             if voltage < 11.5:
+>                 return VoltageStatus.CRITICAL_LOW
+>             elif voltage < 12.2:
+>                 return VoltageStatus.LOW
+>             elif voltage > 13.2:
+>                 return VoltageStatus.HIGH
+>             else:
+>                 return VoltageStatus.NORMAL
+  
+>     def record_voltage(
+>         self,
+>         truck_id: str,
+>         voltage: float,
+>         rpm: Optional[float] = None,
+>         truck_status: str = None,
+>         temperature_f: float = None,
+>     ) -> bool:
+-         """
+>         Record a voltage reading if enough time has passed since last sample.
+  
+>         Returns True if recorded, False if skipped (too soon).
+>         """
+>         if not get_db_connection or voltage is None:
+>             return False
+  
+>         now = datetime.now(timezone.utc)
+  
+          # Check if we should sample (1 per hour per truck)
+>         last = self._last_sample.get(truck_id)
+>         if last and (now - last).total_seconds() < self.SAMPLE_INTERVAL_MINUTES * 60:
+>             return False  # Too soon
+  
+>         engine_running = rpm is not None and rpm > 100
+>         status = self._classify_voltage(voltage, engine_running)
+  
+          # Round timestamp to hour for deduplication
+>         timestamp_hour = now.replace(minute=0, second=0, microsecond=0)
+  
+>         insert_sql = """
+>         INSERT INTO voltage_history 
+>             (truck_id, timestamp_utc, voltage, rpm, engine_running, status, truck_status, temperature_f)
+>         VALUES 
+>             (%s, %s, %s, %s, %s, %s, %s, %s)
+>         ON DUPLICATE KEY UPDATE
+>             voltage = VALUES(voltage),
+>             rpm = VALUES(rpm),
+>             engine_running = VALUES(engine_running),
+>             status = VALUES(status)
+>         """
+  
+>         try:
+>             with get_db_connection() as conn:
+>                 with conn.cursor() as cursor:
+!                     cursor.execute(
+!                         insert_sql,
+!                         (
+!                             truck_id,
+!                             timestamp_hour,
+!                             voltage,
+!                             rpm,
+!                             1 if engine_running else 0,
+!                             status.value,
+!                             truck_status,
+!                             temperature_f,
+!                         ),
+!                     )
+!                     conn.commit()
+  
+!             self._last_sample[truck_id] = now
+!             logger.debug(f"📊 Recorded voltage {voltage:.1f}V for {truck_id}")
+!             return True
+  
+>         except Exception as e:
+>             logger.error(f"Failed to record voltage for {truck_id}: {e}")
+>             return False
+  
+>     def get_history(
+>         self,
+>         truck_id: str,
+>         hours_back: int = 168,  # 7 days default
+>     ) -> List[VoltageReading]:
+>         """Get voltage history for a truck"""
+>         if not get_db_connection:
+!             return []
+  
+>         query = """
+>         SELECT 
+>             truck_id, timestamp_utc, voltage, rpm, engine_running, status
+>         FROM voltage_history
+>         WHERE truck_id = %s
+>           AND timestamp_utc > NOW() - INTERVAL %s HOUR
+>         ORDER BY timestamp_utc ASC
+>         """
+  
+>         try:
+>             with get_db_connection() as conn:
+>                 with conn.cursor() as cursor:
+!                     cursor.execute(query, (truck_id, hours_back))
+!                     rows = cursor.fetchall()
+  
+!             return [
+!                 VoltageReading(
+!                     truck_id=row[0],
+!                     timestamp=row[1],
+!                     voltage=row[2],
+!                     rpm=row[3],
+!                     engine_running=bool(row[4]),
+!                     status=VoltageStatus(row[5]) if row[5] else VoltageStatus.NORMAL,
+!                     source="voltage_history",
+!                 )
+!                 for row in rows
+!             ]
+  
+>         except Exception as e:
+>             logger.error(f"Failed to get voltage history for {truck_id}: {e}")
+>             return []
+  
+>     def get_trending_summary(
+>         self,
+>         truck_id: str,
+>         days_back: int = 30,
+>     ) -> Dict[str, Any]:
+>         """
+>         Get voltage trending summary for prediction.
+  
+>         Returns statistics useful for predicting battery/alternator issues:
+>         - Average voltage over time
+>         - Trend (rising/falling/stable)
+>         - Low voltage event count
+>         - Prediction confidence
+>         """
+>         if not get_db_connection:
+!             return {}
+  
+>         query = """
+>         SELECT 
+>             -- Overall stats
+>             AVG(voltage) as avg_voltage,
+>             MIN(voltage) as min_voltage,
+>             MAX(voltage) as max_voltage,
+>             STDDEV(voltage) as std_voltage,
+>             COUNT(*) as readings,
+              
+>             -- Recent vs old comparison (for trend)
+>             AVG(CASE WHEN timestamp_utc > NOW() - INTERVAL 7 DAY THEN voltage END) as avg_recent,
+>             AVG(CASE WHEN timestamp_utc < NOW() - INTERVAL 7 DAY THEN voltage END) as avg_older,
+              
+>             -- Low voltage events
+>             SUM(CASE WHEN voltage < 12.0 THEN 1 ELSE 0 END) as low_events,
+>             SUM(CASE WHEN voltage < 11.5 THEN 1 ELSE 0 END) as critical_events,
+              
+>             -- High voltage events (alternator issue)
+>             SUM(CASE WHEN voltage > 15.0 THEN 1 ELSE 0 END) as high_events
+              
+>         FROM voltage_history
+>         WHERE truck_id = %s
+>           AND timestamp_utc > NOW() - INTERVAL %s DAY
+>         """
+  
+>         try:
+>             with get_db_connection() as conn:
+>                 with conn.cursor() as cursor:
+>                     cursor.execute(query, (truck_id, days_back))
+>                     row = cursor.fetchone()
+  
+>             if not row or not row[0]:
+>                 return {"truck_id": truck_id, "has_data": False}
+  
+>             (
+>                 avg_voltage,
+>                 min_v,
+>                 max_v,
+>                 std_v,
+>                 readings,
+>                 avg_recent,
+>                 avg_older,
+>                 low_events,
+>                 critical_events,
+>                 high_events,
+>             ) = row
+  
+              # Calculate trend
+>             trend = "STABLE"
+>             trend_value = 0
+>             if avg_recent and avg_older:
+>                 trend_value = avg_recent - avg_older
+>                 if trend_value < -0.3:
+>                     trend = "FALLING"
+!                 elif trend_value > 0.3:
+!                     trend = "RISING"
+  
+              # Predict battery health
+>             battery_health = "GOOD"
+>             if critical_events and critical_events > 2:
+>                 battery_health = "CRITICAL"
+>             elif low_events and low_events > 5:
+>                 battery_health = "DEGRADED"
+>             elif trend == "FALLING" and avg_recent < 12.5:
+!                 battery_health = "DEGRADED"
+  
+              # Predict days until issue (rough estimate)
+>             days_until_issue = None
+>             if trend == "FALLING" and trend_value < 0:
+                  # Linear extrapolation to 11.5V
+>                 days_until_issue = max(
+>                     0, int((avg_recent - 11.5) / abs(trend_value) * 7)
+>                 )
+  
+>             return {
+>                 "truck_id": truck_id,
+>                 "has_data": True,
+>                 "period_days": days_back,
+>                 "readings_count": readings,
+>                 "avg_voltage": round(avg_voltage, 2),
+>                 "min_voltage": round(min_v, 2),
+>                 "max_voltage": round(max_v, 2),
+>                 "std_voltage": round(std_v, 3) if std_v else 0,
+>                 "trend": trend,
+>                 "trend_voltage_per_week": round(trend_value, 2) if trend_value else 0,
+>                 "low_voltage_events": low_events or 0,
+>                 "critical_voltage_events": critical_events or 0,
+>                 "high_voltage_events": high_events or 0,
+>                 "battery_health": battery_health,
+>                 "predicted_days_until_issue": days_until_issue,
+>             }
+  
+!         except Exception as e:
+!             logger.error(f"Failed to get voltage trending for {truck_id}: {e}")
+!             return {"truck_id": truck_id, "has_data": False, "error": str(e)}
+  
+>     def get_fleet_summary(self) -> Dict[str, Any]:
+>         """Get fleet-wide voltage summary"""
+!         if not get_db_connection:
+!             return {}
+  
+!         query = """
+!         SELECT 
+!             COUNT(DISTINCT truck_id) as trucks_with_data,
+!             AVG(voltage) as fleet_avg_voltage,
+!             SUM(CASE WHEN status = 'CRITICAL_LOW' THEN 1 ELSE 0 END) as critical_low_count,
+!             SUM(CASE WHEN status = 'LOW' THEN 1 ELSE 0 END) as low_count,
+!             SUM(CASE WHEN status = 'NORMAL' THEN 1 ELSE 0 END) as normal_count,
+!             SUM(CASE WHEN status = 'HIGH' THEN 1 ELSE 0 END) as high_count,
+!             SUM(CASE WHEN status = 'CRITICAL_HIGH' THEN 1 ELSE 0 END) as critical_high_count
+!         FROM voltage_history
+!         WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
+!         """
+  
+!         try:
+!             with get_db_connection() as conn:
+!                 with conn.cursor() as cursor:
+!                     cursor.execute(query)
+!                     row = cursor.fetchone()
+  
+!             if not row:
+!                 return {"has_data": False}
+  
+!             return {
+!                 "has_data": True,
+!                 "trucks_with_data": row[0] or 0,
+!                 "fleet_avg_voltage": round(row[1], 2) if row[1] else None,
+!                 "status_counts": {
+!                     "CRITICAL_LOW": row[2] or 0,
+!                     "LOW": row[3] or 0,
+!                     "NORMAL": row[4] or 0,
+!                     "HIGH": row[5] or 0,
+!                     "CRITICAL_HIGH": row[6] or 0,
+!                 },
+!                 "last_updated": datetime.now(timezone.utc).isoformat(),
+!             }
+  
+!         except Exception as e:
+!             logger.error(f"Failed to get fleet voltage summary: {e}")
+!             return {"has_data": False, "error": str(e)}
+  
+  
+  # Singleton instance
+> _voltage_history_manager: Optional[VoltageHistoryManager] = None
+  
+  
+> def get_voltage_history_manager() -> VoltageHistoryManager:
+>     """Get singleton voltage history manager"""
+>     global _voltage_history_manager
+>     if _voltage_history_manager is None:
+>         _voltage_history_manager = VoltageHistoryManager()
+>     return _voltage_history_manager
+  
+  
+  # Convenience functions
+> def record_voltage_reading(
+>     truck_id: str,
+>     voltage: float,
+>     rpm: Optional[float] = None,
+>     truck_status: str = None,
+>     temperature_f: float = None,
+> ) -> bool:
+>     """Record a voltage reading"""
+>     return get_voltage_history_manager().record_voltage(
+>         truck_id, voltage, rpm, truck_status, temperature_f
+>     )
+  
+  
+> def get_voltage_trending(truck_id: str, days_back: int = 30) -> Dict[str, Any]:
+>     """Get voltage trending summary for prediction"""
+>     return get_voltage_history_manager().get_trending_summary(truck_id, days_back)
+  
+  
+- if __name__ == "__main__":
+      # Test
+-     logging.basicConfig(level=logging.INFO)
+  
+-     print("🧪 Testing Voltage History")
+-     print("=" * 50)
+  
+-     manager = get_voltage_history_manager()
+  
+      # Record some test readings
+-     for i in range(3):
+-         result = manager.record_voltage(
+>             truck_id="T001",
+>             voltage=13.5 - i * 0.5,
+>             rpm=800 if i < 2 else 0,
+>             truck_status="STOPPED" if i == 2 else "IDLE",
+>         )
+-         print(f"Recording {i+1}: {'✅' if result else '⏭️ Skipped'}")
+  
+      # Get trending
+-     trending = manager.get_trending_summary("T001", days_back=7)
+-     print(f"\n📊 Trending: {trending}")

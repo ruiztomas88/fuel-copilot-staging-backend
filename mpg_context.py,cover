@@ -1,0 +1,516 @@
+> """
+> 🛣️ ROUTE CONTEXT & MPG FACTORS
+> ═══════════════════════════════════════════════════════════════════════════════
+  
+> Contextualizes MPG calculations with polynomial load and weather factors.
+  
+> PROBLEM:
+> - Current MPG baseline is fixed (6.39 MPG for all trucks/conditions)
+> - Doesn't account for route type, load, weather, terrain
+> - Unfair driver scoring (penalizes drivers on difficult routes)
+  
+> SOLUTION:
+> - Route classification (highway, city, suburban, mountain)
+> - Load factor adjustment (empty vs loaded)
+> - Weather factor (rain, snow, wind)
+> - Terrain factor (elevation changes)
+> - Polynomial combinations of factors
+  
+> Author: Fuel Copilot Team
+> Version: 6.3.0
+> Date: December 2025
+> """
+  
+> import logging
+> from datetime import datetime
+> from typing import Dict, List, Optional, Tuple
+> from dataclasses import dataclass
+> from enum import Enum
+> import statistics
+  
+> logger = logging.getLogger(__name__)
+  
+  
+> class RouteType(Enum):
+>     """Route type classification"""
+  
+>     HIGHWAY = "highway"  # >55 mph average, low stops
+>     CITY = "city"  # <35 mph average, many stops
+>     SUBURBAN = "suburban"  # 35-55 mph, moderate stops
+>     MOUNTAIN = "mountain"  # High elevation variance
+>     MIXED = "mixed"  # Combination
+  
+  
+> class WeatherCondition(Enum):
+>     """Weather conditions affecting MPG"""
+  
+>     CLEAR = "clear"
+>     RAIN = "rain"
+>     SNOW = "snow"
+>     WIND = "wind"  # High wind
+>     EXTREME_COLD = "extreme_cold"  # < 20°F
+>     EXTREME_HEAT = "extreme_heat"  # > 95°F
+  
+  
+> @dataclass
+> class RouteContext:
+>     """Context for MPG calculation"""
+  
+>     route_type: RouteType
+>     avg_speed_mph: float
+>     stop_count: int
+>     elevation_change_ft: float
+>     distance_miles: float
+>     is_loaded: bool  # True if truck is carrying cargo
+>     load_weight_lbs: Optional[float] = None
+>     weather: Optional[WeatherCondition] = None
+>     ambient_temp_f: Optional[float] = None
+>     wind_speed_mph: Optional[float] = None
+  
+  
+> @dataclass
+> class MPGExpectation:
+>     """Expected MPG with context"""
+  
+>     baseline_mpg: float
+>     route_factor: float
+>     load_factor: float
+>     weather_factor: float
+>     terrain_factor: float
+>     combined_factor: float
+>     expected_mpg: float
+>     confidence: float
+>     explanation: str
+  
+  
+> class MPGContextEngine:
+>     """
+>     Calculates context-aware MPG expectations.
+  
+>     Baseline MPG per route type:
+>     - Highway: 6.5 MPG (optimal cruising)
+>     - Suburban: 5.5 MPG (moderate stops)
+>     - City: 4.8 MPG (frequent stops)
+>     - Mountain: 4.2 MPG (elevation work)
+  
+>     Factors applied:
+>     - Load: Empty +15%, Loaded baseline, Overloaded -10%
+>     - Weather: Clear baseline, Rain -5%, Snow -10%, Wind -8%
+>     - Terrain: Flat baseline, Hilly -10%, Mountain -20%
+>     """
+  
+      # Baseline MPG by route type
+>     BASELINE_MPG = {
+>         RouteType.HIGHWAY: 6.5,
+>         RouteType.SUBURBAN: 5.5,
+>         RouteType.CITY: 4.8,
+>         RouteType.MOUNTAIN: 4.2,
+>         RouteType.MIXED: 5.7,
+>     }
+  
+      # Load factors (multiplicative)
+>     LOAD_FACTORS = {
+>         "empty": 1.15,  # Empty truck gets +15% MPG
+>         "normal": 1.0,  # Normal load baseline
+>         "heavy": 0.95,  # Heavy load -5%
+>         "overloaded": 0.90,  # Overloaded -10%
+>     }
+  
+      # Weather factors (multiplicative)
+>     WEATHER_FACTORS = {
+>         WeatherCondition.CLEAR: 1.0,
+>         WeatherCondition.RAIN: 0.95,  # -5%
+>         WeatherCondition.SNOW: 0.90,  # -10%
+>         WeatherCondition.WIND: 0.92,  # -8%
+>         WeatherCondition.EXTREME_COLD: 0.88,  # -12%
+>         WeatherCondition.EXTREME_HEAT: 0.95,  # -5%
+>     }
+  
+      # Terrain difficulty (based on elevation change per mile)
+>     TERRAIN_THRESHOLDS = {
+>         "flat": (0, 20),  # <20 ft/mile
+>         "rolling": (20, 50),  # 20-50 ft/mile
+>         "hilly": (50, 100),  # 50-100 ft/mile
+>         "mountainous": (100, 999999),  # >100 ft/mile
+>     }
+  
+>     TERRAIN_FACTORS = {
+>         "flat": 1.0,
+>         "rolling": 0.97,  # -3%
+>         "hilly": 0.90,  # -10%
+>         "mountainous": 0.80,  # -20%
+>     }
+  
+>     def __init__(self):
+>         """Initialize MPG context engine"""
+>         logger.info("MPGContextEngine initialized")
+  
+>     def calculate_expected_mpg(self, context: RouteContext) -> MPGExpectation:
+>         """
+>         Calculate expected MPG given route context.
+  
+>         Args:
+>             context: Route context with all factors
+  
+>         Returns:
+>             MPGExpectation with baseline, factors, and expected MPG
+>         """
+          # Get baseline MPG for route type
+>         baseline_mpg = self.BASELINE_MPG.get(context.route_type, 5.7)
+  
+          # Calculate individual factors
+>         route_factor = self._calculate_route_factor(context)
+>         load_factor = self._calculate_load_factor(context)
+>         weather_factor = self._calculate_weather_factor(context)
+>         terrain_factor = self._calculate_terrain_factor(context)
+  
+          # Combined factor (polynomial combination)
+          # Use product for multiplicative effects
+>         combined_factor = route_factor * load_factor * weather_factor * terrain_factor
+  
+          # Expected MPG
+>         expected_mpg = baseline_mpg * combined_factor
+  
+          # Calculate confidence
+>         confidence = self._calculate_confidence(context)
+  
+          # Generate explanation
+>         explanation = self._generate_explanation(
+>             context,
+>             baseline_mpg,
+>             route_factor,
+>             load_factor,
+>             weather_factor,
+>             terrain_factor,
+>         )
+  
+>         return MPGExpectation(
+>             baseline_mpg=baseline_mpg,
+>             route_factor=route_factor,
+>             load_factor=load_factor,
+>             weather_factor=weather_factor,
+>             terrain_factor=terrain_factor,
+>             combined_factor=combined_factor,
+>             expected_mpg=expected_mpg,
+>             confidence=confidence,
+>             explanation=explanation,
+>         )
+  
+>     def classify_route(
+>         self,
+>         avg_speed_mph: float,
+>         stop_count: int,
+>         distance_miles: float,
+>         elevation_change_ft: float,
+>     ) -> RouteType:
+>         """
+>         Classify route type from telemetry.
+  
+>         Args:
+>             avg_speed_mph: Average speed
+>             stop_count: Number of stops
+>             distance_miles: Total distance
+>             elevation_change_ft: Total elevation change
+  
+>         Returns:
+>             RouteType classification
+>         """
+>         stops_per_mile = stop_count / max(distance_miles, 1)
+>         elevation_per_mile = abs(elevation_change_ft) / max(distance_miles, 1)
+  
+          # Mountain route if significant elevation
+>         if elevation_per_mile > 100:
+>             return RouteType.MOUNTAIN
+  
+          # Highway route
+>         if avg_speed_mph >= 55 and stops_per_mile < 0.1:
+>             return RouteType.HIGHWAY
+  
+          # City route
+>         if avg_speed_mph < 35 or stops_per_mile > 0.5:
+>             return RouteType.CITY
+  
+          # Suburban route
+>         if 35 <= avg_speed_mph < 55:
+>             return RouteType.SUBURBAN
+  
+!         return RouteType.MIXED
+  
+>     def _calculate_route_factor(self, context: RouteContext) -> float:
+>         """
+>         Calculate route type factor.
+  
+>         This is already baked into baseline_mpg selection,
+>         so route_factor is typically 1.0.
+  
+>         Could add fine-tuning based on exact avg_speed.
+>         """
+          # Fine-tune based on actual speed within route type
+>         baseline_speed = {
+>             RouteType.HIGHWAY: 60,
+>             RouteType.SUBURBAN: 45,
+>             RouteType.CITY: 25,
+>             RouteType.MOUNTAIN: 40,
+>             RouteType.MIXED: 45,
+>         }
+  
+>         expected_speed = baseline_speed.get(context.route_type, 45)
+>         speed_diff_pct = (context.avg_speed_mph - expected_speed) / expected_speed
+  
+          # Small adjustment: ±2% for every 10% speed deviation
+>         adjustment = 1.0 + (speed_diff_pct * 0.2)
+  
+          # Clamp to reasonable range
+>         return max(0.90, min(1.10, adjustment))
+  
+>     def _calculate_load_factor(self, context: RouteContext) -> float:
+>         """
+>         Calculate load factor.
+  
+>         Args:
+>             context: Route context
+  
+>         Returns:
+>             Load factor (0.9-1.15)
+>         """
+>         if not context.is_loaded:
+>             return self.LOAD_FACTORS["empty"]
+  
+          # If we have actual load weight
+>         if context.load_weight_lbs:
+              # Typical truck payload capacity ~40,000 lbs
+>             max_payload = 40000
+>             load_pct = (context.load_weight_lbs / max_payload) * 100
+  
+>             if load_pct > 110:  # Overloaded
+>                 return self.LOAD_FACTORS["overloaded"]
+>             elif load_pct > 80:  # Heavy
+>                 return self.LOAD_FACTORS["heavy"]
+>             elif load_pct < 30:  # Light load
+!                 return 1.10
+>             else:
+>                 return self.LOAD_FACTORS["normal"]
+  
+          # Default to normal load if loaded but no weight data
+!         return self.LOAD_FACTORS["normal"]
+  
+>     def _calculate_weather_factor(self, context: RouteContext) -> float:
+>         """
+>         Calculate weather factor.
+  
+>         Args:
+>             context: Route context
+  
+>         Returns:
+>             Weather factor (0.88-1.0)
+>         """
+>         if not context.weather:
+              # Check temperature for extreme conditions
+>             if context.ambient_temp_f:
+!                 if context.ambient_temp_f < 20:
+!                     return self.WEATHER_FACTORS[WeatherCondition.EXTREME_COLD]
+!                 elif context.ambient_temp_f > 95:
+!                     return self.WEATHER_FACTORS[WeatherCondition.EXTREME_HEAT]
+  
+              # Check wind
+>             if context.wind_speed_mph and context.wind_speed_mph > 25:
+!                 return self.WEATHER_FACTORS[WeatherCondition.WIND]
+  
+>             return 1.0  # Clear weather
+  
+>         return self.WEATHER_FACTORS.get(context.weather, 1.0)
+  
+>     def _calculate_terrain_factor(self, context: RouteContext) -> float:
+>         """
+>         Calculate terrain difficulty factor.
+  
+>         Args:
+>             context: Route context
+  
+>         Returns:
+>             Terrain factor (0.8-1.0)
+>         """
+>         if context.distance_miles < 1:
+!             return 1.0
+  
+>         elevation_per_mile = abs(context.elevation_change_ft) / context.distance_miles
+  
+>         for terrain_type, (min_elev, max_elev) in self.TERRAIN_THRESHOLDS.items():
+>             if min_elev <= elevation_per_mile < max_elev:
+>                 return self.TERRAIN_FACTORS[terrain_type]
+  
+!         return 1.0
+  
+>     def _calculate_confidence(self, context: RouteContext) -> float:
+>         """
+>         Calculate confidence in MPG expectation.
+  
+>         Higher confidence when we have more data.
+  
+>         Args:
+>             context: Route context
+  
+>         Returns:
+>             Confidence 0-1
+>         """
+>         confidence = 0.7  # Base confidence
+  
+          # Increase if we have actual load data
+>         if context.load_weight_lbs:
+>             confidence += 0.1
+  
+          # Increase if we have weather data
+>         if context.weather or context.ambient_temp_f:
+>             confidence += 0.1
+  
+          # Increase if distance is significant (more reliable avg speed)
+>         if context.distance_miles > 50:
+>             confidence += 0.1
+  
+>         return min(1.0, confidence)
+  
+>     def _generate_explanation(
+>         self,
+>         context: RouteContext,
+>         baseline: float,
+>         route_f: float,
+>         load_f: float,
+>         weather_f: float,
+>         terrain_f: float,
+>     ) -> str:
+>         """
+>         Generate human-readable explanation.
+  
+>         Args:
+>             context: Route context
+>             baseline: Baseline MPG
+>             route_f: Route factor
+>             load_f: Load factor
+>             weather_f: Weather factor
+>             terrain_f: Terrain factor
+  
+>         Returns:
+>             Explanation string
+>         """
+>         parts = [
+>             f"{context.route_type.value.title()} route baseline: {baseline:.1f} MPG"
+>         ]
+  
+>         if load_f != 1.0:
+>             pct = (load_f - 1.0) * 100
+>             parts.append(f"Load: {pct:+.0f}%")
+  
+>         if weather_f != 1.0:
+>             pct = (weather_f - 1.0) * 100
+>             parts.append(f"Weather: {pct:+.0f}%")
+  
+>         if terrain_f != 1.0:
+>             pct = (terrain_f - 1.0) * 100
+>             parts.append(f"Terrain: {pct:+.0f}%")
+  
+>         if route_f != 1.0:
+>             pct = (route_f - 1.0) * 100
+>             parts.append(f"Speed adj: {pct:+.0f}%")
+  
+>         return " | ".join(parts)
+  
+>     def adjust_driver_score(
+>         self, raw_mpg: float, expected_mpg: float, raw_score: float
+>     ) -> float:
+>         """
+>         Adjust driver score based on context.
+  
+>         If driver achieved better MPG than expected, boost score.
+>         If worse, reduce score (but less penalty if conditions were difficult).
+  
+>         Args:
+>             raw_mpg: Actual MPG achieved
+>             expected_mpg: Expected MPG for conditions
+>             raw_score: Raw driver score (0-100)
+  
+>         Returns:
+>             Adjusted score (0-100)
+>         """
+>         mpg_diff_pct = ((raw_mpg - expected_mpg) / expected_mpg) * 100
+  
+          # Adjust score by ±0.5 points per 1% MPG difference
+>         adjustment = mpg_diff_pct * 0.5
+  
+          # Cap adjustment at ±10 points
+>         adjustment = max(-10, min(10, adjustment))
+  
+>         adjusted_score = raw_score + adjustment
+  
+>         return max(0, min(100, adjusted_score))
+  
+  
+  # Global instance
+> MPG_CONTEXT_ENGINE = MPGContextEngine()
+  
+  
+- if __name__ == "__main__":
+      # Example usage
+-     logging.basicConfig(level=logging.INFO)
+  
+      # Scenario 1: Highway route, empty truck, clear weather
+-     context1 = RouteContext(
+>         route_type=RouteType.HIGHWAY,
+>         avg_speed_mph=62,
+>         stop_count=2,
+>         elevation_change_ft=150,
+>         distance_miles=150,
+>         is_loaded=False,
+>     )
+  
+-     engine = MPGContextEngine()
+-     result1 = engine.calculate_expected_mpg(context1)
+  
+-     print("\n📊 SCENARIO 1: Highway, Empty, Clear")
+-     print("=" * 60)
+-     print(f"Expected MPG: {result1.expected_mpg:.2f}")
+-     print(f"Baseline: {result1.baseline_mpg:.2f}")
+-     print(f"Combined Factor: {result1.combined_factor:.2%}")
+-     print(f"Explanation: {result1.explanation}")
+  
+      # Scenario 2: City route, loaded, rain
+-     context2 = RouteContext(
+>         route_type=RouteType.CITY,
+>         avg_speed_mph=28,
+>         stop_count=45,
+>         elevation_change_ft=50,
+>         distance_miles=50,
+>         is_loaded=True,
+>         load_weight_lbs=35000,
+>         weather=WeatherCondition.RAIN,
+>         ambient_temp_f=55,
+>     )
+  
+-     result2 = engine.calculate_expected_mpg(context2)
+  
+-     print("\n📊 SCENARIO 2: City, Loaded, Rain")
+-     print("=" * 60)
+-     print(f"Expected MPG: {result2.expected_mpg:.2f}")
+-     print(f"Baseline: {result2.baseline_mpg:.2f}")
+-     print(f"Combined Factor: {result2.combined_factor:.2%}")
+-     print(f"Explanation: {result2.explanation}")
+  
+      # Scenario 3: Mountain route, loaded, snow
+-     context3 = RouteContext(
+>         route_type=RouteType.MOUNTAIN,
+>         avg_speed_mph=38,
+>         stop_count=8,
+>         elevation_change_ft=8000,
+>         distance_miles=80,
+>         is_loaded=True,
+>         weather=WeatherCondition.SNOW,
+>         ambient_temp_f=25,
+>     )
+  
+-     result3 = engine.calculate_expected_mpg(context3)
+  
+-     print("\n📊 SCENARIO 3: Mountain, Loaded, Snow")
+-     print("=" * 60)
+-     print(f"Expected MPG: {result3.expected_mpg:.2f}")
+-     print(f"Baseline: {result3.baseline_mpg:.2f}")
+-     print(f"Combined Factor: {result3.combined_factor:.2%}")
+-     print(f"Explanation: {result3.explanation}")

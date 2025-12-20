@@ -1,0 +1,84 @@
+> """
+> Check DO9693 sensor data in Wialon - detailed analysis
+> """
+! import pymysql
+! import sys
+! from datetime import datetime, timedelta
+  
+! if sys.platform == 'win32':
+!     sys.stdout.reconfigure(encoding='utf-8')
+  
+- wialon_conn = pymysql.connect(
+!     host="20.127.200.135",
+!     port=3306,
+!     user="tomas",
+!     password="Tomas2025",
+!     database="wialon_collect",
+!     cursorclass=pymysql.cursors.DictCursor
+! )
+  
+! print("="*80)
+! print("DO9693 SENSOR ANALYSIS")
+! print("="*80)
+  
+! with wialon_conn.cursor() as cursor:
+      # First, find unit_id for DO9693 in units_map
+!     cursor.execute("SELECT * FROM units_map WHERE truck_name = 'DO9693'")
+!     unit_info = cursor.fetchone()
+      
+!     if unit_info:
+!         print(f"\nUnit Info from units_map:")
+!         for k, v in unit_info.items():
+!             print(f"  {k}: {v}")
+          
+!         unit_id = unit_info.get('unit_id') or unit_info.get('unit')
+          
+!         if unit_id:
+!             print(f"\n\nSearching sensors for unit_id: {unit_id}")
+              
+              # Get all sensors for this unit
+!             cursor.execute(f"""
+!                 SELECT p as param_name, n as sensor_name, value, m as timestamp_epoch,
+!                        FROM_UNIXTIME(m) as timestamp_utc, type, updateTime
+!                 FROM sensors 
+!                 WHERE unit = {unit_id}
+!                 ORDER BY m DESC
+!                 LIMIT 50
+!             """)
+              
+!             sensors = cursor.fetchall()
+!             print(f"\nFound {len(sensors)} sensor records")
+              
+!             if sensors:
+!                 print("\n" + "="*80)
+!                 print("RECENT SENSORS:")
+!                 print("="*80)
+                  
+!                 for s in sensors[:25]:
+!                     ts = s['timestamp_utc'] or 'N/A'
+!                     print(f"{s['param_name']:20s} | {s['sensor_name']:30s} | {s['value']:>10} | {ts}")
+                  
+                  # Check for fuel sensor specifically
+!                 print("\n" + "="*80)
+!                 print("FUEL SENSORS:")
+!                 print("="*80)
+!                 cursor.execute(f"""
+!                     SELECT p as param_name, n as sensor_name, value, FROM_UNIXTIME(m) as timestamp_utc
+!                     FROM sensors 
+!                     WHERE unit = {unit_id} AND (p LIKE '%fuel%' OR n LIKE '%fuel%')
+!                     ORDER BY m DESC
+!                     LIMIT 10
+!                 """)
+!                 fuel_sensors = cursor.fetchall()
+!                 for fs in fuel_sensors:
+!                     print(f"  {fs}")
+!     else:
+!         print("\nDO9693 not found in units_map table")
+          
+          # Search in sensors table directly for any mention
+!         cursor.execute("SELECT DISTINCT unit FROM sensors LIMIT 20")
+!         units = cursor.fetchall()
+!         print(f"\nSample unit IDs in sensors table: {[u['unit'] for u in units]}")
+  
+! wialon_conn.close()
+! print("\n" + "="*80)

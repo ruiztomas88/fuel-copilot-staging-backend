@@ -5,13 +5,14 @@ Run with: pytest tests/test_mpg_engine.py -v
 """
 
 import pytest
+
 from mpg_engine import (
-    MPGState,
     MPGConfig,
-    update_mpg_state,
-    reset_mpg_state,
+    MPGState,
     estimate_fuel_from_distance,
     get_mpg_status,
+    reset_mpg_state,
+    update_mpg_state,
 )
 
 
@@ -438,8 +439,9 @@ class TestTruckMPGBaseline:
 
     def test_baseline_update(self):
         """Should update baseline with new observations"""
-        from mpg_engine import TruckMPGBaseline
         import time
+
+        from mpg_engine import TruckMPGBaseline
 
         baseline = TruckMPGBaseline(truck_id="T101")
         baseline.update(6.5, time.time())
@@ -451,8 +453,9 @@ class TestTruckMPGBaseline:
 
     def test_baseline_confidence_levels(self):
         """Should update confidence based on sample count"""
-        from mpg_engine import TruckMPGBaseline
         import time
+
+        from mpg_engine import TruckMPGBaseline
 
         baseline = TruckMPGBaseline(truck_id="T101")
 
@@ -472,8 +475,9 @@ class TestTruckMPGBaseline:
 
     def test_baseline_skip_invalid_mpg(self):
         """Should skip MPG values outside valid range"""
-        from mpg_engine import TruckMPGBaseline
         import time
+
+        from mpg_engine import TruckMPGBaseline
 
         baseline = TruckMPGBaseline(truck_id="T101")
         baseline.update(6.0, time.time())  # Valid
@@ -484,8 +488,9 @@ class TestTruckMPGBaseline:
 
     def test_baseline_deviation(self):
         """Should calculate deviation from baseline"""
-        from mpg_engine import TruckMPGBaseline
         import time
+
+        from mpg_engine import TruckMPGBaseline
 
         baseline = TruckMPGBaseline(truck_id="T101")
 
@@ -507,8 +512,9 @@ class TestTruckMPGBaseline:
 
     def test_baseline_std_dev_property(self):
         """Should calculate standard deviation"""
-        from mpg_engine import TruckMPGBaseline
         import time
+
+        from mpg_engine import TruckMPGBaseline
 
         baseline = TruckMPGBaseline(truck_id="T101")
 
@@ -538,3 +544,142 @@ class TestMPGConfigValidation:
         """Should raise error for negative min_miles"""
         with pytest.raises(ValueError, match="min_miles must be positive"):
             MPGConfig(min_miles=-5)
+
+
+class TestTruckBaselineManager:
+    """Test TruckBaselineManager functionality"""
+
+    def test_manager_get_or_create(self):
+        """Should get or create baseline for truck"""
+        import time
+
+        from mpg_engine import TruckBaselineManager
+
+        manager = TruckBaselineManager()
+        baseline = manager.get_or_create("T101")
+        assert baseline.truck_id == "T101"
+        assert baseline.sample_count == 0
+
+        # Update baseline
+        baseline.update(6.0, time.time())
+
+        # Get same baseline
+        baseline2 = manager.get_or_create("T101")
+        assert baseline2.truck_id == "T101"
+        assert baseline2.sample_count == 1
+
+    def test_manager_get_summary(self):
+        """Should return summary of all baselines"""
+        import time
+
+        from mpg_engine import TruckBaselineManager
+
+        manager = TruckBaselineManager()
+
+        # Create multiple baselines
+        for truck_id in ["T101", "T102", "T103"]:
+            baseline = manager.get_or_create(truck_id)
+            for mpg in [5.5, 6.0, 6.5]:
+                baseline.update(mpg, time.time())
+
+        summary = manager.get_fleet_summary()
+        assert summary["trucks"] == 3
+        assert summary["avg_baseline"] > 0
+        assert len(summary["baselines"]) == 3
+
+    def test_manager_save_load(self, tmp_path):
+        """Should save and load baselines to/from file"""
+        import time
+
+        from mpg_engine import TruckBaselineManager
+
+        # Create and populate manager
+        manager1 = TruckBaselineManager()
+        baseline1 = manager1.get_or_create("T101")
+        baseline1.update(6.0, time.time())
+        baseline1.update(6.5, time.time())
+
+        # Save to temp file
+        filepath = tmp_path / "baselines.json"
+        manager1.save_to_file(str(filepath))
+
+        # Load into new manager
+        manager2 = TruckBaselineManager()
+        manager2.load_from_file(str(filepath))
+
+        # Verify data loaded
+        baseline2 = manager2.get_or_create("T101")
+        assert baseline2.sample_count == 2
+        assert baseline2.baseline_mpg > 0
+
+    def test_manager_load_nonexistent_file(self, tmp_path):
+        """Should handle loading from nonexistent file gracefully"""
+        from mpg_engine import TruckBaselineManager
+
+        manager = TruckBaselineManager()
+        filepath = tmp_path / "nonexistent.json"
+
+        # Should not raise error
+        manager.load_from_file(str(filepath))
+        assert manager.get_fleet_summary()["trucks"] == 0
+
+    def test_baseline_to_dict_from_dict(self):
+        """Should serialize and deserialize baseline"""
+        import time
+
+        from mpg_engine import TruckMPGBaseline
+
+        # Create and update baseline
+        baseline1 = TruckMPGBaseline(truck_id="T101")
+        baseline1.update(6.0, time.time())
+        baseline1.update(6.5, time.time())
+
+        # Serialize
+        data = baseline1.to_dict()
+        assert data["truck_id"] == "T101"
+        assert data["sample_count"] == 2
+
+        # Deserialize
+        baseline2 = TruckMPGBaseline.from_dict(data)
+        assert baseline2.truck_id == "T101"
+        assert baseline2.sample_count == 2
+        # Check approximately equal (rounding differences)
+        assert abs(baseline2.baseline_mpg - baseline1.baseline_mpg) < 0.01
+
+    def test_global_baseline_manager(self):
+        """Should get global baseline manager singleton"""
+        from mpg_engine import get_baseline_manager, shutdown_baseline_manager
+
+        manager1 = get_baseline_manager()
+        manager2 = get_baseline_manager()
+
+        # Should be same instance
+        assert manager1 is manager2
+
+        # Shutdown should work
+        shutdown_baseline_manager()
+
+    def test_baseline_deviation_statuses(self):
+        """Should return correct deviation statuses"""
+        import time
+
+        from mpg_engine import TruckMPGBaseline
+
+        baseline = TruckMPGBaseline(truck_id="T101")
+
+        # Add stable samples around 6.0
+        for _ in range(15):
+            baseline.update(6.0, time.time())
+
+        # Test NORMAL (same value as baseline)
+        dev_normal = baseline.get_deviation(6.0)
+        assert dev_normal["status"] == "NORMAL"
+
+        # Test small deviation
+        dev_small = baseline.get_deviation(6.1)
+        assert dev_small["status"] in ["NORMAL", "NOTABLE"]
+
+        # Test extreme deviation
+        dev_extreme = baseline.get_deviation(2.0)
+        assert dev_extreme["status"] in ["ANOMALY", "CRITICAL"]
+        assert dev_extreme["z_score"] < -1.0

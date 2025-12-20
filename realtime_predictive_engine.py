@@ -859,52 +859,21 @@ class RealTimePredictiveEngine:
         truck_id: str,
         sensors: Dict[str, float],
     ) -> List[PredictiveAlert]:
-        """Analyze efficiency metrics and generate coaching insights."""
+        """
+        Analyze efficiency metrics and generate coaching insights.
+
+        🔧 v1.2.1: Removed dependency on idle_hours_ecu (corrupted sensor)
+        Now calculates idle from truck_status = 'STOPPED' records
+        """
         alerts = []
 
-        total_idle_fuel = sensors.get("total_idle_fuel")
-        total_fuel_used = sensors.get("total_fuel_used")
-        idle_hours = sensors.get("idle_hours")
-        engine_hours = sensors.get("engine_hours")
+        # Note: We no longer use idle_hours_ecu sensor because it's corrupted
+        # (shows values like 2.6M hours = 303 years!)
+        # Instead, idle is calculated in get_loss_analysis() from truck_status='STOPPED'
+        # where STOPPED = engine_running AND speed < 2 mph
 
-        # Calculate idle percentage
-        if idle_hours is not None and engine_hours is not None and engine_hours > 0:
-            idle_pct = (idle_hours / engine_hours) * 100
-
-            if idle_pct > 35:  # More than 35% idle is excessive
-                # Calculate wasted fuel cost if available
-                cost_msg = ""
-                if total_idle_fuel is not None:
-                    wasted_cost = total_idle_fuel * 3.50  # $3.50/gal
-                    potential_savings = wasted_cost * 0.4  # Could save 40%
-                    cost_msg = f" ${wasted_cost:,.0f} gastados en idle. Potencial ahorro: ${potential_savings:,.0f}"
-
-                severity = "WARNING" if idle_pct > 45 else "WATCH"
-
-                alerts.append(
-                    PredictiveAlert(
-                        truck_id=truck_id,
-                        component="Eficiencia General",
-                        severity=severity,
-                        message=f"⏱️ IDLE EXCESIVO: {idle_pct:.0f}% del tiempo en idle.{cost_msg}",
-                        predicted_failure_hours=None,  # Not a failure prediction
-                        confidence=100,
-                        sensor_evidence=[
-                            {
-                                "sensor": "idle_hours",
-                                "value": idle_hours,
-                                "unit": "hours",
-                            },
-                            {
-                                "sensor": "engine_hours",
-                                "value": engine_hours,
-                                "unit": "hours",
-                            },
-                        ],
-                        recommended_action=f"COACHING: Reducir idle 40% = ahorros significativos. Entrenar conductor en técnicas anti-idle.",
-                        alert_type="efficiency",
-                    )
-                )
+        # Efficiency alerts are now handled by Loss Analysis
+        # This function is kept for future non-idle efficiency metrics
 
         return alerts
 

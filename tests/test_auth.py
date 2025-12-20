@@ -5,8 +5,9 @@ Phase 5: Additional test coverage
 Tests the actual functions in auth.py
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import timedelta, datetime, timezone
 
 
 class TestPasswordHashing:
@@ -88,6 +89,71 @@ class TestJWTTokens:
         assert token is not None
         assert isinstance(token, str)
         assert len(token) > 50  # JWT tokens are typically long
+
+    def test_get_carrier_filter_super_admin(self):
+        """Should return None for super admin (sees all carriers)"""
+        from datetime import datetime, timedelta, timezone
+
+        from auth import TokenData, get_carrier_filter
+
+        user = TokenData(
+            username="admin",
+            carrier_id="*",
+            role="super_admin",
+            exp=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+
+        carrier_filter = get_carrier_filter(user)
+        assert carrier_filter is None
+
+    def test_get_carrier_filter_carrier_admin(self):
+        """Should return carrier_id for carrier admin"""
+        from datetime import datetime, timedelta, timezone
+
+        from auth import TokenData, get_carrier_filter
+
+        user = TokenData(
+            username="carrier_admin",
+            carrier_id="CARRIER123",
+            role="carrier_admin",
+            exp=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+
+        carrier_filter = get_carrier_filter(user)
+        assert carrier_filter == "CARRIER123"
+
+    def test_get_carrier_filter_no_auth(self):
+        """Should return None when no auth (public endpoints)"""
+        from auth import get_carrier_filter
+
+        carrier_filter = get_carrier_filter(None)
+        assert carrier_filter is None
+
+    def test_filter_by_carrier(self):
+        """Should filter data by carrier_id"""
+        from auth import filter_by_carrier
+
+        data = [
+            {"id": 1, "carrier_id": "CARRIER_A"},
+            {"id": 2, "carrier_id": "CARRIER_B"},
+            {"id": 3, "carrier_id": "CARRIER_A"},
+        ]
+
+        filtered = filter_by_carrier(data, "CARRIER_A")
+        assert len(filtered) == 2
+        assert all(item["carrier_id"] == "CARRIER_A" for item in filtered)
+
+    def test_filter_by_carrier_no_filter(self):
+        """Should return all data when carrier_id is None"""
+        from auth import filter_by_carrier
+
+        data = [
+            {"id": 1, "carrier_id": "CARRIER_A"},
+            {"id": 2, "carrier_id": "CARRIER_B"},
+        ]
+
+        filtered = filter_by_carrier(data, None)
+        assert len(filtered) == 2
 
     def test_create_access_token_with_expiry(self):
         """Should create token with custom expiry"""

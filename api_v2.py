@@ -11,13 +11,14 @@ This file contains endpoints for:
 - #22: Data export
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, BackgroundTasks
-from fastapi.responses import StreamingResponse
-from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone, timedelta
-from pydantic import BaseModel, Field
 import io
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -340,7 +341,7 @@ async def get_cost_per_mile(
 ):
     """
     Get detailed cost per mile analysis for the fleet.
-    
+
     Returns comprehensive breakdown including:
     - Fleet average cost per mile
     - Per-truck cost per mile with rankings
@@ -350,11 +351,11 @@ async def get_cost_per_mile(
     """
     from cost_per_mile_engine import CostPerMileEngine
     from database_mysql import MySQLDatabase
-    
+
     try:
         db = MySQLDatabase()
         engine = CostPerMileEngine(db)
-        
+
         # Get truck metrics from database for the specified period
         query = f"""
         SELECT 
@@ -369,18 +370,22 @@ async def get_cost_per_mile(
         GROUP BY truck_id
         HAVING miles > 0 AND gallons > 0
         """
-        
+
         trucks_data = []
         with db.get_connection() as conn:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(query)
             trucks_data = cursor.fetchall()
-            
-        logger.info(f"Fetched {len(trucks_data)} trucks for cost per mile analysis ({days} days)")
-        
+
+        logger.info(
+            f"Fetched {len(trucks_data)} trucks for cost per mile analysis ({days} days)"
+        )
+
         # Get fleet analysis
-        fleet_summary = engine.analyze_fleet_costs(trucks_data=trucks_data, period_days=days)
-        
+        fleet_summary = engine.analyze_fleet_costs(
+            trucks_data=trucks_data, period_days=days
+        )
+
         # Format response to match frontend expectations
         return {
             "status": "success",
@@ -389,29 +394,29 @@ async def get_cost_per_mile(
                 "period": {
                     "start": fleet_summary.period_start.isoformat(),
                     "end": fleet_summary.period_end.isoformat(),
-                    "days": fleet_summary.period_days
+                    "days": fleet_summary.period_days,
                 },
                 "fleet_summary": {
                     "total_trucks": fleet_summary.total_trucks,
                     "total_miles": fleet_summary.total_miles,
                     "total_fuel_gallons": fleet_summary.total_fuel_gallons,
-                    "total_fuel_cost": fleet_summary.total_fuel_cost
+                    "total_fuel_cost": fleet_summary.total_fuel_cost,
                 },
                 "cost_per_mile": {
                     "fleet_average": fleet_summary.fleet_avg_cost_per_mile,
                     "breakdown": fleet_summary.cost_breakdown.to_dict(),
                     "vs_industry_benchmark_percent": fleet_summary.vs_industry_benchmark_percent,
-                    "industry_benchmark": 2.26
+                    "industry_benchmark": 2.26,
                 },
                 "performance": {
                     "best": {
                         "truck_id": fleet_summary.best_truck,
-                        "cost_per_mile": fleet_summary.best_cost_per_mile
+                        "cost_per_mile": fleet_summary.best_cost_per_mile,
                     },
                     "worst": {
                         "truck_id": fleet_summary.worst_truck,
-                        "cost_per_mile": fleet_summary.worst_cost_per_mile
-                    }
+                        "cost_per_mile": fleet_summary.worst_cost_per_mile,
+                    },
                 },
                 "savings": {
                     "potential_per_month": fleet_summary.total_potential_savings_per_month
@@ -423,11 +428,11 @@ async def get_cost_per_mile(
                         "miles": t.total_miles,
                         "gallons": t.total_fuel_gallons,
                         "engine_hours": t.total_engine_hours,
-                        "avg_mpg": t.avg_mpg
+                        "avg_mpg": t.avg_mpg,
                     }
                     for t in fleet_summary.truck_analyses
-                ]
-            }
+                ],
+            },
         }
     except Exception as e:
         logger.error(f"Error generating cost per mile analysis: {e}", exc_info=True)
@@ -544,8 +549,9 @@ async def get_truck_sensors(truck_id: str):
     - Electrical: Battery Voltage (V), Backup Battery (V)
     - Operational: Engine Hours, Idle Hours, PTO Hours
     """
-    import mysql.connector
     import os
+
+    import mysql.connector
 
     # Connect to local fuel_copilot database
     FUEL_COPILOT_CONFIG = {
@@ -786,7 +792,7 @@ async def export_to_excel(
 
     Returns Excel file as download.
     """
-    from data_export import get_exporter, ExportConfig
+    from data_export import ExportConfig, get_exporter
 
     config = ExportConfig(
         carrier_id=request.carrier_id,
@@ -821,7 +827,7 @@ async def export_to_pdf(request: ExportRequest):
 
     Returns PDF file as download.
     """
-    from data_export import get_exporter, ExportConfig
+    from data_export import ExportConfig, get_exporter
 
     config = ExportConfig(
         carrier_id=request.carrier_id,
@@ -862,7 +868,7 @@ async def export_to_csv(
 
     Data types: metrics, refuels, alerts, summary
     """
-    from data_export import get_exporter, ExportConfig
+    from data_export import ExportConfig, get_exporter
 
     if data_type not in ("metrics", "refuels", "alerts", "summary"):
         raise HTTPException(status_code=400, detail="Invalid data type")
@@ -1284,7 +1290,7 @@ async def get_def_alerts():
     Returns only trucks with alert_level warning, critical, or emergency.
     Sorted by urgency score (most urgent first).
     """
-    from def_predictor import get_def_predictor, DEFAlertLevel
+    from def_predictor import DEFAlertLevel, get_def_predictor
 
     predictor = get_def_predictor()
     predictions = predictor.predict_all()
@@ -1705,9 +1711,11 @@ async def get_rul_predictions(
     Returns predictions with confidence scores and recommended service dates.
     """
     try:
-        from rul_predictor import RULPredictor
-        import mysql.connector
         import os
+
+        import mysql.connector
+
+        from rul_predictor import RULPredictor
 
         predictor = RULPredictor()
 
@@ -1840,9 +1848,11 @@ async def get_siphoning_alerts(
     Returns alerts with confidence scores and recommendations.
     """
     try:
-        from siphon_detector import SlowSiphonDetector
-        import mysql.connector
         import os
+
+        import mysql.connector
+
+        from siphon_detector import SlowSiphonDetector
 
         detector = SlowSiphonDetector()
 
@@ -1965,14 +1975,16 @@ async def get_mpg_context(
     Helps explain why expected MPG differs from baseline.
     """
     try:
+        import os
+
+        import mysql.connector
+
         from mpg_context import (
             MPGContextEngine,
             RouteContext,
             RouteType,
             WeatherCondition,
         )
-        import mysql.connector
-        import os
 
         engine = MPGContextEngine()
 

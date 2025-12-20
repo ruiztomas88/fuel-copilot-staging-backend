@@ -21,8 +21,8 @@ Updated: December 2025 - Full SPN/FMI from official documentation
 """
 
 from dataclasses import dataclass
-from typing import Optional
 from enum import Enum
+from typing import Optional
 
 
 class DTCSystem(Enum):
@@ -1818,6 +1818,7 @@ SPN_DATABASE: dict[int, SPNInfo] = {
 def get_spn_info(spn: int) -> Optional[SPNInfo]:
     """
     Get detailed information for a SPN code.
+    🆕 v5.9.0: Falls back to J1939 complete database if not found in main DB
 
     Args:
         spn: Suspect Parameter Number
@@ -1825,7 +1826,63 @@ def get_spn_info(spn: int) -> Optional[SPNInfo]:
     Returns:
         SPNInfo if found, None otherwise
     """
-    return SPN_DATABASE.get(spn)
+    # First, try main database (curated, detailed info)
+    spn_info = SPN_DATABASE.get(spn)
+
+    if spn_info:
+        return spn_info
+
+    # Fallback to J1939 complete database (2000+ SPNs)
+    try:
+        from j1939_complete_spn_map import J1939_SPN_MAP
+
+        j1939_data = J1939_SPN_MAP.get(spn)
+        if j1939_data:
+            # Create SPNInfo from J1939 complete data
+            # Map category to system
+            category = j1939_data.get("category", "unknown")
+            system_map = {
+                "engine_control": DTCSystem.ENGINE,
+                "engine_performance": DTCSystem.ENGINE,
+                "fuel_system": DTCSystem.FUEL,
+                "fuel_quality": DTCSystem.FUEL,
+                "lubrication": DTCSystem.ENGINE,
+                "air_intake": DTCSystem.AIR_INTAKE,
+                "exhaust_system": DTCSystem.EXHAUST,
+                "aftertreatment": DTCSystem.AFTERTREATMENT,
+                "transmission": DTCSystem.TRANSMISSION,
+                "electrical_system": DTCSystem.ELECTRICAL,
+                "cooling_system": DTCSystem.COOLING,
+                "brakes": DTCSystem.BRAKES,
+                "vehicle_dynamics": DTCSystem.CHASSIS,
+            }
+            system = system_map.get(category, DTCSystem.UNKNOWN)
+
+            # Determine severity from priority
+            priority = j1939_data.get("priority", "medium")
+            severity = (
+                DTCSeverity.CRITICAL
+                if priority == "high"
+                else DTCSeverity.WARNING if priority == "medium" else DTCSeverity.INFO
+            )
+
+            name = j1939_data.get("name", f"SPN {spn}")
+            component = j1939_data.get("component", "Unknown")
+
+            return SPNInfo(
+                spn=spn,
+                name_en=name,
+                name_es=name,  # TODO: Add Spanish translation
+                system=system,
+                severity=severity,
+                description_es=f"{component} - {name}",
+                action_es=f"Revisar {component.lower()} en próxima mantención",
+            )
+    except (ImportError, Exception) as e:
+        # J1939 complete database not available or error
+        pass
+
+    return None
 
 
 def get_fmi_info(fmi: int) -> dict:

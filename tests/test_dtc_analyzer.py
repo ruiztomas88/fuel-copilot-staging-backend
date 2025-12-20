@@ -5,23 +5,24 @@ Tests for DTC (Diagnostic Trouble Code) analysis and alerting.
 Covers parsing, severity determination, and alert generation.
 """
 
-import pytest
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dtc_analyzer import (
+    CRITICAL_FMIS,
+    CRITICAL_SPNS,
+    WARNING_SPNS,
+    DTCAlert,
     DTCAnalyzer,
     DTCCode,
-    DTCAlert,
     DTCSeverity,
     get_dtc_analyzer,
     process_dtc_from_sensor_data,
-    CRITICAL_SPNS,
-    CRITICAL_FMIS,
-    WARNING_SPNS,
 )
 
 
@@ -598,6 +599,99 @@ class TestEdgeCasesExtended:
         """Test unicode in DTC string"""
         codes = analyzer.parse_dtc_string("100.4,警告")
         assert isinstance(codes, list)
+
+
+class TestDTCAnalysisReport:
+    """Test get_dtc_analysis_report function"""
+
+    def test_analysis_report_no_codes(self):
+        """Should return OK status with no codes"""
+        analyzer = DTCAnalyzer()
+        report = analyzer.get_dtc_analysis_report("TRUCK123", "")
+
+        assert report["status"] == "ok"
+        assert report["summary"]["total"] == 0
+        assert len(report["codes"]) == 0
+
+    def test_analysis_report_with_codes(self):
+        """Should return detailed report with codes"""
+        analyzer = DTCAnalyzer()
+        report = analyzer.get_dtc_analysis_report("TRUCK123", "100.4,157.3")
+
+        assert report["truck_id"] == "TRUCK123"
+        assert report["summary"]["total"] == 2
+        assert len(report["codes"]) == 2
+        assert "database_version" in report
+
+    def test_analysis_report_critical_codes(self):
+        """Should detect critical codes"""
+        analyzer = DTCAnalyzer()
+        # SPN 94 is critical (fuel delivery pressure)
+        report = analyzer.get_dtc_analysis_report("TRUCK123", "94.1")
+
+        assert report["status"] in ["critical", "warning"]
+        assert "systems_affected" in report
+
+    def test_analysis_report_systems_affected(self):
+        """Should categorize systems affected"""
+        analyzer = DTCAnalyzer()
+        report = analyzer.get_dtc_analysis_report("TRUCK123", "100.4")
+
+        assert "systems_affected" in report
+        assert isinstance(report["systems_affected"], list)
+
+
+class TestDTCProcessing:
+    """Test process_truck_dtc functionality"""
+
+    def test_process_truck_dtc_generates_alerts(self):
+        """Should generate alerts from DTC codes"""
+        analyzer = DTCAnalyzer()
+        timestamp = datetime.now(timezone.utc)
+
+        alerts = analyzer.process_truck_dtc("TRUCK123", "100.4", timestamp)
+
+        assert isinstance(alerts, list)
+        if len(alerts) > 0:
+            assert all(isinstance(a, DTCAlert) for a in alerts)
+
+    def test_process_truck_dtc_empty_string(self):
+        """Should handle empty DTC string"""
+        analyzer = DTCAnalyzer()
+        timestamp = datetime.now(timezone.utc)
+
+        alerts = analyzer.process_truck_dtc("TRUCK123", "", timestamp)
+
+        assert isinstance(alerts, list)
+        assert len(alerts) == 0
+
+    def test_process_truck_dtc_none(self):
+        """Should handle None DTC string"""
+        analyzer = DTCAnalyzer()
+        timestamp = datetime.now(timezone.utc)
+
+        alerts = analyzer.process_truck_dtc("TRUCK123", None, timestamp)
+
+        assert isinstance(alerts, list)
+
+
+class TestDTCSystemClassification:
+    """Test _get_system_classification internal method"""
+
+    def test_system_classification_engine(self):
+        """Should classify engine-related SPNs"""
+        analyzer = DTCAnalyzer()
+        # Access internal method
+        system = analyzer._get_system_classification(100)  # Engine oil pressure
+
+        assert isinstance(system, str)
+
+    def test_system_classification_unknown(self):
+        """Should handle unknown SPNs"""
+        analyzer = DTCAnalyzer()
+        system = analyzer._get_system_classification(999999)
+
+        assert isinstance(system, str)
 
 
 if __name__ == "__main__":

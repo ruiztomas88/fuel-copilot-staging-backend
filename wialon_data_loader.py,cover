@@ -1,0 +1,735 @@
+> """
+> Wialon Data Loader Service
+> ===========================
+> Version: 1.0.0
+> Created: December 2025
+  
+> Centralizes all data loading from Wialon database for analytics engines.
+> Provides automatic data refresh and caching for optimal performance.
+  
+> Features:
+> - Unified connection management
+> - Automatic data loading for all engines
+> - Caching with configurable TTL
+> - Background refresh support
+> - Health monitoring
+  
+> Supported Data:
+> - Sensor data (fuel, oil, coolant, DEF, etc.)
+> - Events (speedings, idle, DTCs, etc.)
+> - Position data (GPS)
+> - Engine metrics (hours, odometer)
+> """
+  
+> import logging
+> import yaml
+> from datetime import datetime, timedelta
+> from typing import Dict, List, Optional, Any, Callable
+> from dataclasses import dataclass, field
+> from enum import Enum
+> import threading
+> from pathlib import Path
+  
+> logger = logging.getLogger(__name__)
+  
+  
+> class DataType(Enum):
+>     """Types of data that can be loaded"""
+  
+>     SENSOR_DATA = "sensor_data"
+>     EVENTS = "events"
+>     SPEEDINGS = "speedings"
+>     DEF_LEVELS = "def_levels"
+>     FUEL_LEVELS = "fuel_levels"
+>     OIL_PRESSURE = "oil_pressure"
+>     COOLANT_TEMP = "coolant_temp"
+>     ENGINE_HOURS = "engine_hours"
+>     DTC_CODES = "dtc_codes"
+>     POSITIONS = "positions"
+  
+  
+> @dataclass
+> class DataLoadResult:
+>     """Result of a data load operation"""
+  
+>     data_type: DataType
+>     records_loaded: int
+>     trucks_affected: int
+>     load_time_ms: int
+>     timestamp: datetime
+>     success: bool
+>     error: Optional[str] = None
+  
+  
+> @dataclass
+> class CacheEntry:
+>     """Cached data entry"""
+  
+>     data: Any
+>     loaded_at: datetime
+>     expires_at: datetime
+>     records_count: int
+  
+  
+> class WialonDataLoader:
+>     """
+>     Unified data loader for Wialon database.
+  
+>     Handles all data loading, caching, and distribution to analytics engines.
+>     """
+  
+      # Default cache TTL (time-to-live) in minutes
+>     DEFAULT_TTL_MINUTES = 15
+  
+      # Wialon DB configuration
+>     WIALON_HOST = "20.127.200.135"
+>     WIALON_DB = "wialon_collect"
+>     WIALON_USER = "fuelread"
+>     WIALON_PASS = "d9K$vL2#mP8qR4nX"
+  
+>     def __init__(self, tanks_config_path: str = "tanks.yaml"):
+>         self.db_connection = None
+>         self.tanks_config = {}
+>         self._truck_mapping: Dict[int, str] = {}  # unit_id -> truck_id
+>         self._cache: Dict[str, CacheEntry] = {}
+>         self._subscribers: Dict[DataType, List[Callable]] = {}
+>         self._lock = threading.Lock()
+>         self._is_connected = False
+  
+          # Load tanks configuration
+>         self._load_tanks_config(tanks_config_path)
+  
+>     def _load_tanks_config(self, config_path: str) -> None:
+>         """Load trucks configuration from YAML"""
+>         try:
+>             path = Path(config_path)
+>             if path.exists():
+>                 with open(path, "r") as f:
+>                     self.tanks_config = yaml.safe_load(f)
+  
+                  # Build truck mapping
+>                 trucks = self.tanks_config.get("trucks", {})
+>                 for truck_id, config in trucks.items():
+>                     unit_id = config.get("unit_id")
+>                     if unit_id:
+>                         self._truck_mapping[unit_id] = truck_id
+  
+>                 logger.info(f"Loaded {len(self._truck_mapping)} trucks from tanks.yaml")
+!         except Exception as e:
+!             logger.error(f"Error loading tanks config: {e}")
+  
+>     def get_truck_id(self, unit_id: int) -> str:
+>         """Get truck ID from unit ID"""
+>         return self._truck_mapping.get(unit_id, f"UNIT_{unit_id}")
+  
+>     def get_unit_id(self, truck_id: str) -> Optional[int]:
+>         """Get unit ID from truck ID"""
+>         for uid, tid in self._truck_mapping.items():
+>             if tid == truck_id:
+>                 return uid
+>         return None
+  
+>     def connect(self) -> bool:
+>         """
+>         Establish connection to Wialon database.
+  
+>         Returns:
+>             True if connection successful
+>         """
+>         try:
+>             import mysql.connector
+  
+-             self.db_connection = mysql.connector.connect(
+>                 host=self.WIALON_HOST,
+>                 database=self.WIALON_DB,
+>                 user=self.WIALON_USER,
+>                 password=self.WIALON_PASS,
+>                 connect_timeout=30,
+>                 connection_timeout=30,
+>                 autocommit=True,
+>             )
+  
+              # Test connection
+>             cursor = self.db_connection.cursor()
+>             cursor.execute("SELECT 1")
+>             cursor.fetchone()
+>             cursor.close()
+  
+>             self._is_connected = True
+>             logger.info("Connected to Wialon database")
+>             return True
+  
+>         except Exception as e:
+>             logger.error(f"Failed to connect to Wialon: {e}")
+>             self._is_connected = False
+>             return False
+  
+>     def disconnect(self) -> None:
+>         """Close database connection"""
+>         if self.db_connection:
+>             try:
+>                 self.db_connection.close()
+>             except:
+-                 pass
+>         self._is_connected = False
+>         logger.info("Disconnected from Wialon database")
+  
+>     def is_connected(self) -> bool:
+>         """Check if database connection is active"""
+>         if not self._is_connected or not self.db_connection:
+>             return False
+  
+>         try:
+>             self.db_connection.ping(reconnect=True)
+>             return True
+>         except:
+>             self._is_connected = False
+>             return False
+  
+>     def subscribe(self, data_type: DataType, callback: Callable) -> None:
+>         """Subscribe to data updates"""
+>         if data_type not in self._subscribers:
+>             self._subscribers[data_type] = []
+>         self._subscribers[data_type].append(callback)
+  
+>     def _notify_subscribers(self, data_type: DataType, data: Any) -> None:
+>         """Notify subscribers of new data"""
+>         for callback in self._subscribers.get(data_type, []):
+>             try:
+>                 callback(data)
+>             except Exception as e:
+>                 logger.error(f"Error notifying subscriber: {e}")
+  
+>     def _get_cache_key(self, data_type: DataType, **kwargs) -> str:
+>         """Generate cache key from data type and parameters"""
+>         params = "_".join(f"{k}={v}" for k, v in sorted(kwargs.items()))
+>         return f"{data_type.value}_{params}"
+  
+>     def _get_from_cache(self, cache_key: str) -> Optional[Any]:
+>         """Get data from cache if valid"""
+>         with self._lock:
+>             entry = self._cache.get(cache_key)
+>             if entry and datetime.now() < entry.expires_at:
+>                 return entry.data
+>         return None
+  
+>     def _set_cache(self, cache_key: str, data: Any, ttl_minutes: int = None) -> None:
+>         """Store data in cache"""
+>         ttl = ttl_minutes or self.DEFAULT_TTL_MINUTES
+>         with self._lock:
+>             self._cache[cache_key] = CacheEntry(
+>                 data=data,
+>                 loaded_at=datetime.now(),
+>                 expires_at=datetime.now() + timedelta(minutes=ttl),
+>                 records_count=len(data) if hasattr(data, "__len__") else 1,
+>             )
+  
+>     def load_def_data(self, days: int = 30, force_refresh: bool = False) -> List[Dict]:
+-         """
+>         Load DEF level data from Wialon.
+  
+>         Args:
+>             days: Number of days of history
+>             force_refresh: Bypass cache and reload
+  
+>         Returns:
+>             List of DEF reading dictionaries
+>         """
+>         cache_key = self._get_cache_key(DataType.DEF_LEVELS, days=days)
+  
+>         if not force_refresh:
+>             cached = self._get_from_cache(cache_key)
+>             if cached:
+>                 return cached
+  
+>         if not self.is_connected():
+>             if not self.connect():
+>                 return []
+  
+>         try:
+>             cursor = self.db_connection.cursor(dictionary=True)
+  
+>             query = """
+>                 SELECT 
+>                     timestamp,
+>                     unit_id,
+>                     def_level,
+>                     odometer,
+>                     engine_hours
+>                 FROM sensor_data
+>                 WHERE def_level IS NOT NULL
+>                   AND def_level > 0
+>                   AND def_level <= 100
+>                   AND timestamp >= NOW() - INTERVAL %s DAY
+>                 ORDER BY unit_id, timestamp
+>             """
+  
+>             cursor.execute(query, (days,))
+>             rows = cursor.fetchall()
+>             cursor.close()
+  
+              # Enrich with truck IDs
+>             for row in rows:
+>                 row["truck_id"] = self.get_truck_id(row["unit_id"])
+  
+!             self._set_cache(cache_key, rows)
+!             self._notify_subscribers(DataType.DEF_LEVELS, rows)
+  
+!             logger.info(f"Loaded {len(rows)} DEF readings")
+!             return rows
+  
+>         except Exception as e:
+>             logger.error(f"Error loading DEF data: {e}")
+>             return []
+  
+>     def load_sensor_data(
+>         self,
+>         sensor: str,
+>         days: int = 30,
+>         unit_id: Optional[int] = None,
+>         force_refresh: bool = False,
+>     ) -> List[Dict]:
+-         """
+>         Load generic sensor data from Wialon.
+  
+>         Args:
+>             sensor: Sensor column name (e.g., 'fuel_lvl', 'oil_press')
+>             days: Number of days of history
+>             unit_id: Optional specific unit ID
+>             force_refresh: Bypass cache
+  
+>         Returns:
+>             List of sensor reading dictionaries
+>         """
+>         cache_key = self._get_cache_key(
+>             DataType.SENSOR_DATA, sensor=sensor, days=days, unit=unit_id or "all"
+>         )
+  
+>         if not force_refresh:
+>             cached = self._get_from_cache(cache_key)
+>             if cached:
+!                 return cached
+  
+>         if not self.is_connected():
+>             if not self.connect():
+>                 return []
+  
+>         try:
+>             cursor = self.db_connection.cursor(dictionary=True)
+  
+              # Build query
+>             where_clauses = [
+>                 f"{sensor} IS NOT NULL",
+>                 f"timestamp >= NOW() - INTERVAL {days} DAY",
+>             ]
+  
+>             if unit_id:
+>                 where_clauses.append(f"unit_id = {unit_id}")
+  
+>             query = f"""
+>                 SELECT 
+>                     timestamp,
+>                     unit_id,
+>                     {sensor},
+>                     odometer,
+>                     engine_hours,
+>                     lat,
+>                     lon
+>                 FROM sensor_data
+>                 WHERE {' AND '.join(where_clauses)}
+>                 ORDER BY unit_id, timestamp
+>             """
+  
+>             cursor.execute(query)
+>             rows = cursor.fetchall()
+>             cursor.close()
+  
+              # Enrich with truck IDs
+>             for row in rows:
+>                 row["truck_id"] = self.get_truck_id(row["unit_id"])
+  
+>             self._set_cache(cache_key, rows)
+  
+>             logger.info(f"Loaded {len(rows)} {sensor} readings")
+>             return rows
+  
+>         except Exception as e:
+>             logger.error(f"Error loading {sensor} data: {e}")
+>             return []
+  
+>     def load_events(
+>         self,
+>         event_ids: Optional[List[int]] = None,
+>         days: int = 30,
+>         force_refresh: bool = False,
+>     ) -> List[Dict]:
+-         """
+>         Load events from Wialon.
+  
+>         Args:
+>             event_ids: Optional list of specific event IDs to load
+>             days: Number of days of history
+>             force_refresh: Bypass cache
+  
+>         Returns:
+>             List of event dictionaries
+>         """
+>         cache_key = self._get_cache_key(DataType.EVENTS, ids=str(event_ids), days=days)
+  
+>         if not force_refresh:
+>             cached = self._get_from_cache(cache_key)
+>             if cached:
+!                 return cached
+  
+>         if not self.is_connected():
+>             if not self.connect():
+>                 return []
+  
+>         try:
+>             cursor = self.db_connection.cursor(dictionary=True)
+  
+>             where_clauses = [f"timestamp >= NOW() - INTERVAL {days} DAY"]
+  
+>             if event_ids:
+>                 ids_str = ",".join(str(i) for i in event_ids)
+>                 where_clauses.append(f"event_id IN ({ids_str})")
+  
+>             query = f"""
+>                 SELECT 
+>                     timestamp,
+>                     unit_id,
+>                     event_id,
+>                     event_value,
+>                     lat,
+>                     lon,
+>                     speed
+>                 FROM events
+>                 WHERE {' AND '.join(where_clauses)}
+>                 ORDER BY timestamp DESC
+>             """
+  
+>             cursor.execute(query)
+>             rows = cursor.fetchall()
+>             cursor.close()
+  
+              # Enrich with truck IDs
+>             for row in rows:
+>                 row["truck_id"] = self.get_truck_id(row["unit_id"])
+  
+>             self._set_cache(cache_key, rows)
+>             self._notify_subscribers(DataType.EVENTS, rows)
+  
+>             logger.info(f"Loaded {len(rows)} events")
+>             return rows
+  
+>         except Exception as e:
+>             logger.error(f"Error loading events: {e}")
+>             return []
+  
+>     def load_speedings(self, days: int = 30, force_refresh: bool = False) -> List[Dict]:
+>         """
+>         Load speeding records from Wialon.
+  
+>         Returns:
+>             List of speeding dictionaries
+>         """
+>         cache_key = self._get_cache_key(DataType.SPEEDINGS, days=days)
+  
+>         if not force_refresh:
+>             cached = self._get_from_cache(cache_key)
+>             if cached:
+!                 return cached
+  
+>         if not self.is_connected():
+>             if not self.connect():
+>                 return []
+  
+>         try:
+>             cursor = self.db_connection.cursor(dictionary=True)
+  
+>             query = """
+>                 SELECT 
+>                     timestamp,
+>                     unit_id,
+>                     max_speed,
+>                     duration_seconds,
+>                     distance_meters,
+>                     lat,
+>                     lon
+>                 FROM speedings
+>                 WHERE timestamp >= NOW() - INTERVAL %s DAY
+>                 ORDER BY timestamp DESC
+>             """
+  
+>             cursor.execute(query, (days,))
+>             rows = cursor.fetchall()
+>             cursor.close()
+  
+              # Enrich with truck IDs
+>             for row in rows:
+>                 row["truck_id"] = self.get_truck_id(row["unit_id"])
+  
+>             self._set_cache(cache_key, rows)
+>             self._notify_subscribers(DataType.SPEEDINGS, rows)
+  
+>             logger.info(f"Loaded {len(rows)} speeding records")
+>             return rows
+  
+>         except Exception as e:
+>             logger.error(f"Error loading speedings: {e}")
+>             return []
+  
+>     def load_dtc_events(
+>         self, days: int = 30, force_refresh: bool = False
+>     ) -> List[Dict]:
+>         """
+>         Load DTC (Diagnostic Trouble Code) events from Wialon.
+  
+>         Returns:
+>             List of DTC event dictionaries
+>         """
+          # Event ID 24 = DTC Change
+>         events = self.load_events(
+>             event_ids=[24], days=days, force_refresh=force_refresh
+>         )
+  
+          # Also load any sensor data with J1939 SPN/FMI
+>         cache_key = self._get_cache_key(DataType.DTC_CODES, days=days)
+  
+>         if not force_refresh:
+>             cached = self._get_from_cache(cache_key)
+>             if cached:
+!                 return cached
+  
+>         if not self.is_connected():
+!             if not self.connect():
+!                 return events
+  
+>         try:
+>             cursor = self.db_connection.cursor(dictionary=True)
+  
+>             query = """
+>                 SELECT 
+>                     timestamp,
+>                     unit_id,
+>                     j1939_spn,
+>                     j1939_fmi,
+>                     engine_hours
+>                 FROM sensor_data
+>                 WHERE (j1939_spn IS NOT NULL OR j1939_fmi IS NOT NULL)
+>                   AND timestamp >= NOW() - INTERVAL %s DAY
+>                 ORDER BY timestamp DESC
+>             """
+  
+>             cursor.execute(query, (days,))
+>             rows = cursor.fetchall()
+>             cursor.close()
+  
+              # Enrich with truck IDs
+>             for row in rows:
+!                 row["truck_id"] = self.get_truck_id(row["unit_id"])
+  
+              # Combine with events
+>             combined = events + rows
+>             self._set_cache(cache_key, combined)
+  
+>             logger.info(f"Loaded {len(combined)} DTC-related records")
+>             return combined
+  
+!         except Exception as e:
+!             logger.error(f"Error loading DTC events: {e}")
+!             return events
+  
+>     def load_all_for_analytics(self, days: int = 30) -> Dict[str, int]:
+>         """
+>         Load all data needed for analytics engines.
+  
+>         Args:
+>             days: Number of days of history
+  
+>         Returns:
+>             Dictionary with counts of loaded data per type
+>         """
+>         results = {}
+  
+          # DEF data
+>         def_data = self.load_def_data(days=days, force_refresh=True)
+>         results["def_readings"] = len(def_data)
+  
+          # Fuel data
+>         fuel_data = self.load_sensor_data("fuel_lvl", days=days, force_refresh=True)
+>         results["fuel_readings"] = len(fuel_data)
+  
+          # Oil pressure
+>         oil_data = self.load_sensor_data("oil_press", days=days, force_refresh=True)
+>         results["oil_pressure_readings"] = len(oil_data)
+  
+          # Coolant temperature
+>         cool_data = self.load_sensor_data("cool_temp", days=days, force_refresh=True)
+>         results["coolant_temp_readings"] = len(cool_data)
+  
+          # Events
+>         events = self.load_events(days=days, force_refresh=True)
+>         results["events"] = len(events)
+  
+          # Speedings
+>         speedings = self.load_speedings(days=days, force_refresh=True)
+>         results["speedings"] = len(speedings)
+  
+          # DTC events
+>         dtc = self.load_dtc_events(days=days, force_refresh=True)
+>         results["dtc_records"] = len(dtc)
+  
+>         logger.info(f"Loaded all analytics data: {results}")
+>         return results
+  
+>     def get_data_inventory(self) -> Dict[str, Any]:
+>         """
+>         Get inventory of available data in Wialon.
+  
+>         Returns:
+>             Dictionary with data availability summary
+>         """
+>         if not self.is_connected():
+>             if not self.connect():
+>                 return {"error": "No se pudo conectar a Wialon"}
+  
+>         try:
+>             cursor = self.db_connection.cursor()
+  
+>             inventory = {
+>                 "connection": "✅ Conectado",
+>                 "host": self.WIALON_HOST,
+>                 "database": self.WIALON_DB,
+>                 "trucks_configured": len(self._truck_mapping),
+>                 "sensors": {},
+>                 "events": {},
+>                 "tables": {},
+>             }
+  
+              # Check sensor data
+>             sensors = [
+>                 "def_level",
+>                 "fuel_lvl",
+>                 "oil_press",
+>                 "oil_temp",
+>                 "cool_temp",
+>                 "cool_lvl",
+>                 "engine_hours",
+>                 "odometer",
+>             ]
+  
+>             for sensor in sensors:
+>                 try:
+>                     cursor.execute(
+>                         f"""
+>                         SELECT COUNT(*) FROM sensor_data 
+>                         WHERE {sensor} IS NOT NULL 
+>                         AND timestamp >= NOW() - INTERVAL 30 DAY
+>                     """
+>                     )
+>                     count = cursor.fetchone()[0]
+>                     inventory["sensors"][sensor] = count
+!                 except:
+!                     inventory["sensors"][sensor] = 0
+  
+              # Check events
+>             cursor.execute(
+>                 """
+>                 SELECT event_id, COUNT(*) as cnt 
+>                 FROM events 
+>                 WHERE timestamp >= NOW() - INTERVAL 30 DAY
+>                 GROUP BY event_id
+>             """
+>             )
+>             for row in cursor.fetchall():
+>                 inventory["events"][f"event_{row[0]}"] = row[1]
+  
+              # Check speedings
+>             cursor.execute(
+>                 """
+>                 SELECT COUNT(*) FROM speedings
+>                 WHERE timestamp >= NOW() - INTERVAL 30 DAY
+>             """
+>             )
+>             inventory["tables"]["speedings"] = cursor.fetchone()[0]
+  
+>             cursor.close()
+  
+>             inventory["timestamp"] = datetime.now().isoformat()
+  
+>             return inventory
+  
+!         except Exception as e:
+!             logger.error(f"Error getting data inventory: {e}")
+!             return {"error": str(e)}
+  
+>     def get_cache_status(self) -> Dict[str, Any]:
+>         """Get current cache status"""
+>         with self._lock:
+>             status = {
+>                 "entries": len(self._cache),
+>                 "total_records": sum(e.records_count for e in self._cache.values()),
+>                 "details": {},
+>             }
+  
+>             for key, entry in self._cache.items():
+>                 is_valid = datetime.now() < entry.expires_at
+>                 status["details"][key] = {
+>                     "records": entry.records_count,
+>                     "loaded_at": entry.loaded_at.isoformat(),
+>                     "expires_at": entry.expires_at.isoformat(),
+>                     "is_valid": is_valid,
+>                 }
+  
+>             return status
+  
+>     def clear_cache(self) -> None:
+>         """Clear all cached data"""
+>         with self._lock:
+>             self._cache.clear()
+>         logger.info("Cache cleared")
+  
+  
+  # Singleton instance
+> _loader_instance: Optional[WialonDataLoader] = None
+  
+  
+> def get_wialon_loader() -> WialonDataLoader:
+>     """Get or create singleton WialonDataLoader instance"""
+>     global _loader_instance
+>     if _loader_instance is None:
+>         _loader_instance = WialonDataLoader()
+>     return _loader_instance
+  
+  
+  # Example usage
+- if __name__ == "__main__":
+-     logging.basicConfig(level=logging.INFO)
+  
+-     loader = get_wialon_loader()
+  
+-     if loader.connect():
+-         print("\n📊 Wialon Data Inventory:")
+-         inventory = loader.get_data_inventory()
+  
+-         print(f"\n   Trucks configurados: {inventory.get('trucks_configured', 0)}")
+  
+-         print("\n   Sensores (últimos 30 días):")
+-         for sensor, count in inventory.get("sensors", {}).items():
+-             status = "✅" if count > 0 else "❌"
+-             print(f"      {status} {sensor}: {count:,} registros")
+  
+-         print("\n   Eventos (últimos 30 días):")
+-         for event, count in inventory.get("events", {}).items():
+-             print(f"      📌 {event}: {count:,}")
+  
+          # Load some data
+-         print("\n🔄 Cargando datos para analytics...")
+-         results = loader.load_all_for_analytics(days=30)
+  
+-         print("\n   Datos cargados:")
+-         for data_type, count in results.items():
+-             print(f"      ✅ {data_type}: {count:,}")
+  
+-         loader.disconnect()

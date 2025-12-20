@@ -1,0 +1,525 @@
+> """
+> Redis Cache Service for Fuel Copilot
+> =====================================
+> Distributed caching with Redis for scalability to 1000+ trucks.
+  
+> Features:
+> - Automatic fallback to in-memory cache if Redis unavailable
+> - TTL-based expiration
+> - Pattern-based invalidation
+> - Cache decorators for easy use
+  
+> Usage:
+>     from cache_service import cache, get_cache
+  
+      # Using decorator
+>     @cache(key="fleet:summary", ttl=30)
+>     async def get_fleet_summary():
+>         ...
+  
+      # Manual cache operations
+>     cache_svc = await get_cache()
+>     await cache_svc.set("key", value, ttl=60)
+>     value = await cache_svc.get("key")
+> """
+  
+> import json
+> import logging
+> import os
+> import asyncio
+> from abc import ABC, abstractmethod
+> from datetime import datetime, timezone
+> from functools import wraps
+> from typing import Any, Callable, Dict, Optional, TypeVar, Union
+> from collections import OrderedDict
+> import hashlib
+  
+> logger = logging.getLogger(__name__)
+  
+> T = TypeVar("T")
+  
+  # Configuration from environment
+> REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+> REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() == "true"
+> CACHE_DEFAULT_TTL = int(os.environ.get("CACHE_DEFAULT_TTL", "30"))
+  
+  
+> class CacheBackend(ABC):
+>     """Abstract base class for cache backends"""
+  
+>     @abstractmethod
+>     async def get(self, key: str) -> Optional[Any]:
+-         pass
+  
+>     @abstractmethod
+>     async def set(self, key: str, value: Any, ttl: int = CACHE_DEFAULT_TTL) -> bool:
+-         pass
+  
+>     @abstractmethod
+>     async def delete(self, key: str) -> bool:
+-         pass
+  
+>     @abstractmethod
+>     async def delete_pattern(self, pattern: str) -> int:
+-         pass
+  
+>     @abstractmethod
+>     async def exists(self, key: str) -> bool:
+-         pass
+  
+>     @abstractmethod
+>     async def clear(self) -> bool:
+-         pass
+  
+>     @abstractmethod
+>     def get_stats(self) -> Dict[str, Any]:
+-         pass
+  
+  
+> class InMemoryCache(CacheBackend):
+>     """
+>     In-memory LRU cache with TTL support.
+>     Used as fallback when Redis is unavailable.
+>     """
+  
+>     def __init__(self, max_size: int = 1000):
+>         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+>         self._max_size = max_size
+>         self._hits = 0
+>         self._misses = 0
+>         self._lock = asyncio.Lock()
+  
+>     async def get(self, key: str) -> Optional[Any]:
+>         async with self._lock:
+>             if key not in self._cache:
+>                 self._misses += 1
+>                 return None
+  
+>             entry = self._cache[key]
+  
+              # Check TTL
+>             if entry["expires_at"] and datetime.now(timezone.utc) > entry["expires_at"]:
+>                 del self._cache[key]
+>                 self._misses += 1
+>                 return None
+  
+              # Move to end (LRU)
+>             self._cache.move_to_end(key)
+>             self._hits += 1
+>             return entry["value"]
+  
+>     async def set(self, key: str, value: Any, ttl: int = CACHE_DEFAULT_TTL) -> bool:
+>         async with self._lock:
+              # Evict oldest if at capacity
+>             while len(self._cache) >= self._max_size:
+>                 self._cache.popitem(last=False)
+  
+>             expires_at = None
+>             if ttl > 0:
+>                 expires_at = datetime.now(timezone.utc).replace(microsecond=0)
+>                 from datetime import timedelta
+  
+>                 expires_at = expires_at + timedelta(seconds=ttl)
+  
+>             self._cache[key] = {
+>                 "value": value,
+>                 "expires_at": expires_at,
+>                 "created_at": datetime.now(timezone.utc),
+>             }
+>             return True
+  
+>     async def delete(self, key: str) -> bool:
+>         async with self._lock:
+>             if key in self._cache:
+>                 del self._cache[key]
+>                 return True
+!             return False
+  
+>     async def delete_pattern(self, pattern: str) -> int:
+>         """Delete keys matching glob pattern (simple * wildcard support)"""
+>         import fnmatch
+  
+>         async with self._lock:
+>             keys_to_delete = [
+>                 k for k in self._cache.keys() if fnmatch.fnmatch(k, pattern)
+>             ]
+>             for key in keys_to_delete:
+>                 del self._cache[key]
+>             return len(keys_to_delete)
+  
+>     async def exists(self, key: str) -> bool:
+>         return await self.get(key) is not None
+  
+>     async def clear(self) -> bool:
+>         async with self._lock:
+>             self._cache.clear()
+>             return True
+  
+>     def get_stats(self) -> Dict[str, Any]:
+>         total = self._hits + self._misses
+>         hit_rate = (self._hits / total * 100) if total > 0 else 0
+>         return {
+>             "backend": "memory",
+>             "size": len(self._cache),
+>             "max_size": self._max_size,
+>             "hits": self._hits,
+>             "misses": self._misses,
+>             "hit_rate_pct": round(hit_rate, 2),
+>         }
+  
+  
+> class RedisCache(CacheBackend):
+>     """
+>     Redis-based distributed cache.
+>     Supports multiple backend instances for horizontal scaling.
+>     """
+  
+>     def __init__(self, redis_url: str = REDIS_URL):
+>         self._redis_url = redis_url
+>         self._client = None
+>         self._connected = False
+>         self._hits = 0
+>         self._misses = 0
+  
+>     async def connect(self) -> bool:
+>         """Establish connection to Redis"""
+>         try:
+>             import redis.asyncio as redis
+  
+>             self._client = redis.from_url(
+>                 self._redis_url,
+>                 encoding="utf-8",
+>                 decode_responses=True,
+>                 socket_timeout=5.0,
+>                 socket_connect_timeout=5.0,
+>             )
+>             await self._client.ping()
+>             self._connected = True
+>             logger.info(f"✅ Redis connected: {self._redis_url}")
+>             return True
+!         except ImportError:
+!             logger.warning("⚠️ redis package not installed, using memory cache")
+!             return False
+!         except Exception as e:
+!             logger.warning(f"⚠️ Redis connection failed: {e}")
+!             return False
+  
+>     async def disconnect(self):
+>         """Close Redis connection"""
+!         if self._client:
+!             await self._client.close()
+!             self._connected = False
+  
+>     async def get(self, key: str) -> Optional[Any]:
+>         if not self._connected:
+!             return None
+  
+>         try:
+>             data = await self._client.get(f"fc:{key}")
+>             if data:
+>                 self._hits += 1
+>                 return json.loads(data)
+>             self._misses += 1
+>             return None
+>         except Exception as e:
+>             logger.warning(f"Redis get error: {e}")
+>             self._misses += 1
+>             return None
+  
+>     async def set(self, key: str, value: Any, ttl: int = CACHE_DEFAULT_TTL) -> bool:
+>         if not self._connected:
+!             return False
+  
+>         try:
+>             serialized = json.dumps(value, default=str)
+>             if ttl > 0:
+>                 await self._client.setex(f"fc:{key}", ttl, serialized)
+!             else:
+!                 await self._client.set(f"fc:{key}", serialized)
+>             return True
+>         except Exception as e:
+>             logger.warning(f"Redis set error: {e}")
+>             return False
+  
+>     async def delete(self, key: str) -> bool:
+>         if not self._connected:
+!             return False
+  
+>         try:
+>             await self._client.delete(f"fc:{key}")
+>             return True
+!         except Exception as e:
+!             logger.warning(f"Redis delete error: {e}")
+!             return False
+  
+>     async def delete_pattern(self, pattern: str) -> int:
+>         """Delete keys matching pattern using SCAN"""
+>         if not self._connected:
+!             return 0
+  
+>         try:
+>             deleted = 0
+>             cursor = 0
+>             while True:
+>                 cursor, keys = await self._client.scan(
+>                     cursor, match=f"fc:{pattern}", count=100
+>                 )
+>                 if keys:
+>                     deleted += await self._client.delete(*keys)
+>                 if cursor == 0:
+>                     break
+>             return deleted
+!         except Exception as e:
+!             logger.warning(f"Redis delete_pattern error: {e}")
+!             return 0
+  
+>     async def exists(self, key: str) -> bool:
+!         if not self._connected:
+!             return False
+  
+!         try:
+!             return await self._client.exists(f"fc:{key}") > 0
+!         except Exception as e:
+!             logger.warning(f"Redis exists error: {e}")
+!             return False
+  
+>     async def clear(self) -> bool:
+>         """Clear all Fuel Copilot keys"""
+!         return await self.delete_pattern("*") > 0
+  
+>     def get_stats(self) -> Dict[str, Any]:
+>         total = self._hits + self._misses
+>         hit_rate = (self._hits / total * 100) if total > 0 else 0
+>         return {
+>             "backend": "redis",
+>             "connected": self._connected,
+>             "url": (
+>                 self._redis_url.split("@")[-1]
+>                 if "@" in self._redis_url
+>                 else self._redis_url
+>             ),
+>             "hits": self._hits,
+>             "misses": self._misses,
+>             "hit_rate_pct": round(hit_rate, 2),
+>         }
+  
+  
+> class CacheService:
+>     """
+>     High-level cache service with automatic backend selection.
+>     Provides Redis with in-memory fallback.
+>     """
+  
+      # Cache key prefixes
+>     PREFIX_FLEET = "fleet"
+>     PREFIX_TRUCK = "truck"
+>     PREFIX_KPI = "kpi"
+>     PREFIX_REFUEL = "refuel"
+>     PREFIX_HEALTH = "health"
+>     PREFIX_ALERT = "alert"
+  
+      # TTL presets (seconds)
+>     TTL_REALTIME = 15  # Real-time dashboard data
+>     TTL_SHORT = 30  # Frequently updated data
+>     TTL_MEDIUM = 300  # 5 minutes
+>     TTL_LONG = 3600  # 1 hour
+>     TTL_DAILY = 86400  # 24 hours
+  
+>     def __init__(self):
+>         self._redis: Optional[RedisCache] = None
+>         self._memory: InMemoryCache = InMemoryCache(max_size=2000)
+>         self._initialized = False
+  
+>     async def initialize(self) -> "CacheService":
+>         """Initialize cache backends"""
+>         if self._initialized:
+!             return self
+  
+>         if REDIS_ENABLED:
+>             self._redis = RedisCache(REDIS_URL)
+>             connected = await self._redis.connect()
+>             if not connected:
+!                 logger.info("📦 Using in-memory cache (Redis unavailable)")
+!                 self._redis = None
+!         else:
+!             logger.info("📦 Using in-memory cache (Redis disabled)")
+  
+>         self._initialized = True
+>         return self
+  
+>     @property
+>     def backend(self) -> CacheBackend:
+>         """Get active cache backend"""
+>         return self._redis if self._redis and self._redis._connected else self._memory
+  
+>     async def get(self, key: str) -> Optional[Any]:
+>         """Get value from cache"""
+>         return await self.backend.get(key)
+  
+>     async def set(self, key: str, value: Any, ttl: int = CACHE_DEFAULT_TTL) -> bool:
+>         """Set value in cache with TTL"""
+>         return await self.backend.set(key, value, ttl)
+  
+>     async def delete(self, key: str) -> bool:
+>         """Delete key from cache"""
+>         return await self.backend.delete(key)
+  
+>     async def invalidate_truck(self, truck_id: str) -> int:
+>         """Invalidate all cached data for a truck"""
+>         patterns = [
+>             f"{self.PREFIX_TRUCK}:{truck_id}:*",
+>             f"{self.PREFIX_FLEET}:*",  # Fleet summaries include truck data
+>             f"{self.PREFIX_KPI}:*",  # KPIs may include truck metrics
+>         ]
+>         deleted = 0
+>         for pattern in patterns:
+>             deleted += await self.backend.delete_pattern(pattern)
+>         return deleted
+  
+>     async def invalidate_fleet(self) -> int:
+>         """Invalidate all fleet-level cached data"""
+!         return await self.backend.delete_pattern(f"{self.PREFIX_FLEET}:*")
+  
+>     def get_stats(self) -> Dict[str, Any]:
+>         """Get cache statistics"""
+>         return {
+>             "initialized": self._initialized,
+>             "redis_enabled": REDIS_ENABLED,
+>             **self.backend.get_stats(),
+>         }
+  
+      # Convenience methods for common operations
+>     async def get_fleet_summary(self) -> Optional[Dict]:
+>         return await self.get(f"{self.PREFIX_FLEET}:summary")
+  
+>     async def set_fleet_summary(self, data: Dict) -> bool:
+>         return await self.set(f"{self.PREFIX_FLEET}:summary", data, self.TTL_REALTIME)
+  
+>     async def get_truck_detail(self, truck_id: str) -> Optional[Dict]:
+>         return await self.get(f"{self.PREFIX_TRUCK}:{truck_id}:detail")
+  
+>     async def set_truck_detail(self, truck_id: str, data: Dict) -> bool:
+>         return await self.set(
+>             f"{self.PREFIX_TRUCK}:{truck_id}:detail", data, self.TTL_SHORT
+>         )
+  
+>     async def get_kpis(self, days: int = 1) -> Optional[Dict]:
+>         return await self.get(f"{self.PREFIX_KPI}:{days}d")
+  
+>     async def set_kpis(self, data: Dict, days: int = 1) -> bool:
+>         ttl = self.TTL_SHORT if days == 1 else self.TTL_MEDIUM
+>         return await self.set(f"{self.PREFIX_KPI}:{days}d", data, ttl)
+  
+  
+  # Global instance
+> _cache_service: Optional[CacheService] = None
+  
+  
+> async def get_cache() -> CacheService:
+>     """Get or create global cache service instance"""
+>     global _cache_service
+>     if _cache_service is None:
+>         _cache_service = CacheService()
+>         await _cache_service.initialize()
+>     return _cache_service
+  
+  
+> def cache(
+>     key: Optional[str] = None,
+>     ttl: int = CACHE_DEFAULT_TTL,
+>     key_builder: Optional[Callable[..., str]] = None,
+>     prefix: str = "",
+> ):
+>     """
+>     Decorator for caching function results.
+  
+>     Args:
+>         key: Static cache key (mutually exclusive with key_builder)
+>         ttl: Time-to-live in seconds
+>         key_builder: Function to build dynamic cache key from args/kwargs
+>         prefix: Key prefix (e.g., "truck" for "truck:{id}")
+  
+>     Usage:
+>         @cache(key="fleet:summary", ttl=30)
+>         async def get_fleet_summary():
+>             ...
+  
+>         @cache(prefix="truck", key_builder=lambda truck_id: truck_id, ttl=15)
+>         async def get_truck(truck_id: str):
+>             ...
+>     """
+  
+>     def decorator(func: Callable[..., T]) -> Callable[..., T]:
+>         @wraps(func)
+>         async def wrapper(*args, **kwargs) -> T:
+>             cache_svc = await get_cache()
+  
+              # Build cache key
+>             if key:
+>                 cache_key = key
+>             elif key_builder:
+>                 built_key = key_builder(*args, **kwargs)
+>                 cache_key = f"{prefix}:{built_key}" if prefix else built_key
+!             else:
+                  # Generate key from function name and args
+!                 arg_hash = hashlib.md5(f"{args}:{kwargs}".encode()).hexdigest()[:8]
+!                 cache_key = f"{func.__name__}:{arg_hash}"
+  
+              # Try to get from cache
+>             cached = await cache_svc.get(cache_key)
+>             if cached is not None:
+>                 return cached
+  
+              # Execute function
+>             result = await func(*args, **kwargs)
+  
+              # Store in cache
+>             if result is not None:
+>                 await cache_svc.set(cache_key, result, ttl)
+  
+>             return result
+  
+>         return wrapper
+  
+>     return decorator
+  
+  
+  # Cache invalidation helpers
+> async def invalidate_on_truck_update(truck_id: str):
+>     """Call when truck data is updated to invalidate relevant caches"""
+>     cache_svc = await get_cache()
+>     await cache_svc.invalidate_truck(truck_id)
+  
+  
+> async def invalidate_on_refuel(truck_id: str):
+>     """Call when a refuel is detected"""
+!     cache_svc = await get_cache()
+!     await cache_svc.invalidate_truck(truck_id)
+!     await cache_svc.backend.delete_pattern("refuel:*")
+  
+  
+  # Test function
+> async def test_cache():
+>     """Test cache functionality"""
+>     cache_svc = await get_cache()
+  
+      # Test basic operations
+>     await cache_svc.set("test:key", {"value": 123}, ttl=60)
+>     result = await cache_svc.get("test:key")
+>     assert result == {"value": 123}, f"Expected {{'value': 123}}, got {result}"
+  
+      # Test delete
+>     await cache_svc.delete("test:key")
+>     result = await cache_svc.get("test:key")
+>     assert result is None, f"Expected None after delete, got {result}"
+  
+      # Test stats
+>     stats = cache_svc.get_stats()
+>     print(f"Cache stats: {stats}")
+  
+-     print("✅ Cache tests passed!")
+>     return True
+  
+  
+- if __name__ == "__main__":
+-     asyncio.run(test_cache())

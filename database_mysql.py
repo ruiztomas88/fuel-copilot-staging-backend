@@ -10,16 +10,17 @@ Replaces CSV reading with direct MySQL queries for better performance and histor
 - max_overflow=5: Allow 5 additional connections under load
 """
 
-import pymysql
-import pandas as pd
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Generator
-from contextlib import contextmanager
 import logging
-import sys
 import os
+import sys
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from typing import Any, Dict, Generator, List, Optional
+
+import pandas as pd
+import pymysql
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine, Connection
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import QueuePool
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ except ImportError:
 
 # 🆕 v3.12.22: Memory cache for performance optimization
 try:
-    from memory_cache import cached, cache, invalidate_fleet_cache
+    from memory_cache import cache, cached, invalidate_fleet_cache
 
     CACHE_ENABLED = True
 except ImportError:
@@ -65,7 +66,8 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 try:
-    from config import FUEL, DATABASE as DB_CONFIG
+    from config import DATABASE as DB_CONFIG
+    from config import FUEL
 except ImportError:
     # Fallback if config not available
     logger.warning("Could not import config module, using defaults")
@@ -600,14 +602,40 @@ def get_fleet_summary() -> Dict[str, Any]:
             result = conn.execute(query).fetchone()
 
             if result:
+                total_trucks = result[0] or 0
+
+                # 🆕 Calculate health score from active DTCs
+                # Query for active DTCs count
+                dtc_query = text(
+                    """
+                    SELECT COUNT(DISTINCT CONCAT(truck_id, '-', dtc_code))
+                    FROM dtc_events
+                    WHERE status = 'ACTIVE'
+                      AND truck_id IN ({})
+                """.format(
+                        ",".join(f"'{t}'" for t in allowed_trucks)
+                    )
+                )
+
+                dtc_result = conn.execute(dtc_query).fetchone()
+                active_dtc_count = dtc_result[0] if dtc_result else 0
+
+                # Apply health score algorithm (from 190h refactoring)
+                health_score = calculate_fleet_health_score(
+                    active_dtc_count, total_trucks
+                )
+
                 return {
-                    "total_trucks": result[0] or 0,
+                    "total_trucks": total_trucks,
                     "active_trucks": result[1] or 0,
                     "offline_trucks": result[2] or 0,
                     "avg_fuel_level": float(result[3] or 0),
                     "avg_mpg": float(result[4] or 0),
                     "avg_consumption": float(result[5] or 0),
                     "trucks_with_drift": result[6] or 0,
+                    # 🆕 Health metrics (190h algorithm)
+                    "active_dtcs": active_dtc_count,
+                    "health_score": health_score,
                 }
             return _empty_fleet_summary()
 
@@ -626,6 +654,8 @@ def _empty_fleet_summary() -> Dict[str, Any]:
         "avg_mpg": 0,
         "avg_consumption": 0,
         "trucks_with_drift": 0,
+        "active_dtcs": 0,
+        "health_score": 100.0,  # Perfect health when no data
     }
 
 
@@ -665,8 +695,27 @@ def get_truck_efficiency_stats(truck_id: str, days_back: int = 30) -> Dict[str, 
             ).fetchone()
 
             if result:
+                avg_mpg = float(result[0] or 0)
+                baseline_mpg = 5.7  # Industry baseline for Class 8 trucks
+
+                # 🆕 Efficiency Rating Algorithm (from 190h refactoring)
+                # Calculates MPG deviation from baseline and assigns rating
+                mpg_vs_baseline = (
+                    ((avg_mpg - baseline_mpg) / baseline_mpg * 100)
+                    if baseline_mpg > 0 and avg_mpg > 0
+                    else 0
+                )
+
+                # Rating thresholds: ±5% from baseline
+                if mpg_vs_baseline > 5:
+                    efficiency_rating = "HIGH"
+                elif mpg_vs_baseline < -5:
+                    efficiency_rating = "LOW"
+                else:
+                    efficiency_rating = "MEDIUM"
+
                 return {
-                    "avg_mpg": float(result[0] or 0),
+                    "avg_mpg": avg_mpg,
                     "max_mpg": float(result[1] or 0),
                     "min_mpg": float(result[2] or 0),
                     "avg_consumption": float(result[3] or 0),
@@ -677,6 +726,10 @@ def get_truck_efficiency_stats(truck_id: str, days_back: int = 30) -> Dict[str, 
                     "total_records": result[8] or 0,
                     "total_refuels": result[9] or 0,
                     "total_fuel_added": float(result[10] or 0),
+                    # 🆕 New efficiency metrics
+                    "baseline_mpg": baseline_mpg,
+                    "mpg_vs_baseline_pct": round(mpg_vs_baseline, 1),
+                    "efficiency_rating": efficiency_rating,
                 }
             else:
                 return {}
@@ -910,11 +963,14 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
     """
     🆕 v3.9.0: Loss Analysis by Root Cause
     🔧 v3.15.0: Added 60-second cache for performance
+    🔧 v6.3.0: Added High RPM and Speeding loss categories
 
-    Classifies fuel consumption losses into 3 categories:
-    1. EXCESSIVE IDLE (~50%): Speed < 5 mph with engine running
-    2. HIGH ALTITUDE (~25%): Altitude > 3000 ft affects efficiency
-    3. MECHANICAL/DRIVING (~25%): Catch-all for other inefficiencies
+    Classifies fuel consumption losses into 5 categories:
+    1. EXCESSIVE IDLE (~40%): truck_status='STOPPED' with engine running
+    2. HIGH RPM (~20%): RPM > 1800 causes ~15% more fuel consumption
+    3. SPEEDING (~20%): Speed > 70 mph causes ~12% more fuel consumption
+    4. HIGH ALTITUDE (~10%): Altitude > 3000 ft affects efficiency
+    5. MECHANICAL/OTHER (~10%): Catch-all for other inefficiencies
 
     Args:
         days_back: Number of days to analyze (1, 7, or 30)
@@ -930,7 +986,7 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
         """
         SELECT 
             truck_id,
-            -- Classify each record by root cause
+            -- 1. IDLE: truck_status = 'STOPPED' with engine running
             SUM(CASE 
                 WHEN truck_status = 'STOPPED' AND consumption_gph > 0.1 
                 THEN consumption_gph 
@@ -941,7 +997,29 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                 THEN 1 ELSE 0 
             END) as idle_records,
             
-            -- High altitude (> 3000 ft while moving)
+            -- 2. HIGH RPM: RPM > 1800 causes ~15% extra fuel consumption
+            SUM(CASE 
+                WHEN truck_status = 'MOVING' AND rpm > 1800 AND consumption_gph > 0.5
+                THEN consumption_gph * 0.15
+                ELSE 0 
+            END) as high_rpm_loss_sum,
+            SUM(CASE 
+                WHEN truck_status = 'MOVING' AND rpm > 1800
+                THEN 1 ELSE 0 
+            END) as high_rpm_records,
+            
+            -- 3. SPEEDING: Speed > 70 mph causes ~12% extra fuel consumption
+            SUM(CASE 
+                WHEN truck_status = 'MOVING' AND speed_mph > 70 AND consumption_gph > 0.5
+                THEN consumption_gph * 0.12
+                ELSE 0 
+            END) as speeding_loss_sum,
+            SUM(CASE 
+                WHEN truck_status = 'MOVING' AND speed_mph > 70
+                THEN 1 ELSE 0 
+            END) as speeding_records,
+            
+            -- 4. HIGH ALTITUDE: Altitude > 3000 ft affects efficiency
             SUM(CASE 
                 WHEN truck_status = 'MOVING' AND altitude_ft > 3000 
                 AND mpg_current > 0 AND mpg_current < :baseline_mpg
@@ -996,6 +1074,8 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
             trucks_analysis = []
             totals: Dict[str, float] = {
                 "idle_loss_gal": 0.0,
+                "high_rpm_loss_gal": 0.0,
+                "speeding_loss_gal": 0.0,
                 "altitude_loss_gal": 0.0,
                 "mechanical_loss_gal": 0.0,
                 "total_loss_gal": 0.0,
@@ -1006,7 +1086,7 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
             for row in results:
                 truck_id = row[0]
 
-                # Idle loss
+                # 1. IDLE LOSS (row[1-2])
                 idle_sum = float(row[1] or 0)
                 idle_records = int(row[2] or 0)
                 idle_loss_gal = (
@@ -1015,26 +1095,44 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                     * (idle_sum / idle_records if idle_records > 0 else 0)
                 )
 
-                # Altitude loss
-                altitude_loss_sum = float(row[3] or 0)
-                altitude_records = int(row[4] or 0)
-                altitude_loss_gal = (
-                    altitude_records
-                    * record_interval
-                    * (
-                        altitude_loss_sum / altitude_records
-                        if altitude_records > 0
-                        else 0
-                    )
+                # 2. HIGH RPM LOSS (row[3-4])
+                # SQL already computed: SUM(consumption_gph * 0.15) = total GPH loss rate
+                # We just need to convert GPH to gallons: sum_gph * (1/60) minutes
+                high_rpm_loss_sum = float(row[3] or 0)
+                high_rpm_records = int(row[4] or 0)
+                high_rpm_loss_gal = (
+                    high_rpm_loss_sum * record_interval * high_rpm_records
+                    if high_rpm_records > 0
+                    else 0
                 )
 
-                # Calculate actual vs expected consumption
-                mpg_sum = float(row[5] or 0)
-                mpg_count = int(row[6] or 0)
+                # 3. SPEEDING LOSS (row[5-6])
+                # SQL already computed: SUM(consumption_gph * 0.12) = total GPH loss rate
+                speeding_loss_sum = float(row[5] or 0)
+                speeding_records = int(row[6] or 0)
+                speeding_loss_gal = (
+                    speeding_loss_sum * record_interval * speeding_records
+                    if speeding_records > 0
+                    else 0
+                )
+
+                # 4. ALTITUDE LOSS (row[7-8]) - CHANGED FROM row[3-4]
+                # SQL already computed: SUM((baseline-mpg)/baseline * consumption_gph)
+                altitude_loss_sum = float(row[7] or 0)
+                altitude_records = int(row[8] or 0)
+                altitude_loss_gal = (
+                    altitude_loss_sum * record_interval * altitude_records
+                    if altitude_records > 0
+                    else 0
+                )
+
+                # Calculate actual vs expected consumption (row[9-12]) - CHANGED FROM row[5-8]
+                mpg_sum = float(row[9] or 0)
+                mpg_count = int(row[10] or 0)
                 actual_mpg = mpg_sum / mpg_count if mpg_count > 0 else BASELINE_MPG
 
-                moving_consumption_sum = float(row[7] or 0)
-                moving_records = int(row[8] or 0)
+                moving_consumption_sum = float(row[11] or 0)
+                moving_records = int(row[12] or 0)
                 moving_fuel = (
                     moving_records
                     * record_interval
@@ -1051,11 +1149,16 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                     distance_traveled / BASELINE_MPG if BASELINE_MPG > 0 else 0
                 )
 
-                # Mechanical/driving loss = actual - expected - idle - altitude
+                # 5. MECHANICAL/OTHER LOSS = actual - expected - all other losses
                 total_actual = moving_fuel + idle_loss_gal
                 total_excess = max(0, total_actual - expected_fuel)
                 mechanical_loss_gal = max(
-                    0, total_excess - idle_loss_gal - altitude_loss_gal
+                    0,
+                    total_excess
+                    - idle_loss_gal
+                    - high_rpm_loss_gal
+                    - speeding_loss_gal
+                    - altitude_loss_gal,
                 )
 
                 # Classify truck efficiency
@@ -1069,22 +1172,31 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                     classification = "BAJA"
                     efficiency_status = "Anómala"
 
-                # Determine probable cause
-                if (
-                    idle_loss_gal > altitude_loss_gal
-                    and idle_loss_gal > mechanical_loss_gal
-                ):
-                    probable_cause = "RALENTÍ EXCESIVO"
-                elif altitude_loss_gal > mechanical_loss_gal:
-                    probable_cause = "ALTA ALTITUD"
-                elif mechanical_loss_gal > 0:
-                    probable_cause = "FALLA MECÁNICA/CONDUCCIÓN"
-                else:
+                # Determine probable cause (updated with new categories)
+                max_loss = max(
+                    idle_loss_gal,
+                    high_rpm_loss_gal,
+                    speeding_loss_gal,
+                    altitude_loss_gal,
+                    mechanical_loss_gal,
+                )
+                if max_loss == 0:
                     probable_cause = "N/A"
+                elif idle_loss_gal == max_loss:
+                    probable_cause = "RALENTÍ EXCESIVO"
+                elif high_rpm_loss_gal == max_loss:
+                    probable_cause = "RPM ALTO"
+                elif speeding_loss_gal == max_loss:
+                    probable_cause = "EXCESO DE VELOCIDAD"
+                elif altitude_loss_gal == max_loss:
+                    probable_cause = "ALTA ALTITUD"
+                else:
+                    probable_cause = "FALLA MECÁNICA/CONDUCCIÓN"
 
-                avg_altitude = float(row[9] or 0)
-                avg_speed = float(row[10] or 0)
-                avg_rpm = float(row[11] or 0)
+                # Average metrics (row[13-15]) - CHANGED FROM row[9-11]
+                avg_altitude = float(row[13] or 0)
+                avg_speed = float(row[14] or 0)
+                avg_rpm = float(row[15] or 0)
 
                 truck_analysis = {
                     "truck_id": truck_id,
@@ -1094,16 +1206,31 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                     "actual_mpg": round(actual_mpg, 2),
                     "baseline_mpg": BASELINE_MPG,
                     "idle_loss_gal": round(idle_loss_gal, 2),
+                    "high_rpm_loss_gal": round(high_rpm_loss_gal, 2),
+                    "speeding_loss_gal": round(speeding_loss_gal, 2),
                     "altitude_loss_gal": round(altitude_loss_gal, 2),
                     "mechanical_loss_gal": round(mechanical_loss_gal, 2),
                     "total_loss_gal": round(
-                        idle_loss_gal + altitude_loss_gal + mechanical_loss_gal, 2
+                        idle_loss_gal
+                        + high_rpm_loss_gal
+                        + speeding_loss_gal
+                        + altitude_loss_gal
+                        + mechanical_loss_gal,
+                        2,
                     ),
                     "idle_loss_usd": round(idle_loss_gal * FUEL_PRICE, 2),
+                    "high_rpm_loss_usd": round(high_rpm_loss_gal * FUEL_PRICE, 2),
+                    "speeding_loss_usd": round(speeding_loss_gal * FUEL_PRICE, 2),
                     "altitude_loss_usd": round(altitude_loss_gal * FUEL_PRICE, 2),
                     "mechanical_loss_usd": round(mechanical_loss_gal * FUEL_PRICE, 2),
                     "total_loss_usd": round(
-                        (idle_loss_gal + altitude_loss_gal + mechanical_loss_gal)
+                        (
+                            idle_loss_gal
+                            + high_rpm_loss_gal
+                            + speeding_loss_gal
+                            + altitude_loss_gal
+                            + mechanical_loss_gal
+                        )
                         * FUEL_PRICE,
                         2,
                     ),
@@ -1116,11 +1243,15 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
 
                 # Accumulate totals
                 totals["idle_loss_gal"] += idle_loss_gal
+                totals["high_rpm_loss_gal"] += high_rpm_loss_gal
+                totals["speeding_loss_gal"] += speeding_loss_gal
                 totals["altitude_loss_gal"] += altitude_loss_gal
                 totals["mechanical_loss_gal"] += mechanical_loss_gal
 
             totals["total_loss_gal"] = (
                 totals["idle_loss_gal"]
+                + totals["high_rpm_loss_gal"]
+                + totals["speeding_loss_gal"]
                 + totals["altitude_loss_gal"]
                 + totals["mechanical_loss_gal"]
             )
@@ -1145,6 +1276,20 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                             "usd": round(totals["idle_loss_gal"] * FUEL_PRICE, 2),
                             "percentage": round(
                                 totals["idle_loss_gal"] / total * 100, 1
+                            ),
+                        },
+                        "high_rpm": {
+                            "gallons": round(totals["high_rpm_loss_gal"], 2),
+                            "usd": round(totals["high_rpm_loss_gal"] * FUEL_PRICE, 2),
+                            "percentage": round(
+                                totals["high_rpm_loss_gal"] / total * 100, 1
+                            ),
+                        },
+                        "speeding": {
+                            "gallons": round(totals["speeding_loss_gal"], 2),
+                            "usd": round(totals["speeding_loss_gal"] * FUEL_PRICE, 2),
+                            "percentage": round(
+                                totals["speeding_loss_gal"] / total * 100, 1
                             ),
                         },
                         "altitude": {
@@ -1177,7 +1322,7 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
 
 
 def _empty_loss_response(days: int, price: float) -> Dict[str, Any]:
-    """Return empty loss analysis response"""
+    """Return empty loss analysis response with all 5 categories"""
     return {
         "period_days": days,
         "truck_count": 0,
@@ -1188,6 +1333,8 @@ def _empty_loss_response(days: int, price: float) -> Dict[str, Any]:
             "total_loss_usd": 0,
             "by_cause": {
                 "idle": {"gallons": 0, "usd": 0, "percentage": 0},
+                "high_rpm": {"gallons": 0, "usd": 0, "percentage": 0},
+                "speeding": {"gallons": 0, "usd": 0, "percentage": 0},
                 "altitude": {"gallons": 0, "usd": 0, "percentage": 0},
                 "mechanical": {"gallons": 0, "usd": 0, "percentage": 0},
             },
@@ -4208,6 +4355,43 @@ def get_cost_attribution_report(days_back: int = 30) -> Dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 FLEET HEALTH ALGORITHMS (from 190h refactoring)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def calculate_fleet_health_score(active_dtc_count: int, total_trucks: int) -> float:
+    """
+    Calculate fleet health score based on active DTC count.
+
+    Algorithm from 190h refactoring:
+    - Starts at 100 (perfect health)
+    - Deducts 5 points per active DTC
+    - Normalized by fleet size for fairness
+    - Minimum score: 0
+
+    Args:
+        active_dtc_count: Total number of active DTCs across fleet
+        total_trucks: Total number of trucks in fleet
+
+    Returns:
+        Health score (0-100)
+
+    Example:
+        >>> calculate_fleet_health_score(10, 50)  # 10 DTCs in 50 trucks
+        90.0  # 100 - (10 * 5) / 5 = 90
+    """
+    if total_trucks == 0:
+        return 100.0
+
+    # Penalty: 5 points per DTC, normalized by fleet size
+    # (prevents small fleets from being penalized too heavily)
+    penalty = (active_dtc_count * 5) / max(1, total_trucks / 10)
+    health_score = max(0, 100 - penalty)
+
+    return round(health_score, 1)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 GEOFENCING FUNCTIONS (v3.12.0)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -4238,18 +4422,29 @@ GEOFENCE_ZONES = {
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
     Calculate distance between two GPS coordinates in miles.
-    Uses Haversine formula for great-circle distance.
+    Uses improved Haversine formula for great-circle distance.
+
+    Improved Algorithm (from 190h refactoring):
+    - More accurate asin-based calculation
+    - Better numerical stability for small distances
+    - Standard geodesic formula
     """
-    from math import radians, sin, cos, sqrt, atan2
+    from math import asin, cos, radians, sin, sqrt
 
     R = 3959  # Earth's radius in miles
 
-    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
+    # Convert degrees to radians
+    lat1_rad = radians(lat1)
+    lat2_rad = radians(lat2)
+    delta_lat = radians(lat2 - lat1)
+    delta_lon = radians(lon2 - lon1)
 
-    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    # Haversine formula - improved version
+    a = (
+        sin(delta_lat / 2) ** 2
+        + cos(lat1_rad) * cos(lat2_rad) * sin(delta_lon / 2) ** 2
+    )
+    c = 2 * asin(sqrt(a))
 
     return R * c
 

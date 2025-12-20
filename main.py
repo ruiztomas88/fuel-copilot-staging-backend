@@ -9,31 +9,26 @@ Modern async API with HTTP polling (WebSocket removed for simplicity)
 🆕 v4.0.0: Redis caching, distributed rate limiting, scalability improvements
 """
 
-from contextlib import asynccontextmanager
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Query,
-    Depends,
-    status,
-)
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, FileResponse, Response
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field  # 🆕 v5.5.4: For batch endpoint request model
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import asyncio
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import pandas as pd  # For KPIs calculation
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field  # 🆕 v5.5.4: For batch endpoint request model
 
 # Import centralized settings for VERSION
 from settings import settings
-import pandas as pd  # For KPIs calculation
-from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
@@ -48,11 +43,11 @@ def utc_now() -> datetime:
 # Prometheus metrics
 try:
     from prometheus_client import (
-        Counter,
-        Histogram,
-        Gauge,
-        generate_latest,
         CONTENT_TYPE_LATEST,
+        Counter,
+        Gauge,
+        Histogram,
+        generate_latest,
     )
     from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -64,74 +59,74 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 try:
-    from .models import (
-        FleetSummary,
-        TruckDetail,
-        HistoricalRecord,
-        EfficiencyRanking,
-        Alert,
-        KPIData,
-        HealthCheck,
-        RefuelEvent,
-    )
     from .database import db  # CSV-based database (optimized with 30s updates)
-    from .database_enhanced import (
-        get_raw_sensor_history,
-        get_fuel_consumption_trend,
+    from .database_enhanced import (  # NEW: Enhanced MySQL features
         get_fleet_sensor_status,
-    )  # NEW: Enhanced MySQL features
-except ImportError:
-    from models import (
-        FleetSummary,
-        TruckDetail,
-        HistoricalRecord,
-        EfficiencyRanking,
-        Alert,
-        KPIData,
-        HealthCheck,
-        RefuelEvent,
+        get_fuel_consumption_trend,
+        get_raw_sensor_history,
     )
+    from .models import (
+        Alert,
+        EfficiencyRanking,
+        FleetSummary,
+        HealthCheck,
+        HistoricalRecord,
+        KPIData,
+        RefuelEvent,
+        TruckDetail,
+    )
+except ImportError:
     from database import db  # CSV-based database (optimized with 30s updates)
-    from database_enhanced import (
-        get_raw_sensor_history,
-        get_fuel_consumption_trend,
+    from database_enhanced import (  # NEW: Enhanced MySQL features
         get_fleet_sensor_status,
-    )  # NEW: Enhanced MySQL features
+        get_fuel_consumption_trend,
+        get_raw_sensor_history,
+    )
+    from models import (
+        Alert,
+        EfficiencyRanking,
+        FleetSummary,
+        HealthCheck,
+        HistoricalRecord,
+        KPIData,
+        RefuelEvent,
+        TruckDetail,
+    )
 
 # 🆕 v3.10.8: Authentication module
 try:
     from .auth import (
+        USERS_DB,
+        Token,
+        TokenData,
+        User,
+        UserLogin,
         authenticate_user,
         create_access_token,
         decode_token,
-        get_current_user,
-        require_auth,
-        require_admin,
-        require_super_admin,
-        get_carrier_filter,
         filter_by_carrier,
-        Token,
-        UserLogin,
-        TokenData,
-        User,
-        USERS_DB,
+        get_carrier_filter,
+        get_current_user,
+        require_admin,
+        require_auth,
+        require_super_admin,
     )
 except ImportError:
     from auth import (
+        USERS_DB,
+        Token,
+        TokenData,
+        User,
+        UserLogin,
         authenticate_user,
         create_access_token,
         decode_token,
-        get_current_user,
-        require_auth,
-        require_admin,
-        require_super_admin,
-        get_carrier_filter,
         filter_by_carrier,
-        Token,
-        UserLogin,
-        TokenData,
-        User,
-        USERS_DB,
+        get_carrier_filter,
+        get_current_user,
+        require_admin,
+        require_auth,
+        require_super_admin,
     )
 
 # Redis Cache setup (optional)
@@ -1332,8 +1327,8 @@ async def get_truck_detail(truck_id: str):
     🔧 FIX v3.10.3: Returns basic info if truck exists in config but has no recent data
     🔧 FIX v6.2.2: Improved error handling to prevent 502 errors
     """
-    import pandas as pd
     import numpy as np
+    import pandas as pd
 
     try:
         logger.info(f"[get_truck_detail] Fetching data for {truck_id}")
@@ -1647,6 +1642,7 @@ async def get_truck_sensors_v2(truck_id: str):
     """
     try:
         import pymysql
+
         from database_mysql import get_db_connection
 
         conn = get_db_connection()
@@ -2126,9 +2122,9 @@ async def get_driver_scorecard_endpoint(
     """
     try:
         from database_mysql import (
-            get_driver_scorecard,
             get_driver_score_history,
             get_driver_score_trend,
+            get_driver_scorecard,
         )
         from driver_behavior_engine import generate_coaching_tips
 
@@ -2260,11 +2256,8 @@ async def get_contextualized_mpg_endpoint(
     """
     try:
         from database_mysql import get_kpi_summary
-        from terrain_factor import (
-            get_truck_contextualized_mpg,
-            get_fleet_summary as get_terrain_fleet_summary,
-            get_terrain_manager,
-        )
+        from terrain_factor import get_fleet_summary as get_terrain_fleet_summary
+        from terrain_factor import get_terrain_manager, get_truck_contextualized_mpg
 
         # Get current MPG data for all trucks
         kpi_data = get_kpi_summary(days_back=days)
@@ -2425,24 +2418,24 @@ async def get_enhanced_loss_analysis_endpoint(
     days: int = Query(default=1, ge=1, le=30, description="Days to analyze")
 ):
     """
-    🆕 v3.10.0: Enhanced Loss Analysis with Root Cause Intelligence
+    🆕 v6.3.0: Enhanced Loss Analysis with 5 Root Cause Categories
 
-    Provides detailed breakdown of fuel losses:
-    - EXCESSIVE IDLE: Detailed by patterns and impact
-    - HIGH ALTITUDE: Route-based analysis
-    - RPM ABUSE: High RPM driving patterns
-    - OVERSPEEDING: Speed profile analysis
-    - THERMAL: Coolant temperature issues
+    Provides detailed breakdown of fuel losses by category:
+    1. EXCESSIVE IDLE: truck_status='STOPPED' with engine running (~40%)
+    2. HIGH RPM: RPM > 1800 causing ~15% extra fuel consumption (~20%)
+    3. SPEEDING: Speed > 70 mph causing ~12% extra fuel consumption (~20%)
+    4. HIGH ALTITUDE: Altitude > 3000 ft affecting efficiency (~10%)
+    5. MECHANICAL/OTHER: Remaining efficiency losses (~10%)
 
-    Includes actionable insights with priority and expected ROI
+    Includes per-truck analysis with probable cause and actionable insights.
 
     Returns:
-        Comprehensive loss analysis with recommendations
+        Comprehensive loss analysis with 5-category breakdown and USD impact
     """
     try:
-        from database_mysql import get_enhanced_loss_analysis
+        from database_mysql import get_loss_analysis
 
-        result = get_enhanced_loss_analysis(days_back=days)
+        result = get_loss_analysis(days_back=days)
         return result
 
     except Exception as e:
@@ -2676,8 +2669,9 @@ async def get_fleet_health_summary():
 
         # 🔧 v2.0: Fallback to fuel_metrics data
         # Calculate health from existing fuel_metrics data
-        from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
+
+        from database_mysql import get_sqlalchemy_engine
 
         engine = get_sqlalchemy_engine()
         with engine.connect() as conn:
@@ -3195,8 +3189,9 @@ async def get_predictive_alerts(
     before they become critical problems.
     """
     try:
-        from database_mysql import get_sqlalchemy_engine
         from sqlalchemy import text
+
+        from database_mysql import get_sqlalchemy_engine
 
         # Get current truck data from fuel_metrics
         engine = get_sqlalchemy_engine()
@@ -3299,7 +3294,7 @@ async def get_diagnostics_alerts():
     - Poor GPS quality
     """
     try:
-        from routers.alerts_router import get_diagnostic_alerts, DIAGNOSTICS_AVAILABLE
+        from routers.alerts_router import DIAGNOSTICS_AVAILABLE, get_diagnostic_alerts
 
         if not DIAGNOSTICS_AVAILABLE:
             return {"alerts": [], "message": "Diagnostic modules not available"}
@@ -3374,8 +3369,8 @@ async def get_unified_alerts(
         if include_diagnostics:
             try:
                 from routers.alerts_router import (
-                    get_diagnostic_alerts,
                     DIAGNOSTICS_AVAILABLE,
+                    get_diagnostic_alerts,
                 )
 
                 if DIAGNOSTICS_AVAILABLE:
@@ -6769,9 +6764,10 @@ async def catch_all_routes(full_path: str):
 
 
 if __name__ == "__main__":
-    import uvicorn
     import os
     import sys
+
+    import uvicorn
 
     # 🔧 v5.4.3: Windows-specific asyncio fixes for WinError 64
     if sys.platform == "win32":

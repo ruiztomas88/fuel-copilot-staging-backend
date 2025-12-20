@@ -2,78 +2,45 @@
 source = .
 omit = 
     tests/*
-    test_*.py
-    conftest.py
-    add_idle_gph_column.py
-    analyze_mpg_baseline.py
-    calibrate_mpg_per_truck.py
+    diagnose_*.py
+    audit_*.py
+    compare_*.py
+    extract_*.py
+    manual_*.py
+    quick_*.py
+    UNIVERSAL_*.py
+    *_test.py
+    fuel_analytics_config.py
     check_*.py
     cleanup_*.py
-    create_table.py
-    debug_*.py
-    diagnostic_*.py
-    find_units_map.py
+    analyze_*.py
+    calibrate_*.py
+    add_*.py
+    import_*.py
+    setup_*.py
     migrate_*.py
-    recreate_table.py
-    run_add_idle_columns.py
-    update_units_map.py
-    partition_fuel_metrics.py
-    tools/*
+    script_*.py
+    test_*.py
     wialon_sync_enhanced.py
-    wialon_sync_service.py
-    wialon_to_mysql_sync.py
-    fuel_copilot_v2_1_fixed.py
-    api_v2.py
-    routers.py
-    wialon_config.py
-    theft_detection_engine.py
-    sensor_anomaly.py
-    engine_health_engine.py
-    engine_health_notifications.py
-    daily_reports.py
-    data_export.py
-    audit_log.py
-    api_key_auth.py
-    fuel_cost_tracker.py
-    fuel_stations.py
-    refuel_prediction.py
-    reporter.py
-    user_management.py
-    sse_endpoints.py
-    db_connection.py
-    predictive_maintenance_v3.py
-    database_mysql.py
-    database_pool.py
-    bulk_mysql_handler.py
-    # Routers - need integration tests with real DB
-    routers/*
-    # ML engines - need complex data fixtures  
-    ml_engines/anomaly_detector.py
-    ml_engines/driver_clustering.py
-    # Database modules - need DB connection
-    database.py
-    database_enhanced.py
-    db/*
-    # Wialon integration
     wialon_reader.py
-    # Main FastAPI app entry - hard to unit test
-    main.py
-    # Other complex modules
+    theft_detection_engine.py
     v5_endpoints.py
-    idle_kalman_filter.py
-    field_normalizer.py
-    get_correct_mapping.py
-    get_tanks_trucks.py
-    # Alert system - complex async
-    alert_system.py
-
+    
 [report]
-exclude_lines =
-    pragma: no cover
-    def __repr__
-    raise NotImplementedError
-    if __name__ == .__main__.:
-    if TYPE_CHECKING:
-    pass
-
-show_missing = true
+precision = 2
+show_missing = True
+include = 
+    fleet_command_center.py
+    predictive_maintenance_engine.py
+    alert_service.py
+    api_v2.py
+    database_mysql.py
+    main.py
+    driver_scoring_engine.py
+    real_time_predictive_engine.py
+    sensor_health.py
+    sensor_history.py
+    mpg_baseline_engine.py
+    component_health_predictors.py
+    dtc_analyzer.py
+    def_predictor.py
