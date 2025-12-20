@@ -4363,6 +4363,7 @@ class FleetCommandCenter:
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
                 # Get active DTCs from last 48 hours
+                # 🔧 FIX Dec 20 2025: Tabla dtc_events no tiene columna 'status', usar cleared_at IS NULL
                 result = conn.execute(
                     text(
                         """
@@ -4370,7 +4371,7 @@ class FleetCommandCenter:
                             truck_id, dtc_code, severity, system, 
                             description, recommended_action, timestamp_utc
                         FROM dtc_events
-                        WHERE status = 'ACTIVE' 
+                        WHERE cleared_at IS NULL
                         AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 48 HOUR)
                         ORDER BY 
                             FIELD(severity, 'CRITICAL', 'WARNING', 'INFO'),

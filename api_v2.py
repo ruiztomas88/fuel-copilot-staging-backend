@@ -2122,6 +2122,23 @@ async def get_mpg_context(
         }
 
     except Exception as e:
+        error_msg = str(e)
+        # 🔧 FIX Dec 20 2025: Manejar tabla trip_data no existente
+        if "trip_data" in error_msg and "doesn't exist" in error_msg:
+            logger.warning(f"Table trip_data not found - MPG context not available for {truck_id}")
+            return {
+                "truck_id": truck_id,
+                "contexts": [],
+                "summary": {
+                    "period_days": days,
+                    "trip_count": 0,
+                    "avg_expected_mpg": None,
+                    "avg_actual_mpg": None,
+                    "performance_vs_expected": None,
+                },
+                "message": "MPG context analysis requires trip_data table (feature not yet available)",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
         logger.error(f"Failed to get MPG context for {truck_id}: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to get MPG context: {str(e)}"
