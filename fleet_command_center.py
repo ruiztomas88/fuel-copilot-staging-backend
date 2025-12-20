@@ -4363,58 +4363,61 @@ class FleetCommandCenter:
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
                 # Get active DTCs from last 48 hours
-                # 🔧 FIX Dec 20 2025: Tabla dtc_events no tiene columna 'status', usar cleared_at IS NULL
+                # 🔧 FIX Dec 20 2025: Usar columnas reales (component, action_required)
                 result = conn.execute(
                     text(
                         """
                         SELECT DISTINCT
-                            truck_id, dtc_code, severity, system, 
-                            description, recommended_action, timestamp_utc
+                            truck_id, dtc_code, severity, component, 
+                            description, action_required, detected_at
                         FROM dtc_events
                         WHERE cleared_at IS NULL
-                        AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 48 HOUR)
+                        AND detected_at > DATE_SUB(NOW(), INTERVAL 48 HOUR)
                         ORDER BY 
-                            FIELD(severity, 'CRITICAL', 'WARNING', 'INFO'),
-                            timestamp_utc DESC
-                        LIMIT 30
+                            FIELD(severity, 'critical', 'high', 'medium', 'low'),
+                            detected_at DESC
+                        LIMIT 50
                     """
                     )
                 )
                 dtc_rows = result.fetchall()
 
                 for dtc in dtc_rows:
-                    truck_id, dtc_code, severity, system = dtc[:4]
+                    truck_id, dtc_code, severity, component = dtc[:4]
                     description, recommended_action, timestamp = dtc[4:7]
 
-                    # Map severity to priority
+                    # Map severity to priority (lowercase from DB)
                     priority_map = {
-                        "CRITICAL": Priority.CRITICAL,
-                        "WARNING": Priority.HIGH,
-                        "INFO": Priority.MEDIUM,
+                        "critical": Priority.CRITICAL,
+                        "high": Priority.HIGH,
+                        "medium": Priority.MEDIUM,
+                        "low": Priority.LOW,
                     }
-                    priority = priority_map.get(severity, Priority.MEDIUM)
+                    priority = priority_map.get(str(severity).lower(), Priority.MEDIUM)
 
                     # Calculate priority score
                     score_map = {
                         Priority.CRITICAL: 95,
                         Priority.HIGH: 75,
                         Priority.MEDIUM: 55,
+                        Priority.LOW: 35,
                     }
                     score = score_map.get(priority, 55)
 
-                    # Map system to category
-                    system_category_map = {
-                        "ENGINE": IssueCategory.ENGINE,
-                        "TRANSMISSION": IssueCategory.TRANSMISSION,
-                        "AFTERTREATMENT": IssueCategory.ENGINE,
-                        "ELECTRICAL": IssueCategory.ELECTRICAL,
-                        "FUEL": IssueCategory.FUEL,
-                        "BRAKE": IssueCategory.BRAKES,
-                        "BRAKES": IssueCategory.BRAKES,
-                    }
-                    issue_cat = system_category_map.get(
-                        (system or "").upper(), IssueCategory.ENGINE
-                    )
+                    # Map component to category
+                    component_str = str(component or "").upper()
+                    if any(x in component_str for x in ["ENGINE", "MOTOR", "COOLANT", "OIL"]):
+                        issue_cat = IssueCategory.ENGINE
+                    elif "TRANS" in component_str:
+                        issue_cat = IssueCategory.TRANSMISSION
+                    elif any(x in component_str for x in ["ELECTRIC", "BATTERY", "VOLTAGE"]):
+                        issue_cat = IssueCategory.ELECTRICAL
+                    elif any(x in component_str for x in ["FUEL", "DEF"]):
+                        issue_cat = IssueCategory.FUEL
+                    elif "BRAKE" in component_str:
+                        issue_cat = IssueCategory.BRAKES
+                    else:
+                        issue_cat = IssueCategory.ENGINE
 
                     action_items.append(
                         ActionItem(
@@ -4423,9 +4426,9 @@ class FleetCommandCenter:
                             priority=priority,
                             priority_score=score,
                             category=issue_cat,
-                            component=f"DTC {dtc_code}",
-                            title=f"[DTC] {dtc_code} - {system or 'Unknown System'}",
-                            description=description or f"DTC code {dtc_code} detected",
+                            component=component or f"DTC {dtc_code}",
+                            title=f"[DTC] {dtc_code} - {component or 'Sistema Desconocido'}",
+                            description=description or f"Código DTC {dtc_code} detectado",
                             days_to_critical=None,
                             cost_if_ignored=None,
                             current_value=None,
