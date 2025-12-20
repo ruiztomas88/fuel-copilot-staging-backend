@@ -18,7 +18,9 @@ class TestAlertComplete:
         Alert(AlertType.SENSOR_OFFLINE, AlertPriority.MEDIUM, "GS5034", "Test")
         Alert(AlertType.DTC_ALERT, AlertPriority.HIGH, "GS5035", "Test")
         Alert(AlertType.VOLTAGE_ALERT, AlertPriority.LOW, "GS5036", "Test")
-        Alert(AlertType.MAINTENANCE_PREDICTION, AlertPriority.CRITICAL, "GS5037", "Test")
+        Alert(
+            AlertType.MAINTENANCE_PREDICTION, AlertPriority.CRITICAL, "GS5037", "Test"
+        )
         Alert(AlertType.LOW_FUEL, AlertPriority.MEDIUM, "GS5038", "Test")
         Alert(AlertType.EFFICIENCY_DROP, AlertPriority.LOW, "GS5039", "Test")
         Alert(AlertType.MAINTENANCE_DUE, AlertPriority.MEDIUM, "GS5040", "Test")

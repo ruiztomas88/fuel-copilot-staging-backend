@@ -58,7 +58,7 @@ print(f"      Coolant: {row[4]:,} ({row[4]/total*100:.1f}%)")
 print("\n2️⃣ DTCs")
 cursor.execute("SELECT COUNT(*) FROM dtc_events")
 total_dtcs = cursor.fetchone()[0]
-cursor.execute("SELECT COUNT(*) FROM dtc_events WHERE cleared_at IS NULL")
+cursor.execute("SELECT COUNT(*) FROM dtc_events WHERE status = 'ACTIVE'")
 active_dtcs = cursor.fetchone()[0]
 print(f"   Total DTCs: {total_dtcs}")
 print(f"   Active DTCs: {active_dtcs}")
@@ -67,7 +67,7 @@ if active_dtcs > 0:
     cursor.execute("""
         SELECT truck_id, dtc_code, severity, component
         FROM dtc_events
-        WHERE cleared_at IS NULL
+        WHERE status = 'ACTIVE'
         ORDER BY timestamp_utc DESC
         LIMIT 5
     """)
@@ -85,7 +85,7 @@ if refuels > 0:
     cursor.execute("""
         SELECT SUM(gallons_added), COUNT(DISTINCT truck_id)
         FROM refuel_events
-        WHERE refuel_time > DATE_SUB(NOW(), INTERVAL 7 DAY)
+        WHERE timestamp_utc > DATE_SUB(NOW(), INTERVAL 7 DAY)
     """)
     row = cursor.fetchone()
     print(f"   Last 7 days: {row[0] or 0:.1f} gallons, {row[1] or 0} trucks")

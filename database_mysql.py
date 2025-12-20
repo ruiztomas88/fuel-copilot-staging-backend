@@ -606,12 +606,12 @@ def get_fleet_summary() -> Dict[str, Any]:
 
                 # 🆕 Calculate health score from active DTCs
                 # Query for active DTCs count
-                # 🔧 FIX Dec 20 2025: Tabla dtc_events no tiene columna 'status', usar cleared_at IS NULL
+                # 🔧 FIX Dec 20 2025: Tabla dtc_events tiene columna 'status', usar status = 'ACTIVE'
                 dtc_query = text(
                     """
                     SELECT COUNT(DISTINCT CONCAT(truck_id, '-', dtc_code))
                     FROM dtc_events
-                    WHERE cleared_at IS NULL
+                    WHERE status = 'ACTIVE'
                       AND truck_id IN ({})
                 """.format(
                         ",".join(f"'{t}'" for t in allowed_trucks)

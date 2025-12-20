@@ -4363,19 +4363,19 @@ class FleetCommandCenter:
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
                 # Get active DTCs from last 48 hours
-                # 🔧 FIX Dec 20 2025: Usar columnas reales (component, action_required)
+                # 🔧 FIX Dec 20 2025: Usar columnas reales (component, action_required, status)
                 result = conn.execute(
                     text(
                         """
                         SELECT DISTINCT
                             truck_id, dtc_code, severity, component, 
-                            description, action_required, detected_at
+                            description, action_required, timestamp_utc as detected_at
                         FROM dtc_events
-                        WHERE cleared_at IS NULL
-                        AND detected_at > DATE_SUB(NOW(), INTERVAL 48 HOUR)
+                        WHERE status = 'ACTIVE'
+                        AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 48 HOUR)
                         ORDER BY 
                             FIELD(severity, 'critical', 'high', 'medium', 'low'),
-                            detected_at DESC
+                            timestamp_utc DESC
                         LIMIT 50
                     """
                     )

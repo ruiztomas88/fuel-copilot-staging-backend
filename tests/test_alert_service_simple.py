@@ -29,7 +29,7 @@ class TestAlertCreation:
             alert_type=AlertType.THEFT_CONFIRMED,
             priority=AlertPriority.CRITICAL,
             truck_id="DO9693",
-            message="Critical oil pressure"
+            message="Critical oil pressure",
         )
         assert alert.truck_id == "DO9693"
         assert alert.priority == AlertPriority.CRITICAL
@@ -40,7 +40,7 @@ class TestAlertCreation:
             alert_type=AlertType.THEFT_SUSPECTED,
             priority=AlertPriority.HIGH,
             truck_id="FF7702",
-            message="Harsh braking detected"
+            message="Harsh braking detected",
         )
         assert alert.priority == AlertPriority.HIGH
 
@@ -50,7 +50,7 @@ class TestAlertCreation:
             alert_type=AlertType.SENSOR_ISSUE,
             priority=AlertPriority.MEDIUM,
             truck_id="GS5030",
-            message="Fuel efficiency declining"
+            message="Fuel efficiency declining",
         )
         assert alert.priority == AlertPriority.MEDIUM
 
@@ -60,7 +60,7 @@ class TestAlertCreation:
             alert_type=AlertType.MAINTENANCE_DUE,
             priority=AlertPriority.LOW,
             truck_id="GS5032",
-            message="Maintenance due soon"
+            message="Maintenance due soon",
         )
         assert alert.priority == AlertPriority.LOW
 
