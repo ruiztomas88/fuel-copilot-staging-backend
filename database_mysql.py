@@ -1131,14 +1131,22 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                 calculated_miles = float(row[9] or 0)
                 moving_fuel_consumed = float(row[10] or 0)
                 moving_records = int(row[11] or 0)
-                
+
                 # Calculate actual MPG from miles/fuel
-                actual_mpg = calculated_miles / moving_fuel_consumed if moving_fuel_consumed > 0 else BASELINE_MPG
+                actual_mpg = (
+                    calculated_miles / moving_fuel_consumed
+                    if moving_fuel_consumed > 0
+                    else BASELINE_MPG
+                )
                 if actual_mpg < 3 or actual_mpg > 12:
                     actual_mpg = BASELINE_MPG
 
                 # Expected fuel at baseline MPG
-                expected_fuel = calculated_miles / BASELINE_MPG if BASELINE_MPG > 0 and calculated_miles > 0 else 0
+                expected_fuel = (
+                    calculated_miles / BASELINE_MPG
+                    if BASELINE_MPG > 0 and calculated_miles > 0
+                    else 0
+                )
 
                 # 5. MECHANICAL/OTHER LOSS = actual - expected - all other losses
                 total_actual = moving_fuel_consumed + idle_loss_gal
@@ -3102,7 +3110,7 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
                 # row[8] = rpm
                 # row[9] = odometer_mi
                 # row[10] = consumption_gph
-                
+
                 prev_pct = float(row[11] or 0)  # LAG(estimated_pct)
                 prev_gal = float(row[12] or 0)  # LAG(estimated_gallons)
                 prev_sensor_pct = row[13]  # LAG(sensor_pct) - Can be NULL
@@ -3245,9 +3253,15 @@ def get_fuel_theft_analysis(days_back: int = 7) -> Dict[str, Any]:
 
                 # 🆕 v3.12.27: CHECK FOR RECOVERY - If fuel recovers, it's a SENSOR ISSUE not theft
                 # Look at the next 3 readings to see if fuel recovered
-                next_pct_1 = float(row[18] or 0) if row[18] else None  # LEAD(estimated_pct, 1)
-                next_pct_2 = float(row[19] or 0) if row[19] else None  # LEAD(estimated_pct, 2)
-                next_pct_3 = float(row[20] or 0) if row[20] else None  # LEAD(estimated_pct, 3)
+                next_pct_1 = (
+                    float(row[18] or 0) if row[18] else None
+                )  # LEAD(estimated_pct, 1)
+                next_pct_2 = (
+                    float(row[19] or 0) if row[19] else None
+                )  # LEAD(estimated_pct, 2)
+                next_pct_3 = (
+                    float(row[20] or 0) if row[20] else None
+                )  # LEAD(estimated_pct, 3)
                 next_ts_1 = row[21]  # LEAD(timestamp_utc, 1)
                 next_ts_2 = row[22]  # LEAD(timestamp_utc, 2)
                 next_ts_3 = row[23]  # LEAD(timestamp_utc, 3)

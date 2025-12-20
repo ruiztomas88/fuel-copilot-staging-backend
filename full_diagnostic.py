@@ -2,31 +2,34 @@
 """
 Diagnóstico completo del sistema - verificar TODAS las funcionalidades
 """
-import pymysql
 from datetime import datetime
+
+import pymysql
 
 print("=" * 80)
 print("🔍 DIAGNÓSTICO COMPLETO DEL SISTEMA")
 print("=" * 80)
 
 conn = pymysql.connect(
-    host='localhost',
-    user='fuel_admin',
-    password='FuelCopilot2025!',
-    database='fuel_copilot'
+    host="localhost",
+    user="fuel_admin",
+    password="FuelCopilot2025!",
+    database="fuel_copilot",
 )
 cursor = conn.cursor()
 
 # 1. FUEL_METRICS - datos básicos
 print("\n1️⃣ FUEL_METRICS")
-cursor.execute("""
+cursor.execute(
+    """
     SELECT 
         COUNT(*) as total,
         COUNT(DISTINCT truck_id) as trucks,
         MAX(timestamp_utc) as latest,
         MIN(timestamp_utc) as oldest
     FROM fuel_metrics
-""")
+"""
+)
 row = cursor.fetchone()
 print(f"   Total records: {row[0]:,}")
 print(f"   Trucks: {row[1]}")
@@ -34,7 +37,8 @@ print(f"   Latest: {row[2]}")
 print(f"   Oldest: {row[3]}")
 
 # Verificar columnas críticas
-cursor.execute("""
+cursor.execute(
+    """
     SELECT 
         COUNT(CASE WHEN rpm IS NOT NULL AND rpm > 0 THEN 1 END) as has_rpm,
         COUNT(CASE WHEN speed_mph IS NOT NULL THEN 1 END) as has_speed,
@@ -44,7 +48,8 @@ cursor.execute("""
         COUNT(*) as total
     FROM fuel_metrics
     WHERE timestamp_utc > DATE_SUB(NOW(), INTERVAL 24 HOUR)
-""")
+"""
+)
 row = cursor.fetchone()
 total = row[5]
 print(f"\n   📊 Datos últimas 24h ({total:,} records):")
@@ -64,13 +69,15 @@ print(f"   Total DTCs: {total_dtcs}")
 print(f"   Active DTCs: {active_dtcs}")
 
 if active_dtcs > 0:
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT truck_id, dtc_code, severity, component
         FROM dtc_events
         WHERE status = 'ACTIVE'
         ORDER BY timestamp_utc DESC
         LIMIT 5
-    """)
+    """
+    )
     print("\n   🔴 Top 5 Active DTCs:")
     for row in cursor.fetchall():
         print(f"      {row[0]}: {row[1]} ({row[2]}) - {row[3]}")
@@ -82,17 +89,20 @@ refuels = cursor.fetchone()[0]
 print(f"   Total refuels: {refuels}")
 
 if refuels > 0:
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT SUM(gallons_added), COUNT(DISTINCT truck_id)
         FROM refuel_events
         WHERE timestamp_utc > DATE_SUB(NOW(), INTERVAL 7 DAY)
-    """)
+    """
+    )
     row = cursor.fetchone()
     print(f"   Last 7 days: {row[0] or 0:.1f} gallons, {row[1] or 0} trucks")
 
 # 4. LOSS ANALYSIS Test
 print("\n4️⃣ LOSS ANALYSIS")
-cursor.execute("""
+cursor.execute(
+    """
     SELECT 
         COUNT(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN 1 END) as idle_events,
         SUM(CASE WHEN truck_status = 'STOPPED' AND consumption_gph > 0.3 THEN consumption_gph ELSE 0 END) as idle_gph,
@@ -102,7 +112,8 @@ cursor.execute("""
         COUNT(CASE WHEN coolant_temp_f > 220 THEN 1 END) as overheat_events
     FROM fuel_metrics
     WHERE timestamp_utc > DATE_SUB(NOW(), INTERVAL 1 DAY)
-""")
+"""
+)
 row = cursor.fetchone()
 print(f"   Idle events (>0.3 GPH stopped): {row[0]:,}")
 print(f"   Total idle GPH: {row[1]:.1f}")
@@ -113,7 +124,7 @@ print(f"   Overheating (>220°F): {row[5]:,}")
 
 # 5. TABLAS FALTANTES
 print("\n5️⃣ TABLAS CRÍTICAS")
-critical_tables = ['daily_truck_metrics', 'trip_data', 'fleet_summary']
+critical_tables = ["daily_truck_metrics", "trip_data", "fleet_summary"]
 cursor.execute("SHOW TABLES")
 existing = [row[0] for row in cursor.fetchall()]
 

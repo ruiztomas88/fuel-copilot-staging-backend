@@ -3,10 +3,11 @@ Cost Analysis Router - v4.0
 Cost per mile and speed impact analysis endpoints
 """
 
-from fastapi import APIRouter, Query, HTTPException
-from typing import Optional, Any
 import logging
 import math
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +41,11 @@ async def get_fleet_cost_per_mile(
         Fleet-wide cost analysis with individual truck breakdowns
     """
     try:
-        from cost_per_mile_engine import CostPerMileEngine
-        from database_mysql import get_sqlalchemy_engine
-        from database import db
         from sqlalchemy import text
+
+        from cost_per_mile_engine import CostPerMileEngine
+        from database import db
+        from database_mysql import get_sqlalchemy_engine
 
         logger.info(f"Starting cost per mile analysis for {days} days")
 
@@ -213,9 +215,10 @@ async def get_truck_cost_per_mile(
         Detailed cost breakdown and comparison for the specified truck
     """
     try:
+        from sqlalchemy import text
+
         from cost_per_mile_engine import CostPerMileEngine
         from database_mysql import get_sqlalchemy_engine
-        from sqlalchemy import text
 
         engine = get_sqlalchemy_engine()
         cpm_engine = CostPerMileEngine()
@@ -248,12 +251,12 @@ async def get_truck_cost_per_mile(
         gallons = float(row[1] or 0)
         idle_gallons = float(row[2] or 0)
         total_records = int(row[3] or 0)
-        
+
         # Calculate MPG from actual data
         avg_mpg = miles / gallons if gallons > 0 and miles > 0 else 6.0
         if avg_mpg < 3 or avg_mpg > 12:
             avg_mpg = 6.0
-        
+
         # Estimate engine hours: total_records * 15 seconds / 3600
         engine_hours = total_records * 15 / 3600
 

@@ -397,6 +397,7 @@ except ImportError:
 # 🔧 v6.3.1: Register Cost Analysis Router
 try:
     from routers.cost_router import router as cost_router
+
     app.include_router(cost_router)
     logger.info("✅ Cost Analysis router registered")
 except ImportError as e:
