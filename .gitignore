@@ -20,6 +20,12 @@ data/truck_cache/
 
 # Backup files
 *.backup
+backups/*.sql
+backups/*.sql.gz
+temp_backup_before_pull/
+
+# Cache files
+cache/fleet_sensors.json
 
 # Local utility scripts
 verify_status.py
