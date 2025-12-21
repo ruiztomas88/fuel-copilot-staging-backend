@@ -203,8 +203,13 @@ class MPGConfig:
     for a reasonable calculation. Trade-off: slightly more variance in readings.
     """
 
-    min_miles: float = 5.0  # 🔧 v3.12.18: Reduced from 10.0 for faster updates
-    min_fuel_gal: float = 0.75  # 🔧 v3.12.18: Reduced from 1.5 proportionally
+    # 🔧 v5.18.0 FIX #2: Ajustar thresholds para balance óptimo
+    # De 5.0mi/0.75gal (muy frecuente, mucho ruido) → 8.0mi/1.2gal
+    # Esto permite calcular MPG más frecuentemente sin exceso de varianza
+    min_miles: float = (
+        8.0  # 🔧 v5.18.0: Balance frecuencia/precisión (fue 5.0 en v3.12.18)
+    )
+    min_fuel_gal: float = 1.2  # 🔧 v5.18.0: Ajustado proporcionalmente (fue 0.75)
 
     # Physical limits for Class 8 trucks (realistic ranges)
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
