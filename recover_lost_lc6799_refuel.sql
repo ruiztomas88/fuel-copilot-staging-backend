@@ -18,29 +18,23 @@ SELECT
     COUNT(*) as count
 FROM refuel_events
 WHERE truck_id = 'LC6799'
-  AND timestamp_utc BETWEEN '2025-12-20 18:20:00' AND '2025-12-20 18:30:00';
+  AND refuel_time BETWEEN '2025-12-20 18:20:00' AND '2025-12-20 18:30:00';
 
 -- Insert the lost refuel
 INSERT INTO refuel_events (
     truck_id,
-    timestamp_utc,
-    fuel_before,
-    fuel_after,
+    refuel_time,
+    before_pct,
+    after_pct,
     gallons_added,
-    latitude,
-    longitude,
-    refuel_type,
-    notes
+    refuel_type
 ) VALUES (
     'LC6799',
     '2025-12-20 18:25:56',
     66.0,
     92.8,
     53.6,
-    NULL,  -- Location data was not captured
-    NULL,
-    'MANUAL_RECOVERY',
-    'v5.17.1: Recovered lost refuel - detected by Kalman but not saved due to pending buffer bug'
+    'MANUAL_RECOVERY'
 );
 
 -- Verify insertion
@@ -48,25 +42,24 @@ SELECT
     'AFTER INSERT - Should be 1 row:' as check_type,
     id,
     truck_id,
-    timestamp_utc,
-    fuel_before,
-    fuel_after,
+    refuel_time,
+    before_pct,
+    after_pct,
     gallons_added,
-    refuel_type,
-    notes
+    refuel_type
 FROM refuel_events
 WHERE truck_id = 'LC6799'
-  AND timestamp_utc BETWEEN '2025-12-20 18:20:00' AND '2025-12-20 18:30:00';
+  AND refuel_time BETWEEN '2025-12-20 18:20:00' AND '2025-12-20 18:30:00';
 
 -- Show LC6799 refuel history
 SELECT 
     'LC6799 REFUEL HISTORY:' as info,
     id,
     timestamp_utc,
-    CONCAT(fuel_before, '% → ', fuel_after, '%') as fuel_change,
+    refuel_time,
+    CONCAT(before_pct, '% → ', after_pct, '%') as fuel_change,
     CONCAT('+', gallons_added, ' gal') as volume,
     refuel_type
 FROM refuel_events
 WHERE truck_id = 'LC6799'
-ORDER BY timestamp_utc DESC
-LIMIT 10;
+ORDER BY refuel_time
