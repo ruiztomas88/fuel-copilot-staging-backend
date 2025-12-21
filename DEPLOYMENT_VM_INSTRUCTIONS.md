@@ -35,6 +35,17 @@ pip show fastapi uvicorn mysql-connector-python requests
 
 ## 🔧 Pasos de Deployment Backend
 
+### Paso 0: Limpiar caché de Python (CRÍTICO)
+```bash
+# IMPORTANTE: Eliminar __pycache__ ANTES del pull para evitar errores
+find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null
+find . -type f -name "*.pyc" -delete 2>/dev/null
+
+# En Windows PowerShell:
+Get-ChildItem -Path . -Filter __pycache__ -Recurse -Directory | Remove-Item -Recurse -Force
+Get-ChildItem -Path . -Filter *.pyc -Recurse | Remove-Item -Force
+```
+
 ### Paso 1: Pull del código
 ```bash
 cd /ruta/al/backend
