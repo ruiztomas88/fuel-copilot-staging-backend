@@ -2799,8 +2799,10 @@ def sync_cycle(
             status = metrics["truck_status"]
             status_counts[status] = status_counts.get(status, 0) + 1
 
-            # Handle refuel detection - buffer consecutive jumps
-            # 🆕 v3.12.20: Use pending buffer to consolidate multi-jump refuels
+            # Handle refuel detection - SAVE IMMEDIATELY
+            # 🔧 v5.17.1: Save refuel immediately instead of buffering
+            # Previous approach used add_pending_refuel() which waited 15 min
+            # This caused data loss when service restarted or errors occurred
             if metrics.get("refuel_detected") == "YES" and metrics.get("refuel_event"):
                 refuel_count += 1
                 refuel_evt = metrics["refuel_event"]
@@ -2810,37 +2812,41 @@ def sync_cycle(
                 fuel_after = metrics.get("sensor_pct") or 0
                 gallons_added = refuel_evt.get("increase_gal", 0)
 
-                # Add to pending buffer instead of saving immediately
-                finalized = add_pending_refuel(
-                    truck_id=truck_id,
-                    gallons=gallons_added,
-                    before_pct=fuel_before,
-                    after_pct=fuel_after,
-                    timestamp=metrics["timestamp_utc"],
-                )
-
-                # If a previous refuel was finalized, save and notify
-                if finalized:
-                    # 🔧 v3.12.28: Only notify if save was successful (not duplicate)
+                # 🔧 v5.17.1: Save immediately to prevent data loss
+                try:
                     was_saved = save_refuel_event(
                         connection=local_conn,
-                        truck_id=finalized["truck_id"],
-                        timestamp_utc=finalized["timestamp"],
-                        fuel_before=finalized["start_pct"],
-                        fuel_after=finalized["end_pct"],
-                        gallons_added=finalized["gallons"],
+                        truck_id=truck_id,
+                        timestamp_utc=metrics["timestamp_utc"],
+                        fuel_before=fuel_before,
+                        fuel_after=fuel_after,
+                        gallons_added=gallons_added,
                         latitude=metrics.get("latitude"),
                         longitude=metrics.get("longitude"),
-                        refuel_type="GAP_DETECTED",
+                        refuel_type="DETECTED",
                     )
                     if was_saved:
-                        send_refuel_notification(
-                            truck_id=finalized["truck_id"],
-                            gallons_added=finalized["gallons"],
-                            fuel_before=finalized["start_pct"],
-                            fuel_after=finalized["end_pct"],
-                            timestamp_utc=finalized["timestamp"],
+                        logger.info(
+                            f"✅ [{truck_id}] Refuel SAVED: "
+                            f"{fuel_before:.1f}% → {fuel_after:.1f}% "
+                            f"(+{gallons_added:.1f} gal)"
                         )
+                        # Send notification for successfully saved refuels
+                        send_refuel_notification(
+                            truck_id=truck_id,
+                            gallons_added=gallons_added,
+                            fuel_before=fuel_before,
+                            fuel_after=fuel_after,
+                            timestamp_utc=metrics["timestamp_utc"],
+                        )
+                    else:
+                        logger.warning(
+                            f"⚠️ [{truck_id}] Refuel detected but not saved (likely duplicate)"
+                        )
+                except Exception as e:
+                    logger.error(f"❌ [{truck_id}] Error saving refuel: {e}")
+                    import traceback
+                    traceback.print_exc()
 
                 # 🆕 v3.12.27: Process fuel events with intelligent classification
                 # This differentiates THEFT from SENSOR_ISSUE by monitoring recovery
@@ -2969,9 +2975,9 @@ def sync_cycle(
 
             traceback.print_exc()
 
-    # 🆕 v3.12.20: Flush any stale pending refuels (older than 15 min)
-    # 🔧 v3.12.28: Only notify if save was successful (not duplicate)
-    stale_refuels = flush_stale_pending_refuels(max_age_minutes=15)
+    # 🔧 v5.17.1: Reduced timeout since refuels are now saved immediately
+    # This is just a safety net for backwards compatibility
+    stale_refuels = flush_stale_pending_refuels(max_age_minutes=2)
     for finalized in stale_refuels:
         try:
             was_saved = save_refuel_event(
