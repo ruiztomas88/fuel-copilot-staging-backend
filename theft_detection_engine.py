@@ -803,9 +803,12 @@ def get_sensor_health_fast(
             # Drop is 2x faster than physically possible = sensor noise
             volatility_score = max(volatility_score, 35.0)
 
-    # Heuristic 3: Drop exactly to round numbers often indicates sensor reset
-    if fuel_after_pct in [0, 10, 20, 25, 50, 75, 100]:
-        volatility_score = max(volatility_score, 20.0)
+    # Heuristic 3: Drop exactly to round numbers MAY indicate sensor reset (reduced from 20 to 8)
+    # Only flag 0%, 25%, 50%, 75%, 100% - multiples of 10% are too common in normal operations
+    if fuel_after_pct in [0, 25, 50, 75, 100]:
+        volatility_score = max(
+            volatility_score, 8.0
+        )  # Reduced from 20 to minimize false positives
 
     return SensorHealth(
         is_connected=True,

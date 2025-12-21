@@ -419,6 +419,29 @@ class FuelEventClassifier:
         """Get all pending drops awaiting classification"""
         return list(self._pending_drops.values())
 
+    def cleanup_stale_drops(self, max_age_hours: float = 24.0):
+        """
+        Remove pending drops older than max_age_hours to prevent memory leaks.
+        Called periodically for inactive trucks that never get recovery checks.
+        """
+        cutoff_minutes = max_age_hours * 60
+        stale_trucks = [
+            truck_id
+            for truck_id, pending in self._pending_drops.items()
+            if pending.age_minutes() > cutoff_minutes
+        ]
+
+        for truck_id in stale_trucks:
+            pending = self._pending_drops[truck_id]
+            logger.info(
+                f"🧹 Cleaning stale drop for {truck_id}: "
+                f"{pending.drop_pct:.1f}% drop from {pending.age_minutes()/60:.1f}h ago"
+            )
+            del self._pending_drops[truck_id]
+
+        if stale_trucks:
+            logger.info(f"🧹 Cleaned {len(stale_trucks)} stale pending drops")
+
     def force_classify_pending(
         self, truck_id: str, current_fuel_pct: float
     ) -> Optional[Dict]:

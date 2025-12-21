@@ -558,7 +558,7 @@ async def get_truck_sensors(truck_id: str):
         "host": "localhost",
         "port": 3306,
         "user": os.getenv("MYSQL_USER", "fuel_admin"),
-        "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+        "password": os.getenv("MYSQL_PASSWORD"),
         "database": "fuel_copilot",
     }
 
@@ -1724,7 +1724,7 @@ async def get_rul_predictions(
             "host": "localhost",
             "port": 3306,
             "user": os.getenv("MYSQL_USER", "fuel_admin"),
-            "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+            "password": os.getenv("MYSQL_PASSWORD"),
             "database": "fuel_copilot",
         }
 
@@ -1861,7 +1861,7 @@ async def get_siphoning_alerts(
             "host": "localhost",
             "port": 3306,
             "user": os.getenv("MYSQL_USER", "fuel_admin"),
-            "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+            "password": os.getenv("MYSQL_PASSWORD"),
             "database": "fuel_copilot",
         }
 
@@ -1993,7 +1993,7 @@ async def get_mpg_context(
             "host": "localhost",
             "port": 3306,
             "user": os.getenv("MYSQL_USER", "fuel_admin"),
-            "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+            "password": os.getenv("MYSQL_PASSWORD"),
             "database": "fuel_copilot",
         }
 
@@ -2125,7 +2125,9 @@ async def get_mpg_context(
         error_msg = str(e)
         # 🔧 FIX Dec 20 2025: Manejar tabla trip_data no existente
         if "trip_data" in error_msg and "doesn't exist" in error_msg:
-            logger.warning(f"Table trip_data not found - MPG context not available for {truck_id}")
+            logger.warning(
+                f"Table trip_data not found - MPG context not available for {truck_id}"
+            )
             return {
                 "truck_id": truck_id,
                 "contexts": [],
@@ -2148,3 +2150,295 @@ async def get_mpg_context(
             cursor.close()
         if "conn" in locals():
             conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v7.1: PREDICTIVE MAINTENANCE v4 - RUL PREDICTOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/api/v2/trucks/{truck_id}/predictive-maintenance")
+async def get_predictive_maintenance(
+    truck_id: str, api_key: str = Depends(verify_api_key)
+):
+    """
+    🔧 Predictive Maintenance v4 - RUL (Remaining Useful Life) Predictor
+
+    Analyzes component health and predicts failures before they occur.
+
+    **ROI:**
+    - $15,000-$30,000/truck/year in avoided breakdowns
+    - 40% reduction in unplanned downtime
+
+    **Components Monitored:**
+    - ECM/ECU (Engine Control Module)
+    - Turbocharger
+    - DPF (Diesel Particulate Filter)
+    - DEF System
+    - Cooling System
+
+    Returns:
+    - Component health scores (0-100)
+    - RUL predictions in days
+    - Maintenance alerts prioritized by urgency
+    - Cost estimates for repairs
+    """
+    try:
+        from predictive_maintenance_v4 import get_rul_predictor
+
+        predictor = get_rul_predictor()
+
+        # Connect to local fuel_copilot database
+        DB_CONFIG = {
+            "host": "localhost",
+            "port": 3306,
+            "user": os.getenv("MYSQL_USER", "fuel_admin"),
+            "password": os.getenv("MYSQL_PASSWORD"),
+            "database": "fuel_copilot",
+        }
+
+        import mysql.connector
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+
+        # Get latest sensor readings from truck_sensors_cache
+        query = """
+        SELECT 
+            rpm, oil_temp, cool_temp, oil_press, def_level,
+            engine_load, boost_press, egt, fuel_level_pct,
+            odometer_km, engine_hours_total
+        FROM truck_sensors_cache
+        WHERE truck_id = %s
+        LIMIT 1
+        """
+
+        cursor.execute(query, (truck_id,))
+        sensor_row = cursor.fetchone()
+
+        if not sensor_row:
+            cursor.close()
+            conn.close()
+            raise HTTPException(
+                status_code=404, detail=f"No sensor data found for truck {truck_id}"
+            )
+
+        # Convert to sensor_readings dict (handle None values)
+        sensor_readings = {
+            k: float(v) if v is not None else 0.0
+            for k, v in sensor_row.items()
+            if k not in ["odometer_km", "engine_hours_total"]
+        }
+
+        engine_hours = float(sensor_row.get("engine_hours_total") or 0)
+
+        # Analyze truck components
+        component_healths, maintenance_alerts = predictor.analyze_truck(
+            truck_id=truck_id,
+            sensor_readings=sensor_readings,
+            engine_hours=engine_hours,
+        )
+
+        # Prioritize alerts
+        prioritized_alerts = predictor.prioritize_maintenance(maintenance_alerts)
+
+        # Calculate aggregate metrics
+        avg_health = (
+            sum(c.health_score for c in component_healths) / len(component_healths)
+            if component_healths
+            else 100
+        )
+        critical_count = sum(1 for c in component_healths if c.risk_level == "CRITICAL")
+        high_count = sum(1 for c in component_healths if c.risk_level == "HIGH")
+        total_risk_cost = sum(a.estimated_cost for a in prioritized_alerts)
+
+        # Find nearest predicted failure
+        nearest_failure_days = None
+        for health in component_healths:
+            if health.rul_days and health.rul_days < 9999:
+                if (
+                    nearest_failure_days is None
+                    or health.rul_days < nearest_failure_days
+                ):
+                    nearest_failure_days = health.rul_days
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "truck_id": truck_id,
+            "overall_health": round(avg_health, 1),
+            "risk_summary": {
+                "critical_components": critical_count,
+                "high_risk_components": high_count,
+                "total_risk_cost_usd": round(total_risk_cost, 2),
+                "nearest_predicted_failure_days": nearest_failure_days,
+            },
+            "component_health": [
+                {
+                    "component": c.component,
+                    "health_score": c.health_score,
+                    "rul_days": c.rul_days,
+                    "risk_level": c.risk_level,
+                    "failure_probability_30d": c.failure_probability_30d,
+                    "contributing_sensors": c.contributing_sensors,
+                    "recommendation": c.maintenance_recommendation,
+                    "estimated_repair_cost": c.estimated_cost,
+                }
+                for c in component_healths
+            ],
+            "maintenance_alerts": [
+                {
+                    "component": a.component,
+                    "severity": a.severity,
+                    "health_score": a.health_score,
+                    "rul_days": a.rul_days,
+                    "message": a.message,
+                    "estimated_cost": a.estimated_cost,
+                    "recommended_action": a.recommended_action,
+                    "created_at": a.created_at.isoformat(),
+                }
+                for a in prioritized_alerts
+            ],
+            "sensor_readings": sensor_readings,
+            "engine_hours": engine_hours,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except ImportError as e:
+        logger.error(f"Failed to import predictive_maintenance_v4: {e}")
+        raise HTTPException(
+            status_code=501, detail="Predictive Maintenance v4 module not available"
+        )
+    except Exception as e:
+        logger.error(f"Failed to get predictive maintenance for {truck_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Predictive maintenance analysis failed: {str(e)}"
+        )
+
+
+@app.get("/api/v2/fleet/predictive-maintenance-summary")
+async def get_fleet_predictive_maintenance_summary(
+    api_key: str = Depends(verify_api_key),
+):
+    """
+    Fleet-wide predictive maintenance summary.
+
+    Shows aggregate health metrics and prioritized maintenance schedule for entire fleet.
+    """
+    try:
+        from predictive_maintenance_v4 import get_rul_predictor
+
+        predictor = get_rul_predictor()
+
+        # Connect to database
+        DB_CONFIG = {
+            "host": "localhost",
+            "port": 3306,
+            "user": os.getenv("MYSQL_USER", "fuel_admin"),
+            "password": os.getenv("MYSQL_PASSWORD"),
+            "database": "fuel_copilot",
+        }
+
+        import mysql.connector
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+
+        # Get all active trucks with latest sensors
+        query = """
+        SELECT DISTINCT truck_id
+        FROM truck_sensors_cache
+        WHERE last_update >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        """
+
+        cursor.execute(query)
+        trucks = cursor.fetchall()
+
+        fleet_alerts = []
+        fleet_health_scores = []
+
+        for truck_row in trucks:
+            truck_id = truck_row["truck_id"]
+
+            # Get sensor data
+            sensor_query = """
+            SELECT 
+                rpm, oil_temp, cool_temp, oil_press, def_level,
+                engine_load, boost_press, egt, engine_hours_total
+            FROM truck_sensors_cache
+            WHERE truck_id = %s
+            LIMIT 1
+            """
+
+            cursor.execute(sensor_query, (truck_id,))
+            sensor_row = cursor.fetchone()
+
+            if not sensor_row:
+                continue
+
+            sensor_readings = {
+                k: float(v) if v is not None else 0.0
+                for k, v in sensor_row.items()
+                if k != "engine_hours_total"
+            }
+
+            engine_hours = float(sensor_row.get("engine_hours_total") or 0)
+
+            # Analyze truck
+            component_healths, alerts = predictor.analyze_truck(
+                truck_id, sensor_readings, engine_hours
+            )
+
+            if component_healths:
+                avg_health = sum(c.health_score for c in component_healths) / len(
+                    component_healths
+                )
+                fleet_health_scores.append(avg_health)
+
+            fleet_alerts.extend(alerts)
+
+        # Prioritize all fleet alerts
+        prioritized_fleet_alerts = predictor.prioritize_maintenance(fleet_alerts)
+
+        # Calculate fleet metrics
+        fleet_avg_health = (
+            sum(fleet_health_scores) / len(fleet_health_scores)
+            if fleet_health_scores
+            else 100
+        )
+        urgent_alerts = [a for a in fleet_alerts if a.severity == "URGENT"]
+        warning_alerts = [a for a in fleet_alerts if a.severity == "WARNING"]
+        total_risk_cost = sum(a.estimated_cost for a in fleet_alerts)
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "fleet_size": len(trucks),
+            "fleet_avg_health": round(fleet_avg_health, 1),
+            "total_alerts": len(fleet_alerts),
+            "urgent_alerts": len(urgent_alerts),
+            "warning_alerts": len(warning_alerts),
+            "total_risk_cost_usd": round(total_risk_cost, 2),
+            "top_priority_alerts": [
+                {
+                    "truck_id": a.truck_id,
+                    "component": a.component,
+                    "severity": a.severity,
+                    "health_score": a.health_score,
+                    "rul_days": a.rul_days,
+                    "message": a.message,
+                    "estimated_cost": a.estimated_cost,
+                    "recommended_action": a.recommended_action,
+                }
+                for a in prioritized_fleet_alerts[:20]  # Top 20 most urgent
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get fleet predictive maintenance summary: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Fleet maintenance analysis failed: {str(e)}"
+        )

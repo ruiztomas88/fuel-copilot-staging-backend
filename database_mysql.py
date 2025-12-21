@@ -80,7 +80,9 @@ except ImportError:
         HOST = "localhost"
         PORT = 3306
         USER = "fuel_admin"
-        PASSWORD = "FuelCopilot2025!"
+        PASSWORD = os.getenv("MYSQL_PASSWORD")
+        if not PASSWORD:
+            raise RuntimeError("MYSQL_PASSWORD environment variable required")
         DATABASE = "fuel_copilot"
         CHARSET = "utf8mb4"
         POOL_SIZE = 10
@@ -629,7 +631,8 @@ def get_fleet_summary() -> Dict[str, Any]:
                 # 🆕 v6.5.0: Get truck_details with all sensor data (fixes N/A display)
                 # 🐛 FIX: Use truck_sensors_cache (not truck_sensors)
                 truck_details = []
-                sensor_query = text("""
+                sensor_query = text(
+                    """
                     SELECT 
                         s.truck_id,
                         s.timestamp,
@@ -678,58 +681,119 @@ def get_fleet_summary() -> Dict[str, Any]:
                     WHERE s.truck_id IN ({})
                       AND s.data_age_seconds < 300
                     ORDER BY s.truck_id
-                """.format(','.join(f"'{t}'" for t in allowed_trucks)))
+                """.format(
+                        ",".join(f"'{t}'" for t in allowed_trucks)
+                    )
+                )
 
                 sensor_result = conn.execute(sensor_query).fetchall()
-                
+
                 for row in sensor_result:
-                    truck_details.append({
-                        "truck_id": row[0],
-                        "timestamp": row[1].isoformat() if row[1] else None,
-                        "data_available": True,
-                        "data_age_seconds": row[2],
-                        "oil_pressure_psi": float(row[3]) if row[3] is not None else None,
-                        "oil_temp_f": float(row[4]) if row[4] is not None else None,
-                        "oil_level_pct": float(row[5]) if row[5] is not None else None,
-                        "def_level_pct": float(row[6]) if row[6] is not None else None,
-                        "engine_load_pct": float(row[7]) if row[7] is not None else None,
-                        "rpm": int(row[8]) if row[8] is not None else None,
-                        "coolant_temp_f": float(row[9]) if row[9] is not None else None,
-                        "coolant_level_pct": float(row[10]) if row[10] is not None else None,
-                        "gear": int(row[11]) if row[11] is not None else None,
-                        "brake_active": bool(row[12]) if row[12] is not None else None,
-                        "intake_pressure_bar": float(row[13]) if row[13] is not None else None,
-                        "intake_temp_f": float(row[14]) if row[14] is not None else None,
-                        "intercooler_temp_f": float(row[15]) if row[15] is not None else None,
-                        "fuel_temp_f": float(row[16]) if row[16] is not None else None,
-                        "fuel_level_pct": float(row[17]) if row[17] is not None else None,
-                        "fuel_rate_gph": float(row[18]) if row[18] is not None else None,
-                        "ambient_temp_f": float(row[19]) if row[19] is not None else None,
-                        "barometric_pressure_inhg": float(row[20]) if row[20] is not None else None,
-                        "voltage": float(row[21]) if row[21] is not None else None,
-                        "backup_voltage": float(row[22]) if row[22] is not None else None,
-                        "engine_hours": float(row[23]) if row[23] is not None else None,
-                        "idle_hours": float(row[24]) if row[24] is not None else None,
-                        "pto_hours": float(row[25]) if row[25] is not None else None,
-                        "total_idle_fuel_gal": float(row[26]) if row[26] is not None else None,
-                        "total_fuel_used_gal": float(row[27]) if row[27] is not None else None,
-                        "dtc_count": int(row[28]) if row[28] is not None else None,
-                        "dtc_code": row[29],
-                        "latitude": float(row[30]) if row[30] is not None else None,
-                        "longitude": float(row[31]) if row[31] is not None else None,
-                        "speed_mph": float(row[32]) if row[32] is not None else None,
-                        "altitude_ft": float(row[33]) if row[33] is not None else None,
-                        "odometer_mi": float(row[34]) if row[34] is not None else None,
-                        # From fuel_metrics
-                        "estimated_pct": float(row[35]) if row[35] is not None else None,
-                        "sensor_pct": float(row[36]) if row[36] is not None else None,
-                        "drift_pct": float(row[37]) if row[37] is not None else None,
-                        "mpg": float(row[38]) if row[38] is not None else None,
-                        "idle_gph": float(row[39]) if row[39] is not None else None,
-                        "status": row[40] if row[40] else "UNKNOWN",
-                        "health_score": 80,
-                        "health_category": "healthy"
-                    })
+                    truck_details.append(
+                        {
+                            "truck_id": row[0],
+                            "timestamp": row[1].isoformat() if row[1] else None,
+                            "data_available": True,
+                            "data_age_seconds": row[2],
+                            "oil_pressure_psi": (
+                                float(row[3]) if row[3] is not None else None
+                            ),
+                            "oil_temp_f": float(row[4]) if row[4] is not None else None,
+                            "oil_level_pct": (
+                                float(row[5]) if row[5] is not None else None
+                            ),
+                            "def_level_pct": (
+                                float(row[6]) if row[6] is not None else None
+                            ),
+                            "engine_load_pct": (
+                                float(row[7]) if row[7] is not None else None
+                            ),
+                            "rpm": int(row[8]) if row[8] is not None else None,
+                            "coolant_temp_f": (
+                                float(row[9]) if row[9] is not None else None
+                            ),
+                            "coolant_level_pct": (
+                                float(row[10]) if row[10] is not None else None
+                            ),
+                            "gear": int(row[11]) if row[11] is not None else None,
+                            "brake_active": (
+                                bool(row[12]) if row[12] is not None else None
+                            ),
+                            "intake_pressure_bar": (
+                                float(row[13]) if row[13] is not None else None
+                            ),
+                            "intake_temp_f": (
+                                float(row[14]) if row[14] is not None else None
+                            ),
+                            "intercooler_temp_f": (
+                                float(row[15]) if row[15] is not None else None
+                            ),
+                            "fuel_temp_f": (
+                                float(row[16]) if row[16] is not None else None
+                            ),
+                            "fuel_level_pct": (
+                                float(row[17]) if row[17] is not None else None
+                            ),
+                            "fuel_rate_gph": (
+                                float(row[18]) if row[18] is not None else None
+                            ),
+                            "ambient_temp_f": (
+                                float(row[19]) if row[19] is not None else None
+                            ),
+                            "barometric_pressure_inhg": (
+                                float(row[20]) if row[20] is not None else None
+                            ),
+                            "voltage": float(row[21]) if row[21] is not None else None,
+                            "backup_voltage": (
+                                float(row[22]) if row[22] is not None else None
+                            ),
+                            "engine_hours": (
+                                float(row[23]) if row[23] is not None else None
+                            ),
+                            "idle_hours": (
+                                float(row[24]) if row[24] is not None else None
+                            ),
+                            "pto_hours": (
+                                float(row[25]) if row[25] is not None else None
+                            ),
+                            "total_idle_fuel_gal": (
+                                float(row[26]) if row[26] is not None else None
+                            ),
+                            "total_fuel_used_gal": (
+                                float(row[27]) if row[27] is not None else None
+                            ),
+                            "dtc_count": int(row[28]) if row[28] is not None else None,
+                            "dtc_code": row[29],
+                            "latitude": float(row[30]) if row[30] is not None else None,
+                            "longitude": (
+                                float(row[31]) if row[31] is not None else None
+                            ),
+                            "speed_mph": (
+                                float(row[32]) if row[32] is not None else None
+                            ),
+                            "altitude_ft": (
+                                float(row[33]) if row[33] is not None else None
+                            ),
+                            "odometer_mi": (
+                                float(row[34]) if row[34] is not None else None
+                            ),
+                            # From fuel_metrics
+                            "estimated_pct": (
+                                float(row[35]) if row[35] is not None else None
+                            ),
+                            "sensor_pct": (
+                                float(row[36]) if row[36] is not None else None
+                            ),
+                            "drift_pct": (
+                                float(row[37]) if row[37] is not None else None
+                            ),
+                            "mpg": float(row[38]) if row[38] is not None else None,
+                            "idle_gph": float(row[39]) if row[39] is not None else None,
+                            "status": row[40] if row[40] else "UNKNOWN",
+                            "health_score": 80,
+                            "health_category": "healthy",
+                        }
+                    )
 
                 return {
                     "total_trucks": total_trucks,
@@ -744,7 +808,7 @@ def get_fleet_summary() -> Dict[str, Any]:
                     "health_score": health_score,
                     # 🆕 v6.5.0: Truck details with all sensors
                     "truck_details": truck_details,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             return _empty_fleet_summary()
 
@@ -766,7 +830,7 @@ def _empty_fleet_summary() -> Dict[str, Any]:
         "active_dtcs": 0,
         "health_score": 100.0,  # Perfect health when no data
         "truck_details": [],  # 🆕 v6.5.0: Empty truck details
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -1084,6 +1148,9 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
     5. MECHANICAL/OTHER (~10%): Catch-all for other inefficiencies
 
     Args:
+    """
+    # 🔒 SECURITY: Prevent division by zero
+    days_back = max(days_back, 1)
         days_back: Number of days to analyze (1, 7, or 30)
 
     Returns:
@@ -2852,6 +2919,9 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
     - Quick wins vs long-term improvements
     - Cost-benefit analysis for each recommendation
     """
+    # 🔒 SECURITY: Prevent division by zero
+    days_back = max(days_back, 1)
+    
     BASELINE_MPG = FUEL.BASELINE_MPG
     FUEL_PRICE = FUEL.PRICE_PER_GALLON
 

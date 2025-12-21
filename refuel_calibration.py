@@ -62,7 +62,7 @@ except ImportError:
     DB_CONFIG = {
         "host": "localhost",
         "user": "fuel_admin",
-        "password": "FuelCopilot2025!",
+        "password": os.getenv("MYSQL_PASSWORD"),
         "database": "fuel_copilot",
         "charset": "utf8mb4",
         "port": 3306,

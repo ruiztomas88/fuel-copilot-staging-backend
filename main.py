@@ -602,24 +602,36 @@ logger.info("✅ Rate limiting middleware enabled")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 logger.info("✅ GZip compression middleware enabled")
 
-# CORS configuration - allow React frontend
+# CORS configuration - production-ready with environment-based origins
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,https://fuelanalytics.fleetbooster.net",
+).split(",")
+
+# In development, add local variants
+if os.getenv("ENVIRONMENT", "production") == "development":
+    ALLOWED_ORIGINS.extend(
+        [
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+            "http://127.0.0.1:5173",
+        ]
+    )
+    logger.info("🔧 Development mode: Added localhost origins")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React dev server
-        "http://localhost:3001",  # Vite dev server (alternate port)
-        "http://localhost:5173",  # Vite dev server
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:5173",
-        "https://fuelanalytics.fleetbooster.net",
-        "https://fleetbooster.net",
-        "https://uninterrogative-unputrefiable-maleah.ngrok-free.dev",  # ngrok tunnel
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Explicit methods only
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-API-Key",
+    ],  # Explicit headers only
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
+logger.info(f"✅ CORS configured with {len(ALLOWED_ORIGINS)} allowed origins")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

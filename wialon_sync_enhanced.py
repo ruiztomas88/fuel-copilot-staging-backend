@@ -105,10 +105,14 @@ LOCAL_DB_CONFIG = {
     "host": "localhost",
     "port": 3306,
     "user": "fuel_admin",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD"),
     "database": "fuel_copilot",
     "autocommit": True,
 }
+
+# Security: Ensure password is set
+if not LOCAL_DB_CONFIG["password"]:
+    raise RuntimeError("MYSQL_PASSWORD environment variable is required")
 
 # State persistence paths
 DATA_DIR = Path(__file__).parent / "data"
