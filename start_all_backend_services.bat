@@ -1,36 +1,53 @@
 @echo off
 REM ============================================
 REM Fuel Analytics Backend - All Services
-REM Single launcher for NSSM service
+REM Quick launcher without log redirection issues
 REM ============================================
 
 cd /d C:\Users\devteam\Proyectos\fuel-analytics-backend
 
-echo [%TIME%] Starting all backend services...
+echo.
+echo ========================================
+echo   Fuel Analytics Backend Launcher
+echo ========================================
+echo.
+echo [%TIME%] Iniciando servicios...
+echo.
 
-REM Activate venv and launch components
-call venv\Scripts\activate.bat
+REM Crear directorio de logs si no existe
+if not exist logs mkdir logs
 
-REM Start wialon_sync_enhanced (15s intervals)
-start /B python wialon_sync_enhanced.py >> logs\backend-all.log 2>> logs\backend-errors.log
+REM Iniciar wialon_sync en ventana minimizada
+echo [1/4] Iniciando Wialon Sync...
+start "WIALON_SYNC" /MIN cmd /c "venv\Scripts\python.exe wialon_sync_enhanced.py"
 
-REM Wait 5 seconds for wialon_sync to initialize
+REM Esperar 5 segundos para que Wialon inicialice
 timeout /t 5 /nobreak >nul
 
-REM Start Uvicorn API (port 8000)
-start /B venv\Scripts\uvicorn.exe main:app --host 0.0.0.0 --port 8000 >> logs\backend-all.log 2>> logs\backend-errors.log
+REM Iniciar API REST en ventana minimizada
+echo [2/4] Iniciando API REST (puerto 8000)...
+start "API_REST" /MIN cmd /c "venv\Scripts\uvicorn.exe main:app --host 0.0.0.0 --port 8000"
 
-REM Start auto_update_daily_metrics (15-min updates)
-start /B python auto_update_daily_metrics.py >> logs\backend-all.log 2>> logs\backend-errors.log
+REM Esperar 3 segundos
+timeout /t 3 /nobreak >nul
 
-REM Start auto_backup_db (6-hour backups)
-start /B python auto_backup_db.py >> logs\backend-all.log 2>> logs\backend-errors.log
+REM Iniciar actualizador de métricas en ventana minimizada
+echo [3/4] Iniciando Daily Metrics Updater...
+start "DAILY_METRICS" /MIN cmd /c "venv\Scripts\python.exe auto_update_daily_metrics.py"
 
-echo [%TIME%] All services started successfully
-echo Check logs\backend-all.log for output
-echo Check logs\backend-errors.log for errors
+REM Iniciar auto backup en ventana minimizada
+echo [4/4] Iniciando Auto Backup...
+start "AUTO_BACKUP" /MIN cmd /c "venv\Scripts\python.exe auto_backup_db.py"
 
-REM Keep this process alive (required for NSSM)
-:loop
-timeout /t 60 /nobreak >nul
-goto loop
+echo.
+echo ========================================
+echo   SERVICIOS INICIADOS CORRECTAMENTE
+echo ========================================
+echo.
+echo   Wialon Sync       : Ventana "WIALON_SYNC"
+echo   API REST          : http://localhost:8000
+echo   Daily Metrics     : Ventana "DAILY_METRICS"
+echo   Auto Backup       : Ventana "AUTO_BACKUP"
+echo.
+echo Presiona cualquier tecla para salir...
+pause >nul
