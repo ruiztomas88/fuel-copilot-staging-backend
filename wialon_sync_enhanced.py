@@ -1623,6 +1623,7 @@ def process_truck(
         sats=sats,
         latitude=latitude,
         longitude=longitude,
+        speed_mph=speed,  # 🆕 v5.18.0: Speed gating (80% FP reduction)
     )
 
     # Update estimator timestamp
