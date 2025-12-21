@@ -13,6 +13,7 @@ This file contains endpoints for:
 
 import io
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -2203,9 +2204,11 @@ async def get_predictive_maintenance(truck_id: str):
         # Get latest sensor readings from truck_sensors_cache
         query = """
         SELECT 
-            rpm, oil_temp, cool_temp, oil_press, def_level,
-            engine_load, boost_press, egt, fuel_level_pct,
-            odometer_km, engine_hours_total
+            rpm, oil_temp_f as oil_temp, coolant_temp_f as cool_temp, 
+            oil_pressure_psi as oil_press, def_level_pct as def_level,
+            engine_load_pct as engine_load, turbo_pressure_psi as boost_press, 
+            egr_temp_f as egt, fuel_level_pct,
+            odometer_mi as odometer_km, engine_hours as engine_hours_total
         FROM truck_sensors_cache
         WHERE truck_id = %s
         LIMIT 1
@@ -2345,7 +2348,7 @@ async def get_fleet_predictive_maintenance_summary():
         query = """
         SELECT DISTINCT truck_id
         FROM truck_sensors_cache
-        WHERE last_update >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        WHERE last_updated >= DATE_SUB(NOW(), INTERVAL 7 DAY)
         """
 
         cursor.execute(query)
@@ -2360,8 +2363,10 @@ async def get_fleet_predictive_maintenance_summary():
             # Get sensor data
             sensor_query = """
             SELECT 
-                rpm, oil_temp, cool_temp, oil_press, def_level,
-                engine_load, boost_press, egt, engine_hours_total
+                rpm, oil_temp_f as oil_temp, coolant_temp_f as cool_temp, 
+                oil_pressure_psi as oil_press, def_level_pct as def_level,
+                engine_load_pct as engine_load, turbo_pressure_psi as boost_press, 
+                egr_temp_f as egt, engine_hours as engine_hours_total
             FROM truck_sensors_cache
             WHERE truck_id = %s
             LIMIT 1
