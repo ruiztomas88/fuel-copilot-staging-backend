@@ -2462,62 +2462,56 @@ async def get_fleet_summary():
 
         from db_connection import get_pymysql_connection
 
-        conn = get_pymysql_connection()
-        cursor = conn.cursor()
+        with get_pymysql_connection() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                # Calculate metrics from fuel_metrics (last 7 days)
+                # Using: odometer_mi, estimated_gallons, mpg_current
+                # Cost estimate: $3.50/gallon
+                cursor.execute(
+                    """
+                    SELECT 
+                        AVG(CASE WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi ELSE 0 END) as avg_cost_per_mile,
+                        COUNT(DISTINCT truck_id) as active_trucks,
+                        AVG(mpg_current) as avg_mpg,
+                        SUM(odometer_mi) as total_miles,
+                        SUM(estimated_gallons * 3.50) as total_fuel_cost
+                    FROM fuel_metrics
+                    WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                        AND odometer_mi > 0
+                """
+                )
 
-        # Get basic fleet stats from last 7 days
-        query = """
-        SELECT 
-            COUNT(DISTINCT truck_id) as active_trucks,
-            AVG(mpg) as avg_mpg,
-            SUM(distance_mi) as total_miles,
-            SUM(fuel_consumed_gal) as total_fuel_gal,
-            AVG(fuel_rate_gph) as avg_fuel_rate
-        FROM truck_sensors_cache
-        WHERE last_updated >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        """
+                metrics = cursor.fetchone()
 
-        cursor.execute(query)
-        fleet_stats = cursor.fetchone()
+                # Get utilization from fuel_metrics (engine_hours vs idle_hours_ecu)
+                cursor.execute(
+                    """
+                    SELECT 
+                        SUM(engine_hours) as total_engine,
+                        SUM(idle_hours_ecu) as total_idle
+                    FROM fuel_metrics
+                    WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                """
+                )
 
-        # Calculate cost metrics (assuming $3.50/gallon diesel)
-        fuel_price_per_gallon = 3.50
-        total_fuel_cost = (
-            fleet_stats.get("total_fuel_gal") or 0
-        ) * fuel_price_per_gallon
-        total_miles = fleet_stats.get("total_miles") or 1
-        cost_per_mile = total_fuel_cost / total_miles if total_miles > 0 else 0
+                util = cursor.fetchone()
 
-        # Get utilization from daily_truck_metrics (last 7 days avg)
-        util_query = """
-        SELECT 
-            AVG(active_hours) as avg_active_hours,
-            AVG(idle_hours) as avg_idle_hours,
-            AVG(parked_hours) as avg_parked_hours
-        FROM daily_truck_metrics
-        WHERE date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-        """
-
-        cursor.execute(util_query)
-        util_stats = cursor.fetchone()
-
-        avg_active = util_stats.get("avg_active_hours") or 0
-        avg_idle = util_stats.get("avg_idle_hours") or 0
-        avg_parked = util_stats.get("avg_parked_hours") or 0
-        total_hours = avg_active + avg_idle + avg_parked
-        utilization_pct = (avg_active / total_hours * 100) if total_hours > 0 else 0
-
-        cursor.close()
-        conn.close()
+                total_engine = util.get("total_engine") or 0
+                total_idle = util.get("total_idle") or 0
+                active = total_engine - total_idle
+                utilization_pct = (
+                    (active / total_engine * 100) if total_engine > 0 else 0
+                )
 
         return {
-            "active_trucks": fleet_stats.get("active_trucks") or 0,
-            "avg_mpg": round(fleet_stats.get("avg_mpg") or 0, 2),
-            "cost_per_mile": round(cost_per_mile, 2),
+            "cost_per_mile": round(
+                float(metrics["avg_cost_per_mile"] or 0), 2
+            ),
+            "active_trucks": metrics["active_trucks"] or 0,
+            "avg_mpg": round(float(metrics["avg_mpg"] or 0), 2),
             "utilization_pct": round(utilization_pct, 1),
-            "total_miles": round(total_miles, 0),
-            "total_fuel_cost": round(total_fuel_cost, 2),
-            "fuel_price_per_gallon": fuel_price_per_gallon,
+            "total_miles": round(float(metrics["total_miles"] or 0), 1),
+            "total_fuel_cost": round(float(metrics["total_fuel_cost"] or 0), 2),
             "period_days": 7,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -2528,87 +2522,82 @@ async def get_fleet_summary():
 
 
 @router.get("/fleet/cost-analysis")
-async def get_fleet_cost_analysis(
-    period: str = Query(default="week", pattern="^(week|month|quarter)$")
-):
+async def get_fleet_cost_analysis():
     """
-    Fleet cost breakdown and analysis.
+    Fleet cost analysis with breakdown by category and truck.
 
-    Returns cost distribution, cost per mile by truck, trends.
+    Returns:
+    - Cost distribution (fuel, maintenance, labor)
+    - Per-truck cost analysis
+    - Monthly trends
     """
     try:
-        import pymysql
+        import mysql.connector
 
-        from db_connection import get_pymysql_connection
+        DB_CONFIG = {
+            "host": "localhost",
+            "port": 3306,
+            "user": os.getenv("MYSQL_USER", "fuel_admin"),
+            "password": os.getenv("MYSQL_PASSWORD"),
+            "database": "fuel_copilot",
+        }
 
-        conn = get_pymysql_connection()
-        cursor = conn.cursor()
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
 
-        # Determine date range
-        if period == "week":
-            days = 7
-        elif period == "month":
-            days = 30
-        else:  # quarter
-            days = 90
-
-        # Get per-truck costs
-        query = """
-        SELECT 
-            truck_id,
-            SUM(fuel_consumed_gal) as fuel_gal,
-            SUM(distance_mi) as miles,
-            AVG(mpg) as avg_mpg
-        FROM truck_sensors_cache
-        WHERE last_updated >= DATE_SUB(NOW(), INTERVAL %s DAY)
-        GROUP BY truck_id
-        ORDER BY fuel_gal DESC
+        # Get fuel costs from fuel_metrics (estimated at $3.50/gal)
+        cursor.execute(
+            """
+            SELECT 
+                SUM(estimated_gallons * 3.50) as total_fuel_cost
+            FROM fuel_metrics
+            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         """
+        )
 
-        cursor.execute(query, (days,))
-        trucks = cursor.fetchall()
+        fuel_data = cursor.fetchone()
+        total_fuel = float(fuel_data["total_fuel_cost"] or 0.0)
 
-        fuel_price = 3.50  # $/gallon
+        # Estimate maintenance and labor (industry standard percentages)
+        total_maintenance = total_fuel * 0.30  # 30% of fuel cost
+        total_labor = total_fuel * 0.40  # 40% of fuel cost
 
-        truck_costs = []
-        total_fuel_cost = 0
+        # Get per-truck cost breakdown
+        cursor.execute(
+            """
+            SELECT 
+                truck_id,
+                AVG(CASE WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi ELSE 0 END) as cost_per_mile,
+                SUM(estimated_gallons * 3.50) as total_cost,
+                SUM(odometer_mi) as total_miles
+            FROM fuel_metrics
+            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY truck_id
+            HAVING total_miles > 0
+            ORDER BY cost_per_mile DESC
+        """
+        )
 
-        for truck in trucks:
-            fuel_cost = (truck.get("fuel_gal") or 0) * fuel_price
-            miles = truck.get("miles") or 1
-            cost_per_mile = fuel_cost / miles if miles > 0 else 0
-
-            truck_costs.append(
-                {
-                    "truck_id": truck.get("truck_id"),
-                    "fuel_cost": round(fuel_cost, 2),
-                    "miles": round(miles, 0),
-                    "cost_per_mile": round(cost_per_mile, 2),
-                    "avg_mpg": round(truck.get("avg_mpg") or 0, 2),
-                }
-            )
-
-            total_fuel_cost += fuel_cost
-
-        # Estimate other costs (maintenance ~30% of fuel, labor ~40% of fuel)
-        maintenance_cost = total_fuel_cost * 0.30
-        labor_cost = total_fuel_cost * 0.40
-        total_cost = total_fuel_cost + maintenance_cost + labor_cost
+        truck_costs = cursor.fetchall()
 
         cursor.close()
         conn.close()
 
         return {
-            "period": period,
-            "days": days,
             "cost_distribution": {
-                "fuel": round(total_fuel_cost, 2),
-                "maintenance": round(maintenance_cost, 2),
-                "labor": round(labor_cost, 2),
-                "total": round(total_cost, 2),
+                "fuel": round(total_fuel, 2),
+                "maintenance": round(total_maintenance, 2),
+                "labor": round(total_labor, 2),
             },
-            "cost_by_truck": truck_costs,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "cost_by_truck": [
+                {
+                    "truck_id": row["truck_id"],
+                    "cost_per_mile": round(float(row["cost_per_mile"] or 0), 2),
+                    "total_cost": round(float(row["total_cost"] or 0), 2),
+                    "total_miles": round(float(row["total_miles"] or 0), 1),
+                }
+                for row in truck_costs
+            ],
         }
 
     except Exception as e:
@@ -2630,66 +2619,61 @@ async def get_fleet_utilization(
 
         from db_connection import get_pymysql_connection
 
-        conn = get_pymysql_connection()
-        cursor = conn.cursor()
+        with get_pymysql_connection() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                # Determine date range
+                if period == "week":
+                    days = 7
+                elif period == "month":
+                    days = 30
+                else:  # quarter
+                    days = 90
 
-        # Determine date range
-        if period == "week":
-            days = 7
-        elif period == "month":
-            days = 30
-        else:  # quarter
-            days = 90
+                # Get utilization from fuel_metrics (using idle_hours_ecu)
+                query = """
+                SELECT 
+                    truck_id,
+                    SUM(engine_hours) as total_engine_hours,
+                    SUM(idle_hours_ecu) as total_idle_hours,
+                    AVG(CASE WHEN engine_hours > 0 
+                        THEN ((engine_hours - idle_hours_ecu) / engine_hours) * 100 
+                        ELSE 0 END) as avg_utilization_pct
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                GROUP BY truck_id
+                HAVING total_engine_hours > 0
+                """
 
-        # Get utilization from daily_truck_metrics
-        query = """
-        SELECT 
-            truck_id,
-            AVG(active_hours) as avg_active,
-            AVG(idle_hours) as avg_idle,
-            AVG(parked_hours) as avg_parked
-        FROM daily_truck_metrics
-        WHERE date >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
-        GROUP BY truck_id
-        """
+                cursor.execute(query, (days,))
+                trucks = cursor.fetchall()
 
-        cursor.execute(query, (days,))
-        trucks = cursor.fetchall()
+                truck_utilization = []
+                total_active = 0
+                total_idle = 0
 
-        truck_utilization = []
-        total_active = 0
-        total_idle = 0
-        total_parked = 0
+                for truck in trucks:
+                    engine_hours = truck.get("total_engine_hours") or 0
+                    idle_hours = truck.get("total_idle_hours") or 0
+                    active_hours = max(0, engine_hours - idle_hours)
+                    utilization_pct = truck.get("avg_utilization_pct") or 0
 
-        for truck in trucks:
-            active = truck.get("avg_active") or 0
-            idle = truck.get("avg_idle") or 0
-            parked = truck.get("avg_parked") or 0
-            total = active + idle + parked
+                    truck_utilization.append(
+                        {
+                            "truck_id": truck.get("truck_id"),
+                            "active_hours": round(active_hours, 1),
+                            "idle_hours": round(idle_hours, 1),
+                            "engine_hours": round(engine_hours, 1),
+                            "utilization_pct": round(utilization_pct, 1),
+                        }
+                    )
 
-            utilization_pct = (active / total * 100) if total > 0 else 0
+                    total_active += active_hours
+                    total_idle += idle_hours
 
-            truck_utilization.append(
-                {
-                    "truck_id": truck.get("truck_id"),
-                    "active_hours": round(active, 1),
-                    "idle_hours": round(idle, 1),
-                    "parked_hours": round(parked, 1),
-                    "utilization_pct": round(utilization_pct, 1),
-                }
-            )
-
-            total_active += active
-            total_idle += idle
-            total_parked += parked
-
-        total_hours = total_active + total_idle + total_parked
-        fleet_utilization_pct = (
-            (total_active / total_hours * 100) if total_hours > 0 else 0
-        )
-
-        cursor.close()
-        conn.close()
+                total_hours = total_active + total_idle
+                fleet_utilization_pct = (
+                    (total_active / total_hours * 100) if total_hours > 0 else 0
+                )
 
         return {
             "period": period,
@@ -2697,7 +2681,7 @@ async def get_fleet_utilization(
             "fleet_summary": {
                 "active_hours": round(total_active, 1),
                 "idle_hours": round(total_idle, 1),
-                "parked_hours": round(total_parked, 1),
+                "total_hours": round(total_hours, 1),
                 "utilization_pct": round(fleet_utilization_pct, 1),
             },
             "by_truck": truck_utilization,
