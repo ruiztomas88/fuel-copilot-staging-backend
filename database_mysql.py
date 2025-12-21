@@ -627,12 +627,13 @@ def get_fleet_summary() -> Dict[str, Any]:
                 )
 
                 # 🆕 v6.5.0: Get truck_details with all sensor data (fixes N/A display)
+                # 🐛 FIX: Use truck_sensors_cache (not truck_sensors)
                 truck_details = []
                 sensor_query = text("""
                     SELECT 
                         s.truck_id,
                         s.timestamp,
-                        TIMESTAMPDIFF(SECOND, s.timestamp, NOW()) as data_age_seconds,
+                        s.data_age_seconds,
                         s.oil_pressure_psi,
                         s.oil_temp_f,
                         s.oil_level_pct,
@@ -671,16 +672,11 @@ def get_fleet_summary() -> Dict[str, Any]:
                         fm.mpg_current,
                         fm.idle_consumption_gph,
                         fm.truck_status
-                    FROM truck_sensors s
-                    INNER JOIN (
-                        SELECT truck_id, MAX(timestamp) as max_time
-                        FROM truck_sensors
-                        WHERE timestamp > NOW() - INTERVAL 5 MINUTE
-                          AND truck_id IN ({})
-                        GROUP BY truck_id
-                    ) latest ON s.truck_id = latest.truck_id AND s.timestamp = latest.max_time
+                    FROM truck_sensors_cache s
                     LEFT JOIN fuel_metrics fm ON s.truck_id = fm.truck_id 
                         AND fm.timestamp_utc > NOW() - INTERVAL 5 MINUTE
+                    WHERE s.truck_id IN ({})
+                      AND s.data_age_seconds < 300
                     ORDER BY s.truck_id
                 """.format(','.join(f"'{t}'" for t in allowed_trucks)))
 
