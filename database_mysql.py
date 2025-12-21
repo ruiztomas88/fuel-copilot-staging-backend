@@ -626,6 +626,115 @@ def get_fleet_summary() -> Dict[str, Any]:
                     active_dtc_count, total_trucks
                 )
 
+                # 🆕 v6.5.0: Get truck_details with all sensor data (fixes N/A display)
+                truck_details = []
+                sensor_query = text("""
+                    SELECT 
+                        s.truck_id,
+                        s.timestamp,
+                        TIMESTAMPDIFF(SECOND, s.timestamp, NOW()) as data_age_seconds,
+                        s.oil_pressure_psi,
+                        s.oil_temp_f,
+                        s.oil_level_pct,
+                        s.def_level_pct,
+                        s.engine_load_pct,
+                        s.rpm,
+                        s.coolant_temp_f,
+                        s.coolant_level_pct,
+                        s.gear,
+                        s.brake_active,
+                        s.intake_pressure_bar,
+                        s.intake_temp_f,
+                        s.intercooler_temp_f,
+                        s.fuel_temp_f,
+                        s.fuel_level_pct,
+                        s.fuel_rate_gph,
+                        s.ambient_temp_f,
+                        s.barometric_pressure_inhg,
+                        s.voltage,
+                        s.backup_voltage,
+                        s.engine_hours,
+                        s.idle_hours,
+                        s.pto_hours,
+                        s.total_idle_fuel_gal,
+                        s.total_fuel_used_gal,
+                        s.dtc_count,
+                        s.dtc_code,
+                        s.latitude,
+                        s.longitude,
+                        s.speed_mph,
+                        s.altitude_ft,
+                        s.odometer_mi,
+                        fm.estimated_pct,
+                        fm.sensor_pct,
+                        fm.drift_pct,
+                        fm.mpg_current,
+                        fm.idle_consumption_gph,
+                        fm.truck_status
+                    FROM truck_sensors s
+                    INNER JOIN (
+                        SELECT truck_id, MAX(timestamp) as max_time
+                        FROM truck_sensors
+                        WHERE timestamp > NOW() - INTERVAL 5 MINUTE
+                          AND truck_id IN ({})
+                        GROUP BY truck_id
+                    ) latest ON s.truck_id = latest.truck_id AND s.timestamp = latest.max_time
+                    LEFT JOIN fuel_metrics fm ON s.truck_id = fm.truck_id 
+                        AND fm.timestamp_utc > NOW() - INTERVAL 5 MINUTE
+                    ORDER BY s.truck_id
+                """.format(','.join(f"'{t}'" for t in allowed_trucks)))
+
+                sensor_result = conn.execute(sensor_query).fetchall()
+                
+                for row in sensor_result:
+                    truck_details.append({
+                        "truck_id": row[0],
+                        "timestamp": row[1].isoformat() if row[1] else None,
+                        "data_available": True,
+                        "data_age_seconds": row[2],
+                        "oil_pressure_psi": float(row[3]) if row[3] is not None else None,
+                        "oil_temp_f": float(row[4]) if row[4] is not None else None,
+                        "oil_level_pct": float(row[5]) if row[5] is not None else None,
+                        "def_level_pct": float(row[6]) if row[6] is not None else None,
+                        "engine_load_pct": float(row[7]) if row[7] is not None else None,
+                        "rpm": int(row[8]) if row[8] is not None else None,
+                        "coolant_temp_f": float(row[9]) if row[9] is not None else None,
+                        "coolant_level_pct": float(row[10]) if row[10] is not None else None,
+                        "gear": int(row[11]) if row[11] is not None else None,
+                        "brake_active": bool(row[12]) if row[12] is not None else None,
+                        "intake_pressure_bar": float(row[13]) if row[13] is not None else None,
+                        "intake_temp_f": float(row[14]) if row[14] is not None else None,
+                        "intercooler_temp_f": float(row[15]) if row[15] is not None else None,
+                        "fuel_temp_f": float(row[16]) if row[16] is not None else None,
+                        "fuel_level_pct": float(row[17]) if row[17] is not None else None,
+                        "fuel_rate_gph": float(row[18]) if row[18] is not None else None,
+                        "ambient_temp_f": float(row[19]) if row[19] is not None else None,
+                        "barometric_pressure_inhg": float(row[20]) if row[20] is not None else None,
+                        "voltage": float(row[21]) if row[21] is not None else None,
+                        "backup_voltage": float(row[22]) if row[22] is not None else None,
+                        "engine_hours": float(row[23]) if row[23] is not None else None,
+                        "idle_hours": float(row[24]) if row[24] is not None else None,
+                        "pto_hours": float(row[25]) if row[25] is not None else None,
+                        "total_idle_fuel_gal": float(row[26]) if row[26] is not None else None,
+                        "total_fuel_used_gal": float(row[27]) if row[27] is not None else None,
+                        "dtc_count": int(row[28]) if row[28] is not None else None,
+                        "dtc_code": row[29],
+                        "latitude": float(row[30]) if row[30] is not None else None,
+                        "longitude": float(row[31]) if row[31] is not None else None,
+                        "speed_mph": float(row[32]) if row[32] is not None else None,
+                        "altitude_ft": float(row[33]) if row[33] is not None else None,
+                        "odometer_mi": float(row[34]) if row[34] is not None else None,
+                        # From fuel_metrics
+                        "estimated_pct": float(row[35]) if row[35] is not None else None,
+                        "sensor_pct": float(row[36]) if row[36] is not None else None,
+                        "drift_pct": float(row[37]) if row[37] is not None else None,
+                        "mpg": float(row[38]) if row[38] is not None else None,
+                        "idle_gph": float(row[39]) if row[39] is not None else None,
+                        "status": row[40] if row[40] else "UNKNOWN",
+                        "health_score": 80,
+                        "health_category": "healthy"
+                    })
+
                 return {
                     "total_trucks": total_trucks,
                     "active_trucks": result[1] or 0,
@@ -637,6 +746,9 @@ def get_fleet_summary() -> Dict[str, Any]:
                     # 🆕 Health metrics (190h algorithm)
                     "active_dtcs": active_dtc_count,
                     "health_score": health_score,
+                    # 🆕 v6.5.0: Truck details with all sensors
+                    "truck_details": truck_details,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             return _empty_fleet_summary()
 
@@ -657,6 +769,8 @@ def _empty_fleet_summary() -> Dict[str, Any]:
         "trucks_with_drift": 0,
         "active_dtcs": 0,
         "health_score": 100.0,  # Perfect health when no data
+        "truck_details": [],  # 🆕 v6.5.0: Empty truck details
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
