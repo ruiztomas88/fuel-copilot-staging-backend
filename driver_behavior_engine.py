@@ -29,11 +29,11 @@
 """
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -505,8 +505,10 @@ class DriverBehaviorEngine:
                             truck_id, timestamp, accel_mpss, SeverityLevel.MINOR
                         )
                     )
-                state.hard_brake_count += 1
-                state.fuel_waste_brake += self.config.fuel_waste_hard_brake_gal * 0.5
+                    state.hard_brake_count += 1
+                    state.fuel_waste_brake += (
+                        self.config.fuel_waste_hard_brake_gal * 0.5
+                    )
 
         # ═══════════════════════════════════════════════════════════════════
         # 2. RPM MANAGEMENT DETECTION
@@ -986,6 +988,7 @@ class DriverBehaviorEngine:
         """
         try:
             from sqlalchemy import text
+
             from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
@@ -1379,6 +1382,45 @@ class DriverBehaviorEngine:
             )
 
         return recommendations
+
+    def cleanup_inactive_trucks(
+        self, active_truck_ids: set, max_inactive_days: int = 30
+    ) -> int:
+        """
+        🆕 v6.5.0: Remove state for trucks inactive > max_inactive_days.
+
+        Prevents memory leaks from trucks removed from fleet or long offline.
+
+        Args:
+            active_truck_ids: Set of currently active truck IDs
+            max_inactive_days: Days of inactivity before cleanup (default 30)
+
+        Returns:
+            Number of trucks cleaned up
+        """
+        from datetime import datetime, timedelta, timezone
+
+        cleaned_count = 0
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=max_inactive_days)
+        trucks_to_remove = []
+
+        for truck_id, state in self.truck_states.items():
+            # Remove if not in active fleet
+            if truck_id not in active_truck_ids:
+                trucks_to_remove.append(truck_id)
+                continue
+
+            # Check if last data is older than cutoff
+            if state.last_timestamp and state.last_timestamp < cutoff_time:
+                trucks_to_remove.append(truck_id)
+
+        # Remove inactive trucks
+        for truck_id in trucks_to_remove:
+            del self.truck_states[truck_id]
+            cleaned_count += 1
+            logger.info(f"🧹 Cleaned up behavior state for inactive truck: {truck_id}")
+
+        return cleaned_count
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

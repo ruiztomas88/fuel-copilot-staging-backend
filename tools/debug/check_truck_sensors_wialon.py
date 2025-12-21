@@ -5,11 +5,12 @@ Revisa qué parámetros/sensores están reportando los camiones en las últimas 
 """
 
 import os
+import sys
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+
 import pymysql
 from dotenv import load_dotenv
-from datetime import datetime, timedelta, timezone
-from collections import defaultdict
-import sys
 
 # Cargar variables de entorno
 load_dotenv()
@@ -199,7 +200,7 @@ def main():
                         if data["last_value"]
                         else "NULL"
                     )
-                except:
+                except (ValueError, TypeError) as e:
                     last_val = str(data["last_value"])[:12]
 
                 # Formatear última actualización

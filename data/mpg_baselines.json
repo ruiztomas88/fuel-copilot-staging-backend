@@ -1,0 +1,13 @@
+{
+  "ACTIVE002": {
+    "truck_id": "ACTIVE002",
+    "baseline_mpg": 5.8,
+    "min_observed": 5.7,
+    "max_observed": 5.8,
+    "sample_count": 1,
+    "last_updated": 1766293082.913169,
+    "confidence": "LOW",
+    "_mpg_sum": 5.8,
+    "_mpg_squared_sum": 33.64
+  }
+}

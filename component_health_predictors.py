@@ -27,13 +27,13 @@ Version: 1.0.0
 Created: December 2025
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
-from enum import Enum
-from collections import deque
 import logging
 import statistics
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +117,17 @@ class TurboHealthPredictor:
     Warning Signs:
     - High intercooler temps = Turbo overheating
     - Low boost pressure = Turbo degradation
+
+    🆕 STANDARDIZED: Temperatures in °F (Fahrenheit) for consistency across all modules
     """
 
-    # Normal operating ranges
-    INTERCOOLER_TEMP_NORMAL = (30, 65)
-    INTERCOOLER_TEMP_WARNING = 75
-    INTERCOOLER_TEMP_CRITICAL = 85
+    # 🆕 STANDARDIZED: Changed from °C to °F for consistency
+    # Normal: 86-149°F (30-65°C)
+    # Warning: 167°F (75°C)
+    # Critical: 185°F (85°C)
+    INTERCOOLER_TEMP_NORMAL = (86, 149)  # °F (was 30-65°C)
+    INTERCOOLER_TEMP_WARNING = 167  # °F (was 75°C)
+    INTERCOOLER_TEMP_CRITICAL = 185  # °F (was 85°C)
 
     BOOST_PRESSURE_MIN = 15
     BOOST_PRESSURE_NORMAL = (20, 35)
@@ -130,6 +135,32 @@ class TurboHealthPredictor:
     def __init__(self, history_size: int = 100):
         self._readings: Dict[str, Dict[str, deque]] = {}
         self.history_size = history_size
+
+    @staticmethod
+    def ensure_fahrenheit(temp: float) -> float:
+        """
+        Ensure temperature is in Fahrenheit.
+
+        Auto-detects if value is likely Celsius and converts.
+
+        HEURISTIC:
+        - If temp < 100 → likely Celsius (intercooler rarely >100°F but often >100°C is rare)
+        - If temp >= 100 → likely Fahrenheit
+
+        Args:
+            temp: Temperature value (°C or °F)
+
+        Returns:
+            Temperature in °F
+        """
+        # Intercooler temps are typically 30-85°C (86-185°F)
+        # If value is < 100, it's almost certainly Celsius
+        if temp < 100:
+            # Convert C to F: F = (C * 9/5) + 32
+            return (temp * 9 / 5) + 32
+
+        # Already in Fahrenheit
+        return temp
 
     def add_reading(
         self,
@@ -148,8 +179,11 @@ class TurboHealthPredictor:
         ts = timestamp or datetime.now(timezone.utc)
 
         if intrclr_t is not None:
+            # 🆕 Ensure temperature is in Fahrenheit
+            intrclr_t_f = self.ensure_fahrenheit(intrclr_t)
+
             self._readings[truck_id]["intrclr_t"].append(
-                SensorReading(ts, intrclr_t, "intrclr_t", "°C")
+                SensorReading(ts, intrclr_t_f, "intrclr_t", "°F")
             )
         if intake_pres is not None:
             self._readings[truck_id]["intake_pres"].append(
@@ -192,15 +226,15 @@ class TurboHealthPredictor:
 
             if max_temp >= self.INTERCOOLER_TEMP_CRITICAL:
                 score -= 50
-                alerts.append(f"⛔ Temp intercooler CRÍTICA: {max_temp:.1f}°C")
+                alerts.append(f"⛔ Temp intercooler CRÍTICA: {max_temp:.1f}°F")
                 recommendations.append("Detener. Verificar turbo y enfriamiento.")
             elif max_temp >= self.INTERCOOLER_TEMP_WARNING:
                 score -= 25
-                alerts.append(f"⚠️ Temp intercooler alta: {max_temp:.1f}°C")
+                alerts.append(f"⚠️ Temp intercooler alta: {max_temp:.1f}°F")
                 recommendations.append("Programar revisión de turbo.")
             elif avg_temp > self.INTERCOOLER_TEMP_NORMAL[1]:
                 score -= 10
-                alerts.append(f"ℹ️ Temp intercooler elevada: {avg_temp:.1f}°C")
+                alerts.append(f"ℹ️ Temp intercooler elevada: {avg_temp:.1f}°F")
 
         # Analyze boost/intake pressure
         pressure_data = list(readings["intake_pres"])

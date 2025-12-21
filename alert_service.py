@@ -30,15 +30,16 @@ Setup:
 - Uses timezone_utils for consistent UTC handling
 """
 
-import os
 import logging
+import os
 import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from dotenv import load_dotenv
 
 from timezone_utils import utc_now
@@ -1416,6 +1417,58 @@ class AlertManager:
             },
         )
         return self.send_alert(alert, channels=channels)
+
+    def cleanup_inactive_trucks(
+        self, active_truck_ids: set, max_inactive_days: int = 30
+    ) -> int:
+        """
+        🆕 v6.5.0: Remove alert history and rate limiters for inactive trucks.
+
+        Prevents memory leaks from trucks removed from fleet.
+
+        Args:
+            active_truck_ids: Set of currently active truck IDs
+            max_inactive_days: Days of inactivity before cleanup (default 30)
+
+        Returns:
+            Number of trucks cleaned up
+        """
+        from datetime import timedelta
+
+        cleaned_count = 0
+        cutoff_time = utc_now() - timedelta(days=max_inactive_days)
+
+        # Clean rate limit trackers
+        trucks_to_remove = []
+        for truck_id in self._last_alert_by_truck.keys():
+            if truck_id not in active_truck_ids:
+                trucks_to_remove.append(truck_id)
+
+        for truck_id in trucks_to_remove:
+            del self._last_alert_by_truck[truck_id]
+            cleaned_count += 1
+
+        # Clean type-based rate limiters
+        type_keys_to_remove = []
+        for type_key in self._last_alert_by_type.keys():
+            truck_id = type_key.split(":")[0]
+            if truck_id not in active_truck_ids:
+                type_keys_to_remove.append(type_key)
+
+        for type_key in type_keys_to_remove:
+            del self._last_alert_by_type[type_key]
+
+        # Clean alert history (keep recent alerts even if truck inactive)
+        self._alert_history = [
+            alert
+            for alert in self._alert_history
+            if alert.truck_id in active_truck_ids or alert.timestamp > cutoff_time
+        ]
+
+        if cleaned_count > 0:
+            logger.info(f"🧹 Cleaned up alert data for {cleaned_count} inactive trucks")
+
+        return cleaned_count
 
 
 # Global instance for easy access

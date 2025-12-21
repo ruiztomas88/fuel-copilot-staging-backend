@@ -27,8 +27,8 @@ Version: 1.0.0
 Created: December 2025
 """
 
-import logging
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -46,8 +46,9 @@ _mysql_available = False
 _sqlalchemy_engine = None
 
 try:
-    from database_mysql import get_sqlalchemy_engine
     from sqlalchemy import text
+
+    from database_mysql import get_sqlalchemy_engine
 
     _mysql_available = True
     logger.info("✅ MySQL available for Predictive Maintenance persistence")
@@ -1283,6 +1284,58 @@ class PredictiveMaintenanceEngine:
         if self._use_mysql:
             self._flush_mysql_writes()
         logger.info(f"💾 PM Engine flush complete (MySQL={self._use_mysql})")
+
+    def cleanup_inactive_trucks(
+        self, active_truck_ids: set, max_inactive_days: int = 30
+    ) -> int:
+        """
+        🆕 v6.5.0: Remove sensor history for trucks inactive > max_inactive_days.
+
+        Prevents memory leaks from trucks removed from fleet.
+
+        Args:
+            active_truck_ids: Set of currently active truck IDs
+            max_inactive_days: Days of inactivity before cleanup (default 30)
+
+        Returns:
+            Number of trucks cleaned up
+        """
+        from datetime import timedelta
+
+        cleaned_count = 0
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=max_inactive_days)
+        trucks_to_remove = []
+
+        for truck_id, sensors in self.histories.items():
+            # Remove if not in active fleet
+            if truck_id not in active_truck_ids:
+                trucks_to_remove.append(truck_id)
+                continue
+
+            # Check if last data is older than cutoff
+            has_recent = False
+            for sensor_history in sensors.values():
+                if (
+                    sensor_history.readings
+                    and sensor_history.readings[-1].timestamp > cutoff_time
+                ):
+                    has_recent = True
+                    break
+
+            if not has_recent:
+                trucks_to_remove.append(truck_id)
+
+        # Remove inactive trucks
+        for truck_id in trucks_to_remove:
+            del self.histories[truck_id]
+            if truck_id in self.active_predictions:
+                del self.active_predictions[truck_id]
+            if truck_id in self.last_analysis:
+                del self.last_analysis[truck_id]
+            cleaned_count += 1
+            logger.info(f"🧹 Cleaned up PM history for inactive truck: {truck_id}")
+
+        return cleaned_count
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

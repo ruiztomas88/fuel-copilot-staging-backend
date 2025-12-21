@@ -10,11 +10,12 @@ Conecta a:
 2. Base de datos Fuel Copilot LOCAL - datos procesados
 """
 
+from collections import defaultdict
+from datetime import datetime, timedelta
+from pathlib import Path
+
 import pymysql
 import yaml
-from datetime import datetime, timedelta
-from collections import defaultdict
-from pathlib import Path
 
 # Configuración MySQL (Wialon DB - Remoto)
 WIALON_DB_CONFIG = {
@@ -147,8 +148,8 @@ def query_wialon_sensors(trucks):
         try:
             cursor.execute(f"SELECT * FROM {table_name} LIMIT 1")
             print(f"\n   ✅ Tabla '{table_name}' existe")
-        except:
-            pass
+        except Exception as e:
+            print(f"   ⏭️ Tabla '{table_name}' no encontrada: {e}")
 
     cursor.close()
     conn.close()

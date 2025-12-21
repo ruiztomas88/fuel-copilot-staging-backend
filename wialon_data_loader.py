@@ -22,13 +22,14 @@ Supported Data:
 """
 
 import logging
-import yaml
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable
-from dataclasses import dataclass, field
-from enum import Enum
 import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -169,8 +170,8 @@ class WialonDataLoader:
         if self.db_connection:
             try:
                 self.db_connection.close()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Error closing connection: {e}")
         self._is_connected = False
         logger.info("Disconnected from Wialon database")
 
@@ -182,7 +183,8 @@ class WialonDataLoader:
         try:
             self.db_connection.ping(reconnect=True)
             return True
-        except:
+        except Exception as e:
+            logger.debug(f"Connection ping failed: {e}")
             self._is_connected = False
             return False
 
@@ -630,7 +632,8 @@ class WialonDataLoader:
                     )
                     count = cursor.fetchone()[0]
                     inventory["sensors"][sensor] = count
-                except:
+                except Exception as e:
+                    logger.debug(f"Could not count sensor {sensor}: {e}")
                     inventory["sensors"][sensor] = 0
 
             # Check events

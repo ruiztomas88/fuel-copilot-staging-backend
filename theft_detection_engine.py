@@ -516,6 +516,43 @@ class TheftPatternAnalyzer:
             for truck_id in self._theft_history.keys()
         ]
 
+    def cleanup_inactive_trucks(
+        self, active_truck_ids: set, max_inactive_days: int = 30
+    ) -> int:
+        """
+        🆕 v6.5.0: Remove theft history for trucks inactive > max_inactive_days.
+
+        Prevents memory leaks from trucks removed from fleet.
+
+        Args:
+            active_truck_ids: Set of currently active truck IDs
+            max_inactive_days: Days of inactivity before cleanup (default 30)
+
+        Returns:
+            Number of trucks cleaned up
+        """
+        self._load_from_db()
+
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=max_inactive_days)
+        trucks_to_remove = []
+
+        for truck_id, history in self._theft_history.items():
+            # Remove if not in active fleet
+            if truck_id not in active_truck_ids:
+                trucks_to_remove.append(truck_id)
+                continue
+
+            # Check if last event is older than cutoff
+            if history and history[-1]["timestamp"] < cutoff_time:
+                trucks_to_remove.append(truck_id)
+
+        # Remove inactive trucks
+        for truck_id in trucks_to_remove:
+            del self._theft_history[truck_id]
+            logger.info(f"🧹 Cleaned up theft history for inactive truck: {truck_id}")
+
+        return len(trucks_to_remove)
+
 
 # Global pattern analyzer instance
 PATTERN_ANALYZER = TheftPatternAnalyzer()
@@ -537,7 +574,9 @@ class TheftDetectionConfig:
 
     # Movement thresholds
     parked_max_miles: float = 0.5  # Less than 0.5 mi = considered parked
-    parked_max_speed: float = 2.0  # Less than 2 mph = considered parked
+    # 🆕 UPDATED: Changed from 2.0 to 3.0 mph for consistency with wialon_sync_enhanced.py
+    # This ensures ALL theft detection paths use the same speed gating threshold
+    parked_max_speed: float = 3.0  # Less than 3 mph = considered parked (was 2.0)
 
     # Sensor health thresholds
     recovery_window_minutes: float = 30.0  # Check for recovery within 30 min

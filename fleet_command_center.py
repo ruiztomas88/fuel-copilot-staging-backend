@@ -4406,11 +4406,16 @@ class FleetCommandCenter:
 
                     # Map component to category
                     component_str = str(component or "").upper()
-                    if any(x in component_str for x in ["ENGINE", "MOTOR", "COOLANT", "OIL"]):
+                    if any(
+                        x in component_str
+                        for x in ["ENGINE", "MOTOR", "COOLANT", "OIL"]
+                    ):
                         issue_cat = IssueCategory.ENGINE
                     elif "TRANS" in component_str:
                         issue_cat = IssueCategory.TRANSMISSION
-                    elif any(x in component_str for x in ["ELECTRIC", "BATTERY", "VOLTAGE"]):
+                    elif any(
+                        x in component_str for x in ["ELECTRIC", "BATTERY", "VOLTAGE"]
+                    ):
                         issue_cat = IssueCategory.ELECTRICAL
                     elif any(x in component_str for x in ["FUEL", "DEF"]):
                         issue_cat = IssueCategory.FUEL
@@ -4428,7 +4433,8 @@ class FleetCommandCenter:
                             category=issue_cat,
                             component=component or f"DTC {dtc_code}",
                             title=f"[DTC] {dtc_code} - {component or 'Sistema Desconocido'}",
-                            description=description or f"Código DTC {dtc_code} detectado",
+                            description=description
+                            or f"Código DTC {dtc_code} detectado",
                             days_to_critical=None,
                             cost_if_ignored=None,
                             current_value=None,
@@ -4673,7 +4679,8 @@ class FleetCommandCenter:
                 from config import get_allowed_trucks
 
                 total_trucks = len(get_allowed_trucks())
-            except:
+            except Exception as e:
+                logger.warning(f"Could not load allowed trucks: {e}")
                 total_trucks = 45  # Fallback to known fleet size
 
         # Update sensor_status.total_trucks if it was 0

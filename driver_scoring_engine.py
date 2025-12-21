@@ -30,18 +30,18 @@ Version: 1.0.0
 Created: December 2025
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from enum import Enum
 import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 # Import Pacific Track events for scoring
 try:
     from pacific_track_events import (
+        SCORING_EVENTS,
         calculate_driver_score_impact,
         get_event_description,
-        SCORING_EVENTS,
     )
 
     PACIFIC_TRACK_AVAILABLE = True
@@ -533,6 +533,52 @@ class DriverScoringEngine:
             )
 
         return tips
+
+    def cleanup_inactive_trucks(
+        self, active_truck_ids: set, max_inactive_days: int = 30
+    ) -> int:
+        """
+        🆕 v6.5.0: Remove driver events for trucks inactive > max_inactive_days.
+
+        Prevents memory leaks from trucks removed from fleet.
+
+        Args:
+            active_truck_ids: Set of currently active truck IDs
+            max_inactive_days: Days of inactivity before cleanup (default 30)
+
+        Returns:
+            Number of trucks cleaned up
+        """
+        from datetime import datetime, timedelta, timezone
+
+        cleaned_count = 0
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=max_inactive_days)
+
+        # Clean events
+        trucks_to_remove = []
+        for truck_id in self._events.keys():
+            if truck_id not in active_truck_ids:
+                trucks_to_remove.append(truck_id)
+                continue
+
+            # Check if last event is older than cutoff
+            events = self._events[truck_id]
+            if events and events[-1].timestamp < cutoff_time:
+                trucks_to_remove.append(truck_id)
+
+        for truck_id in trucks_to_remove:
+            if truck_id in self._events:
+                del self._events[truck_id]
+            if truck_id in self._speeding_events:
+                del self._speeding_events[truck_id]
+            if truck_id in self._idle_hours:
+                del self._idle_hours[truck_id]
+            cleaned_count += 1
+            logger.info(
+                f"🧹 Cleaned up driver scoring data for inactive truck: {truck_id}"
+            )
+
+        return cleaned_count
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
