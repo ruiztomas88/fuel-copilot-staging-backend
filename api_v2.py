@@ -2443,3 +2443,270 @@ async def get_fleet_predictive_maintenance_summary():
         raise HTTPException(
             status_code=500, detail=f"Fleet maintenance analysis failed: {str(e)}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v7.1: FLEET METRICS ENDPOINTS - For Metrics Dashboard
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/fleet/summary")
+async def get_fleet_summary():
+    """
+    Fleet-wide summary metrics for dashboard.
+
+    Returns cost/mile, utilization, MPG, active trucks, etc.
+    """
+    try:
+        import pymysql
+
+        from db_connection import get_pymysql_connection
+
+        conn = get_pymysql_connection()
+        cursor = conn.cursor()
+
+        # Get basic fleet stats from last 7 days
+        query = """
+        SELECT 
+            COUNT(DISTINCT truck_id) as active_trucks,
+            AVG(mpg) as avg_mpg,
+            SUM(distance_mi) as total_miles,
+            SUM(fuel_consumed_gal) as total_fuel_gal,
+            AVG(fuel_rate_gph) as avg_fuel_rate
+        FROM truck_sensors_cache
+        WHERE last_updated >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        """
+
+        cursor.execute(query)
+        fleet_stats = cursor.fetchone()
+
+        # Calculate cost metrics (assuming $3.50/gallon diesel)
+        fuel_price_per_gallon = 3.50
+        total_fuel_cost = (
+            fleet_stats.get("total_fuel_gal") or 0
+        ) * fuel_price_per_gallon
+        total_miles = fleet_stats.get("total_miles") or 1
+        cost_per_mile = total_fuel_cost / total_miles if total_miles > 0 else 0
+
+        # Get utilization from daily_truck_metrics (last 7 days avg)
+        util_query = """
+        SELECT 
+            AVG(active_hours) as avg_active_hours,
+            AVG(idle_hours) as avg_idle_hours,
+            AVG(parked_hours) as avg_parked_hours
+        FROM daily_truck_metrics
+        WHERE date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+        """
+
+        cursor.execute(util_query)
+        util_stats = cursor.fetchone()
+
+        avg_active = util_stats.get("avg_active_hours") or 0
+        avg_idle = util_stats.get("avg_idle_hours") or 0
+        avg_parked = util_stats.get("avg_parked_hours") or 0
+        total_hours = avg_active + avg_idle + avg_parked
+        utilization_pct = (avg_active / total_hours * 100) if total_hours > 0 else 0
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "active_trucks": fleet_stats.get("active_trucks") or 0,
+            "avg_mpg": round(fleet_stats.get("avg_mpg") or 0, 2),
+            "cost_per_mile": round(cost_per_mile, 2),
+            "utilization_pct": round(utilization_pct, 1),
+            "total_miles": round(total_miles, 0),
+            "total_fuel_cost": round(total_fuel_cost, 2),
+            "fuel_price_per_gallon": fuel_price_per_gallon,
+            "period_days": 7,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get fleet summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Fleet summary failed: {str(e)}")
+
+
+@router.get("/fleet/cost-analysis")
+async def get_fleet_cost_analysis(
+    period: str = Query(default="week", pattern="^(week|month|quarter)$")
+):
+    """
+    Fleet cost breakdown and analysis.
+
+    Returns cost distribution, cost per mile by truck, trends.
+    """
+    try:
+        import pymysql
+
+        from db_connection import get_pymysql_connection
+
+        conn = get_pymysql_connection()
+        cursor = conn.cursor()
+
+        # Determine date range
+        if period == "week":
+            days = 7
+        elif period == "month":
+            days = 30
+        else:  # quarter
+            days = 90
+
+        # Get per-truck costs
+        query = """
+        SELECT 
+            truck_id,
+            SUM(fuel_consumed_gal) as fuel_gal,
+            SUM(distance_mi) as miles,
+            AVG(mpg) as avg_mpg
+        FROM truck_sensors_cache
+        WHERE last_updated >= DATE_SUB(NOW(), INTERVAL %s DAY)
+        GROUP BY truck_id
+        ORDER BY fuel_gal DESC
+        """
+
+        cursor.execute(query, (days,))
+        trucks = cursor.fetchall()
+
+        fuel_price = 3.50  # $/gallon
+
+        truck_costs = []
+        total_fuel_cost = 0
+
+        for truck in trucks:
+            fuel_cost = (truck.get("fuel_gal") or 0) * fuel_price
+            miles = truck.get("miles") or 1
+            cost_per_mile = fuel_cost / miles if miles > 0 else 0
+
+            truck_costs.append(
+                {
+                    "truck_id": truck.get("truck_id"),
+                    "fuel_cost": round(fuel_cost, 2),
+                    "miles": round(miles, 0),
+                    "cost_per_mile": round(cost_per_mile, 2),
+                    "avg_mpg": round(truck.get("avg_mpg") or 0, 2),
+                }
+            )
+
+            total_fuel_cost += fuel_cost
+
+        # Estimate other costs (maintenance ~30% of fuel, labor ~40% of fuel)
+        maintenance_cost = total_fuel_cost * 0.30
+        labor_cost = total_fuel_cost * 0.40
+        total_cost = total_fuel_cost + maintenance_cost + labor_cost
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "period": period,
+            "days": days,
+            "cost_distribution": {
+                "fuel": round(total_fuel_cost, 2),
+                "maintenance": round(maintenance_cost, 2),
+                "labor": round(labor_cost, 2),
+                "total": round(total_cost, 2),
+            },
+            "cost_by_truck": truck_costs,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get cost analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Cost analysis failed: {str(e)}")
+
+
+@router.get("/fleet/utilization")
+async def get_fleet_utilization(
+    period: str = Query(default="week", pattern="^(week|month|quarter)$")
+):
+    """
+    Fleet utilization metrics.
+
+    Returns active/idle/parked time distribution by truck.
+    """
+    try:
+        import pymysql
+
+        from db_connection import get_pymysql_connection
+
+        conn = get_pymysql_connection()
+        cursor = conn.cursor()
+
+        # Determine date range
+        if period == "week":
+            days = 7
+        elif period == "month":
+            days = 30
+        else:  # quarter
+            days = 90
+
+        # Get utilization from daily_truck_metrics
+        query = """
+        SELECT 
+            truck_id,
+            AVG(active_hours) as avg_active,
+            AVG(idle_hours) as avg_idle,
+            AVG(parked_hours) as avg_parked
+        FROM daily_truck_metrics
+        WHERE date >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
+        GROUP BY truck_id
+        """
+
+        cursor.execute(query, (days,))
+        trucks = cursor.fetchall()
+
+        truck_utilization = []
+        total_active = 0
+        total_idle = 0
+        total_parked = 0
+
+        for truck in trucks:
+            active = truck.get("avg_active") or 0
+            idle = truck.get("avg_idle") or 0
+            parked = truck.get("avg_parked") or 0
+            total = active + idle + parked
+
+            utilization_pct = (active / total * 100) if total > 0 else 0
+
+            truck_utilization.append(
+                {
+                    "truck_id": truck.get("truck_id"),
+                    "active_hours": round(active, 1),
+                    "idle_hours": round(idle, 1),
+                    "parked_hours": round(parked, 1),
+                    "utilization_pct": round(utilization_pct, 1),
+                }
+            )
+
+            total_active += active
+            total_idle += idle
+            total_parked += parked
+
+        total_hours = total_active + total_idle + total_parked
+        fleet_utilization_pct = (
+            (total_active / total_hours * 100) if total_hours > 0 else 0
+        )
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "period": period,
+            "days": days,
+            "fleet_summary": {
+                "active_hours": round(total_active, 1),
+                "idle_hours": round(total_idle, 1),
+                "parked_hours": round(total_parked, 1),
+                "utilization_pct": round(fleet_utilization_pct, 1),
+            },
+            "by_truck": truck_utilization,
+            "target_utilization_pct": 60.0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get utilization: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Utilization analysis failed: {str(e)}"
+        )
