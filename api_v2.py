@@ -2157,7 +2157,7 @@ async def get_mpg_context(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@router.get("/api/v2/trucks/{truck_id}/predictive-maintenance")
+@router.get("/trucks/{truck_id}/predictive-maintenance")
 async def get_predictive_maintenance(truck_id: str):
     """
     🔧 Predictive Maintenance v4 - RUL (Remaining Useful Life) Predictor
@@ -2315,7 +2315,7 @@ async def get_predictive_maintenance(truck_id: str):
         )
 
 
-@router.get("/api/v2/fleet/predictive-maintenance-summary")
+@router.get("/fleet/predictive-maintenance-summary")
 async def get_fleet_predictive_maintenance_summary():
     """
     Fleet-wide predictive maintenance summary.
