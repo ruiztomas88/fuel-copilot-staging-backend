@@ -2443,3 +2443,254 @@ async def get_fleet_predictive_maintenance_summary():
         raise HTTPException(
             status_code=500, detail=f"Fleet maintenance analysis failed: {str(e)}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v7.1: FLEET METRICS ENDPOINTS - For Metrics Dashboard
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@router.get("/fleet/summary")
+async def get_fleet_summary():
+    """
+    Fleet-wide summary metrics for dashboard.
+
+    Returns cost/mile, utilization, MPG, active trucks, etc.
+    """
+    try:
+        import pymysql
+
+        from db_connection import get_pymysql_connection
+
+        with get_pymysql_connection() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                # Calculate metrics from fuel_metrics (last 7 days)
+                # Using: odometer_mi, estimated_gallons, mpg_current
+                # Cost estimate: $3.50/gallon
+                cursor.execute(
+                    """
+                    SELECT 
+                        AVG(CASE WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi ELSE 0 END) as avg_cost_per_mile,
+                        COUNT(DISTINCT truck_id) as active_trucks,
+                        AVG(mpg_current) as avg_mpg,
+                        SUM(odometer_mi) as total_miles,
+                        SUM(estimated_gallons * 3.50) as total_fuel_cost
+                    FROM fuel_metrics
+                    WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                        AND odometer_mi > 0
+                """
+                )
+
+                metrics = cursor.fetchone()
+
+                # Get utilization from fuel_metrics (engine_hours vs idle_hours_ecu)
+                cursor.execute(
+                    """
+                    SELECT 
+                        SUM(engine_hours) as total_engine,
+                        SUM(idle_hours_ecu) as total_idle
+                    FROM fuel_metrics
+                    WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                """
+                )
+
+                util = cursor.fetchone()
+
+                total_engine = util.get("total_engine") or 0
+                total_idle = util.get("total_idle") or 0
+                active = total_engine - total_idle
+                utilization_pct = (
+                    (active / total_engine * 100) if total_engine > 0 else 0
+                )
+
+        return {
+            "cost_per_mile": round(
+                float(metrics["avg_cost_per_mile"] or 0), 2
+            ),
+            "active_trucks": metrics["active_trucks"] or 0,
+            "avg_mpg": round(float(metrics["avg_mpg"] or 0), 2),
+            "utilization_pct": round(utilization_pct, 1),
+            "total_miles": round(float(metrics["total_miles"] or 0), 1),
+            "total_fuel_cost": round(float(metrics["total_fuel_cost"] or 0), 2),
+            "period_days": 7,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get fleet summary: {e}")
+        raise HTTPException(status_code=500, detail=f"Fleet summary failed: {str(e)}")
+
+
+@router.get("/fleet/cost-analysis")
+async def get_fleet_cost_analysis():
+    """
+    Fleet cost analysis with breakdown by category and truck.
+
+    Returns:
+    - Cost distribution (fuel, maintenance, labor)
+    - Per-truck cost analysis
+    - Monthly trends
+    """
+    try:
+        import mysql.connector
+
+        DB_CONFIG = {
+            "host": "localhost",
+            "port": 3306,
+            "user": os.getenv("MYSQL_USER", "fuel_admin"),
+            "password": os.getenv("MYSQL_PASSWORD"),
+            "database": "fuel_copilot",
+        }
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+
+        # Get fuel costs from fuel_metrics (estimated at $3.50/gal)
+        cursor.execute(
+            """
+            SELECT 
+                SUM(estimated_gallons * 3.50) as total_fuel_cost
+            FROM fuel_metrics
+            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        """
+        )
+
+        fuel_data = cursor.fetchone()
+        total_fuel = float(fuel_data["total_fuel_cost"] or 0.0)
+
+        # Estimate maintenance and labor (industry standard percentages)
+        total_maintenance = total_fuel * 0.30  # 30% of fuel cost
+        total_labor = total_fuel * 0.40  # 40% of fuel cost
+
+        # Get per-truck cost breakdown
+        cursor.execute(
+            """
+            SELECT 
+                truck_id,
+                AVG(CASE WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi ELSE 0 END) as cost_per_mile,
+                SUM(estimated_gallons * 3.50) as total_cost,
+                SUM(odometer_mi) as total_miles
+            FROM fuel_metrics
+            WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY truck_id
+            HAVING total_miles > 0
+            ORDER BY cost_per_mile DESC
+        """
+        )
+
+        truck_costs = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "cost_distribution": {
+                "fuel": round(total_fuel, 2),
+                "maintenance": round(total_maintenance, 2),
+                "labor": round(total_labor, 2),
+            },
+            "cost_by_truck": [
+                {
+                    "truck_id": row["truck_id"],
+                    "cost_per_mile": round(float(row["cost_per_mile"] or 0), 2),
+                    "total_cost": round(float(row["total_cost"] or 0), 2),
+                    "total_miles": round(float(row["total_miles"] or 0), 1),
+                }
+                for row in truck_costs
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get cost analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Cost analysis failed: {str(e)}")
+
+
+@router.get("/fleet/utilization")
+async def get_fleet_utilization(
+    period: str = Query(default="week", pattern="^(week|month|quarter)$")
+):
+    """
+    Fleet utilization metrics.
+
+    Returns active/idle/parked time distribution by truck.
+    """
+    try:
+        import pymysql
+
+        from db_connection import get_pymysql_connection
+
+        with get_pymysql_connection() as conn:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                # Determine date range
+                if period == "week":
+                    days = 7
+                elif period == "month":
+                    days = 30
+                else:  # quarter
+                    days = 90
+
+                # Get utilization from fuel_metrics (using idle_hours_ecu)
+                query = """
+                SELECT 
+                    truck_id,
+                    SUM(engine_hours) as total_engine_hours,
+                    SUM(idle_hours_ecu) as total_idle_hours,
+                    AVG(CASE WHEN engine_hours > 0 
+                        THEN ((engine_hours - idle_hours_ecu) / engine_hours) * 100 
+                        ELSE 0 END) as avg_utilization_pct
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                GROUP BY truck_id
+                HAVING total_engine_hours > 0
+                """
+
+                cursor.execute(query, (days,))
+                trucks = cursor.fetchall()
+
+                truck_utilization = []
+                total_active = 0
+                total_idle = 0
+
+                for truck in trucks:
+                    engine_hours = truck.get("total_engine_hours") or 0
+                    idle_hours = truck.get("total_idle_hours") or 0
+                    active_hours = max(0, engine_hours - idle_hours)
+                    utilization_pct = truck.get("avg_utilization_pct") or 0
+
+                    truck_utilization.append(
+                        {
+                            "truck_id": truck.get("truck_id"),
+                            "active_hours": round(active_hours, 1),
+                            "idle_hours": round(idle_hours, 1),
+                            "engine_hours": round(engine_hours, 1),
+                            "utilization_pct": round(utilization_pct, 1),
+                        }
+                    )
+
+                    total_active += active_hours
+                    total_idle += idle_hours
+
+                total_hours = total_active + total_idle
+                fleet_utilization_pct = (
+                    (total_active / total_hours * 100) if total_hours > 0 else 0
+                )
+
+        return {
+            "period": period,
+            "days": days,
+            "fleet_summary": {
+                "active_hours": round(total_active, 1),
+                "idle_hours": round(total_idle, 1),
+                "total_hours": round(total_hours, 1),
+                "utilization_pct": round(fleet_utilization_pct, 1),
+            },
+            "by_truck": truck_utilization,
+            "target_utilization_pct": 60.0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get utilization: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Utilization analysis failed: {str(e)}"
+        )
