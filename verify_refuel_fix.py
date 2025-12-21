@@ -3,9 +3,10 @@
 verify_refuel_fix.py - Verify refuel immediate save fix is working
 🔧 v5.17.1: Monitor refuel detection and verify immediate saves to database
 """
-import pymysql
-from datetime import datetime, timedelta
 import time
+from datetime import datetime, timedelta
+
+import pymysql
 
 # Database config
 DB_CONFIG = {
@@ -17,19 +18,21 @@ DB_CONFIG = {
     "port": 3306,
 }
 
+
 def check_recent_refuels(minutes=30):
     """Check for refuels detected in fuel_metrics and verify they were saved"""
     conn = pymysql.connect(**DB_CONFIG)
     cursor = conn.cursor(pymysql.cursors.DictCursor)
-    
+
     cutoff_time = datetime.now() - timedelta(minutes=minutes)
-    
+
     print(f"\n🔍 Checking refuels in last {minutes} minutes...")
     print(f"   Cutoff: {cutoff_time}")
     print("=" * 80)
-    
+
     # Find refuel detections in fuel_metrics
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT 
             truck_id,
             timestamp_utc,
@@ -42,19 +45,21 @@ def check_recent_refuels(minutes=30):
         WHERE timestamp_utc >= %s
           AND refuel_detected = 'YES'
         ORDER BY truck_id, timestamp_utc
-    """, (cutoff_time,))
-    
+    """,
+        (cutoff_time,),
+    )
+
     detections = cursor.fetchall()
-    
+
     if not detections:
         print("✅ No refuels detected (nothing to verify)")
         cursor.close()
         conn.close()
         return True
-    
+
     print(f"\n📊 Found {len(detections)} refuel detection(s) in fuel_metrics:")
     print()
-    
+
     all_saved = True
     for det in detections:
         truck_id = det["truck_id"]
@@ -62,12 +67,13 @@ def check_recent_refuels(minutes=30):
         sensor = det["sensor_pct"]
         kalman = det["kalman_pct"]
         drift = det["drift_pct"]
-        
+
         print(f"🚛 [{truck_id}] @ {ts}")
         print(f"   Sensor: {sensor:.1f}%, Kalman: {kalman:.1f}%, Drift: {drift:.1f}%")
-        
+
         # Check if it was saved to refuel_events
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT 
                 id,
                 timestamp_utc,
@@ -80,10 +86,12 @@ def check_recent_refuels(minutes=30):
               AND ABS(TIMESTAMPDIFF(SECOND, timestamp_utc, %s)) <= 120
             ORDER BY ABS(TIMESTAMPDIFF(SECOND, timestamp_utc, %s))
             LIMIT 1
-        """, (truck_id, ts, ts))
-        
+        """,
+            (truck_id, ts, ts),
+        )
+
         saved = cursor.fetchone()
-        
+
         if saved:
             print(f"   ✅ SAVED to refuel_events:")
             print(f"      ID: {saved['id']}")
@@ -94,12 +102,12 @@ def check_recent_refuels(minutes=30):
         else:
             print(f"   ❌ NOT SAVED to refuel_events!")
             all_saved = False
-        
+
         print()
-    
+
     cursor.close()
     conn.close()
-    
+
     if all_saved:
         print("=" * 80)
         print("✅ SUCCESS: All detected refuels were saved to database")
@@ -108,8 +116,9 @@ def check_recent_refuels(minutes=30):
         print("=" * 80)
         print("❌ FAILURE: Some refuels were detected but NOT saved")
         print("=" * 80)
-    
+
     return all_saved
+
 
 def monitor_live(check_interval_seconds=60):
     """Monitor refuel detection in real-time"""
@@ -117,7 +126,7 @@ def monitor_live(check_interval_seconds=60):
     print(f"   Checking every {check_interval_seconds} seconds")
     print("   Press Ctrl+C to stop")
     print()
-    
+
     try:
         while True:
             check_recent_refuels(minutes=5)
@@ -126,9 +135,10 @@ def monitor_live(check_interval_seconds=60):
     except KeyboardInterrupt:
         print("\n\n👋 Monitoring stopped")
 
+
 if __name__ == "__main__":
     import sys
-    
+
     if len(sys.argv) > 1 and sys.argv[1] == "live":
         monitor_live()
     else:

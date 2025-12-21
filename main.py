@@ -2427,7 +2427,15 @@ async def get_enhanced_loss_analysis_endpoint(
     days: int = Query(default=1, ge=1, le=30, description="Days to analyze")
 ):
     """
-    🆕 v6.3.0: Enhanced Loss Analysis with 5 Root Cause Categories
+    🆕 v6.4.0: Enhanced Loss Analysis V2 with ROI & Actionable Insights
+
+    Major improvements:
+    - 4-tier severity classification (CRITICAL/HIGH/MEDIUM/LOW)
+    - Actionable insights with detailed ROI calculations
+    - Implementation cost estimates & payback periods
+    - Priority scoring for action items
+    - Quick wins identification (high impact, low effort)
+    - Annual savings potential with confidence intervals
 
     Provides detailed breakdown of fuel losses by category:
     1. EXCESSIVE IDLE: truck_status='STOPPED' with engine running (~40%)
@@ -2436,19 +2444,17 @@ async def get_enhanced_loss_analysis_endpoint(
     4. HIGH ALTITUDE: Altitude > 3000 ft affecting efficiency (~10%)
     5. MECHANICAL/OTHER: Remaining efficiency losses (~10%)
 
-    Includes per-truck analysis with probable cause and actionable insights.
-
     Returns:
-        Comprehensive loss analysis with 5-category breakdown and USD impact
+        Comprehensive loss analysis with ROI insights and action recommendations
     """
     try:
-        from database_mysql import get_loss_analysis
+        from database_mysql import get_loss_analysis_v2
 
-        result = get_loss_analysis(days_back=days)
+        result = get_loss_analysis_v2(days_back=days)
         return result
 
     except Exception as e:
-        logger.error(f"Error in enhanced loss analysis: {e}")
+        logger.error(f"Error in enhanced loss analysis v2: {e}")
         raise HTTPException(
             status_code=500, detail=f"Error in enhanced loss analysis: {str(e)}"
         )

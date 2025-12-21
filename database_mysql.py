@@ -2653,7 +2653,7 @@ def get_enhanced_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
 def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
     """
     🆕 v5.19.0: Enhanced Loss Analysis V2 with Advanced Insights & ROI
-    
+
     Major improvements over v3.10.0:
     ✅ 4-tier severity classification (CRITICAL/HIGH/MEDIUM/LOW)
     ✅ Actionable insights with detailed ROI calculations
@@ -2661,7 +2661,7 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
     ✅ Payback period analysis
     ✅ Priority scoring for action items
     ✅ Confidence intervals on savings estimates
-    
+
     Returns comprehensive analysis with:
     - Per-truck severity classification
     - Fleet-wide loss breakdown
@@ -2671,27 +2671,27 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
     """
     BASELINE_MPG = FUEL.BASELINE_MPG
     FUEL_PRICE = FUEL.PRICE_PER_GALLON
-    
+
     # Use existing enhanced analysis as base
     base_analysis = get_enhanced_loss_analysis(days_back)
-    
+
     if base_analysis["truck_count"] == 0:
         return base_analysis
-    
+
     # Extract data
     trucks = base_analysis["trucks"]
     summary = base_analysis["summary"]
     total_loss_gal = summary["total_loss"]["gallons"]
     total_loss_usd = summary["total_loss"]["usd"]
-    
+
     # Enhanced severity classification (4 tiers)
     for truck in trucks:
         loss_gal = truck["total_loss"]["gallons"]
         loss_usd = truck["total_loss"]["usd"]
-        
+
         # Multi-factor severity scoring
         severity_score = 0
-        
+
         # Factor 1: Absolute loss (40% weight)
         if loss_usd > 100:
             severity_score += 40
@@ -2701,7 +2701,7 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
             severity_score += 20
         elif loss_usd > 10:
             severity_score += 10
-        
+
         # Factor 2: Loss percentage vs baseline (30% weight)
         if truck["total_miles"] > 0:
             expected_consumption = truck["total_miles"] / BASELINE_MPG
@@ -2715,7 +2715,7 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
                     severity_score += 15
                 elif loss_pct > 5:
                     severity_score += 10
-        
+
         # Factor 3: Primary cause severity (30% weight)
         primary = truck["primary_cause"]
         if primary == "SOBRECALENTAMIENTO":
@@ -2724,7 +2724,7 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
             severity_score += 20  # Behavioral = high
         else:
             severity_score += 10  # Environmental = medium
-        
+
         # Assign 4-tier severity
         if severity_score >= 70:
             truck["severity_v2"] = "CRITICAL"
@@ -2742,215 +2742,242 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
             truck["severity_v2"] = "LOW"
             truck["severity_color"] = "#10B981"
             truck["action_urgency"] = "MONITOR"
-        
+
         truck["severity_score"] = severity_score
-    
+
     # Generate enhanced insights with ROI
     enhanced_insights = []
-    
+
     # INSIGHT 1: Idle Reduction
     idle_loss_gal = summary["by_cause"]["idle"]["gallons"]
     if idle_loss_gal > 2:
         idle_trucks = [t for t in trucks if t["losses"]["idle"]["gallons"] > 1]
-        
+
         # Conservative savings estimate (50% reduction achievable)
         savings_gal = idle_loss_gal * 0.50
         savings_usd = savings_gal * FUEL_PRICE
         annual_savings = savings_usd * 365 / days_back
-        
+
         # Implementation cost
         impl_cost = len(idle_trucks) * 50  # $50/truck for training
         payback_days = (impl_cost / savings_usd) if savings_usd > 0 else 999
-        
-        enhanced_insights.append({
-            "id": "IDLE_REDUCTION",
-            "severity": "HIGH" if idle_loss_gal > 10 else "MEDIUM",
-            "category": "IDLE",
-            "title": "Excessive Idling Waste",
-            "finding": f"Fleet loses {idle_loss_gal:.1f} gal/day ({idle_loss_gal/total_loss_gal*100:.0f}% of total) to excessive idling",
-            "affected_trucks": len(idle_trucks),
-            "root_causes": [
-                "Drivers leaving engine running during breaks",
-                "Overnight idling for cabin climate",
-                "Extended warmup periods",
-                "Waiting at loading docks with engine on"
-            ],
-            "recommendation": {
-                "action": "Implement 5-minute idle shutdown policy",
-                "steps": [
-                    "1. Train drivers on APU usage instead of engine idle",
-                    "2. Install idle timers/alarms in cabs",
-                    "3. Monitor idle time via dashboards",
-                    "4. Incentivize low idle time (<10% of engine hours)"
+
+        enhanced_insights.append(
+            {
+                "id": "IDLE_REDUCTION",
+                "severity": "HIGH" if idle_loss_gal > 10 else "MEDIUM",
+                "category": "IDLE",
+                "title": "Excessive Idling Waste",
+                "finding": f"Fleet loses {idle_loss_gal:.1f} gal/day ({idle_loss_gal/total_loss_gal*100:.0f}% of total) to excessive idling",
+                "affected_trucks": len(idle_trucks),
+                "root_causes": [
+                    "Drivers leaving engine running during breaks",
+                    "Overnight idling for cabin climate",
+                    "Extended warmup periods",
+                    "Waiting at loading docks with engine on",
                 ],
-                "difficulty": "LOW",
-                "implementation_time_days": 7,
-            },
-            "roi": {
-                "savings_per_period_gal": round(savings_gal, 1),
-                "savings_per_period_usd": round(savings_usd, 2),
-                "annual_savings_usd": round(annual_savings, 2),
-                "implementation_cost_usd": impl_cost,
-                "payback_period_days": round(payback_days, 0),
-                "roi_percent": round((annual_savings / impl_cost - 1) * 100, 0) if impl_cost > 0 else 0,
-                "confidence": "HIGH (70-90% reduction achievable)"
-            },
-            "priority_score": 95,  # High savings, low cost, easy
-            "quick_win": True,
-        })
-    
+                "recommendation": {
+                    "action": "Implement 5-minute idle shutdown policy",
+                    "steps": [
+                        "1. Train drivers on APU usage instead of engine idle",
+                        "2. Install idle timers/alarms in cabs",
+                        "3. Monitor idle time via dashboards",
+                        "4. Incentivize low idle time (<10% of engine hours)",
+                    ],
+                    "difficulty": "LOW",
+                    "implementation_time_days": 7,
+                },
+                "roi": {
+                    "savings_per_period_gal": round(savings_gal, 1),
+                    "savings_per_period_usd": round(savings_usd, 2),
+                    "annual_savings_usd": round(annual_savings, 2),
+                    "implementation_cost_usd": impl_cost,
+                    "payback_period_days": round(payback_days, 0),
+                    "roi_percent": (
+                        round((annual_savings / impl_cost - 1) * 100, 0)
+                        if impl_cost > 0
+                        else 0
+                    ),
+                    "confidence": "HIGH (70-90% reduction achievable)",
+                },
+                "priority_score": 95,  # High savings, low cost, easy
+                "quick_win": True,
+            }
+        )
+
     # INSIGHT 2: RPM Optimization
     rpm_loss_gal = summary["by_cause"]["rpm"]["gallons"]
     if rpm_loss_gal > 1:
         rpm_trucks = [t for t in trucks if t["losses"]["rpm"]["gallons"] > 0.5]
-        
+
         savings_gal = rpm_loss_gal * 0.70  # 70% reduction with training
         savings_usd = savings_gal * FUEL_PRICE
         annual_savings = savings_usd * 365 / days_back
-        
+
         impl_cost = len(rpm_trucks) * 100  # $100/truck for advanced training
         payback_days = (impl_cost / savings_usd) if savings_usd > 0 else 999
-        
-        enhanced_insights.append({
-            "id": "RPM_OPTIMIZATION",
-            "severity": "MEDIUM",
-            "category": "DRIVING",
-            "title": "High RPM Fuel Waste",
-            "finding": f"Fleet wastes {rpm_loss_gal:.1f} gal/day to excessive RPM (>1800)",
-            "affected_trucks": len(rpm_trucks),
-            "root_causes": [
-                "Poor gear selection (running too low gear)",
-                "Aggressive acceleration patterns",
-                "Lack of cruise control usage",
-                "Unfamiliarity with optimal RPM range (1200-1600)"
-            ],
-            "recommendation": {
-                "action": "Driver training on RPM management",
-                "steps": [
-                    "1. Educate drivers: 1200-1600 RPM sweet spot",
-                    "2. Encourage cruise control on highways",
-                    "3. Install RPM alerts at 1800+ RPM",
-                    "4. Monthly performance reviews with RPM data"
+
+        enhanced_insights.append(
+            {
+                "id": "RPM_OPTIMIZATION",
+                "severity": "MEDIUM",
+                "category": "DRIVING",
+                "title": "High RPM Fuel Waste",
+                "finding": f"Fleet wastes {rpm_loss_gal:.1f} gal/day to excessive RPM (>1800)",
+                "affected_trucks": len(rpm_trucks),
+                "root_causes": [
+                    "Poor gear selection (running too low gear)",
+                    "Aggressive acceleration patterns",
+                    "Lack of cruise control usage",
+                    "Unfamiliarity with optimal RPM range (1200-1600)",
                 ],
-                "difficulty": "MEDIUM",
-                "implementation_time_days": 14,
-            },
-            "roi": {
-                "savings_per_period_gal": round(savings_gal, 1),
-                "savings_per_period_usd": round(savings_usd, 2),
-                "annual_savings_usd": round(annual_savings, 2),
-                "implementation_cost_usd": impl_cost,
-                "payback_period_days": round(payback_days, 0),
-                "roi_percent": round((annual_savings / impl_cost - 1) * 100, 0) if impl_cost > 0 else 0,
-                "confidence": "MEDIUM (50-80% reduction with proper training)"
-            },
-            "priority_score": 75,
-            "quick_win": False,
-        })
-    
+                "recommendation": {
+                    "action": "Driver training on RPM management",
+                    "steps": [
+                        "1. Educate drivers: 1200-1600 RPM sweet spot",
+                        "2. Encourage cruise control on highways",
+                        "3. Install RPM alerts at 1800+ RPM",
+                        "4. Monthly performance reviews with RPM data",
+                    ],
+                    "difficulty": "MEDIUM",
+                    "implementation_time_days": 14,
+                },
+                "roi": {
+                    "savings_per_period_gal": round(savings_gal, 1),
+                    "savings_per_period_usd": round(savings_usd, 2),
+                    "annual_savings_usd": round(annual_savings, 2),
+                    "implementation_cost_usd": impl_cost,
+                    "payback_period_days": round(payback_days, 0),
+                    "roi_percent": (
+                        round((annual_savings / impl_cost - 1) * 100, 0)
+                        if impl_cost > 0
+                        else 0
+                    ),
+                    "confidence": "MEDIUM (50-80% reduction with proper training)",
+                },
+                "priority_score": 75,
+                "quick_win": False,
+            }
+        )
+
     # INSIGHT 3: Speed Management
     speed_loss_gal = summary["by_cause"]["speed"]["gallons"]
     if speed_loss_gal > 1:
         speed_trucks = [t for t in trucks if t["losses"]["speed"]["gallons"] > 0.5]
-        
+
         savings_gal = speed_loss_gal * 0.80  # 80% reduction with speed limiters
         savings_usd = savings_gal * FUEL_PRICE
         annual_savings = savings_usd * 365 / days_back
-        
+
         impl_cost = 0  # Software-based speed limiter (already available)
         payback_days = 0  # Immediate
-        
-        enhanced_insights.append({
-            "id": "SPEED_LIMITER",
-            "severity": "MEDIUM",
-            "category": "DRIVING",
-            "title": "Overspeeding Fuel Waste",
-            "finding": f"Fleet loses {speed_loss_gal:.1f} gal/day to speeds >70 mph",
-            "affected_trucks": len(speed_trucks),
-            "root_causes": [
-                "Delivery time pressure",
-                "Driver habits / aggressive driving",
-                "No speed governor configured",
-                "Lack of monitoring/accountability"
-            ],
-            "recommendation": {
-                "action": "Enforce 65 mph speed limit via ECM programming",
-                "steps": [
-                    "1. Set ECM speed limiter to 65 mph",
-                    "2. Configure Wialon alerts for >65 mph",
-                    "3. Driver accountability system",
-                    "4. Adjust delivery schedules if needed"
+
+        enhanced_insights.append(
+            {
+                "id": "SPEED_LIMITER",
+                "severity": "MEDIUM",
+                "category": "DRIVING",
+                "title": "Overspeeding Fuel Waste",
+                "finding": f"Fleet loses {speed_loss_gal:.1f} gal/day to speeds >70 mph",
+                "affected_trucks": len(speed_trucks),
+                "root_causes": [
+                    "Delivery time pressure",
+                    "Driver habits / aggressive driving",
+                    "No speed governor configured",
+                    "Lack of monitoring/accountability",
                 ],
-                "difficulty": "LOW",
-                "implementation_time_days": 3,
-            },
-            "roi": {
-                "savings_per_period_gal": round(savings_gal, 1),
-                "savings_per_period_usd": round(savings_usd, 2),
-                "annual_savings_usd": round(annual_savings, 2),
-                "implementation_cost_usd": impl_cost,
-                "payback_period_days": round(payback_days, 0),
-                "roi_percent": 999,  # Infinite ROI (no cost)
-                "confidence": "HIGH (80%+ reduction guaranteed with limiter)"
-            },
-            "priority_score": 90,  # No cost, high savings
-            "quick_win": True,
-        })
-    
+                "recommendation": {
+                    "action": "Enforce 65 mph speed limit via ECM programming",
+                    "steps": [
+                        "1. Set ECM speed limiter to 65 mph",
+                        "2. Configure Wialon alerts for >65 mph",
+                        "3. Driver accountability system",
+                        "4. Adjust delivery schedules if needed",
+                    ],
+                    "difficulty": "LOW",
+                    "implementation_time_days": 3,
+                },
+                "roi": {
+                    "savings_per_period_gal": round(savings_gal, 1),
+                    "savings_per_period_usd": round(savings_usd, 2),
+                    "annual_savings_usd": round(annual_savings, 2),
+                    "implementation_cost_usd": impl_cost,
+                    "payback_period_days": round(payback_days, 0),
+                    "roi_percent": 999,  # Infinite ROI (no cost)
+                    "confidence": "HIGH (80%+ reduction guaranteed with limiter)",
+                },
+                "priority_score": 90,  # No cost, high savings
+                "quick_win": True,
+            }
+        )
+
     # INSIGHT 4: Mechanical Issues (Overheating)
     thermal_loss_gal = summary["by_cause"]["thermal"]["gallons"]
     if thermal_loss_gal > 0.5:
         thermal_trucks = [t for t in trucks if t["losses"]["thermal"]["gallons"] > 0.2]
-        
+
         savings_gal = thermal_loss_gal * 0.90  # Fix eliminates 90% of thermal loss
         savings_usd = savings_gal * FUEL_PRICE
         annual_savings = savings_usd * 365 / days_back
-        
+
         # Maintenance cost + prevented engine damage
         impl_cost = len(thermal_trucks) * 500  # $500/truck for cooling system service
         prevented_damage = len(thermal_trucks) * 2000  # Prevent $2k engine damage
-        payback_days = (impl_cost / (savings_usd + prevented_damage/30)) if savings_usd > 0 else 999
-        
-        enhanced_insights.append({
-            "id": "THERMAL_MAINTENANCE",
-            "severity": "CRITICAL",  # Engine damage risk
-            "category": "MECHANICAL",
-            "title": "Overheating - Urgent Maintenance Required",
-            "finding": f"{len(thermal_trucks)} trucks showing overheating ({thermal_loss_gal:.1f} gal/day waste + engine damage risk)",
-            "affected_trucks": len(thermal_trucks),
-            "root_causes": [
-                "Coolant level low or contaminated",
-                "Thermostat failure",
-                "Radiator blockage/debris",
-                "Water pump wear",
-                "Fan clutch malfunction"
-            ],
-            "recommendation": {
-                "action": "URGENT: Cooling system inspection & service",
-                "steps": [
-                    "1. IMMEDIATE inspection of all affected trucks",
-                    "2. Coolant flush & replacement",
-                    "3. Thermostat testing/replacement",
-                    "4. Radiator cleaning",
-                    "5. Water pump & fan clutch inspection"
+        payback_days = (
+            (impl_cost / (savings_usd + prevented_damage / 30))
+            if savings_usd > 0
+            else 999
+        )
+
+        enhanced_insights.append(
+            {
+                "id": "THERMAL_MAINTENANCE",
+                "severity": "CRITICAL",  # Engine damage risk
+                "category": "MECHANICAL",
+                "title": "Overheating - Urgent Maintenance Required",
+                "finding": f"{len(thermal_trucks)} trucks showing overheating ({thermal_loss_gal:.1f} gal/day waste + engine damage risk)",
+                "affected_trucks": len(thermal_trucks),
+                "root_causes": [
+                    "Coolant level low or contaminated",
+                    "Thermostat failure",
+                    "Radiator blockage/debris",
+                    "Water pump wear",
+                    "Fan clutch malfunction",
                 ],
-                "difficulty": "MEDIUM",
-                "implementation_time_days": 2,
-            },
-            "roi": {
-                "savings_per_period_gal": round(savings_gal, 1),
-                "savings_per_period_usd": round(savings_usd, 2),
-                "annual_savings_usd": round(annual_savings, 2),
-                "implementation_cost_usd": impl_cost,
-                "prevented_damage_usd": prevented_damage,
-                "payback_period_days": round(payback_days, 0),
-                "roi_percent": round(((annual_savings + prevented_damage) / impl_cost - 1) * 100, 0) if impl_cost > 0 else 0,
-                "confidence": "HIGH (prevents catastrophic engine failure)"
-            },
-            "priority_score": 100,  # Highest - safety & cost
-            "quick_win": False,
-        })
-    
+                "recommendation": {
+                    "action": "URGENT: Cooling system inspection & service",
+                    "steps": [
+                        "1. IMMEDIATE inspection of all affected trucks",
+                        "2. Coolant flush & replacement",
+                        "3. Thermostat testing/replacement",
+                        "4. Radiator cleaning",
+                        "5. Water pump & fan clutch inspection",
+                    ],
+                    "difficulty": "MEDIUM",
+                    "implementation_time_days": 2,
+                },
+                "roi": {
+                    "savings_per_period_gal": round(savings_gal, 1),
+                    "savings_per_period_usd": round(savings_usd, 2),
+                    "annual_savings_usd": round(annual_savings, 2),
+                    "implementation_cost_usd": impl_cost,
+                    "prevented_damage_usd": prevented_damage,
+                    "payback_period_days": round(payback_days, 0),
+                    "roi_percent": (
+                        round(
+                            ((annual_savings + prevented_damage) / impl_cost - 1) * 100,
+                            0,
+                        )
+                        if impl_cost > 0
+                        else 0
+                    ),
+                    "confidence": "HIGH (prevents catastrophic engine failure)",
+                },
+                "priority_score": 100,  # Highest - safety & cost
+                "quick_win": False,
+            }
+        )
+
     # INSIGHT 5: Route Optimization (High Altitude)
     altitude_loss_gal = summary["by_cause"]["altitude"]["gallons"]
     if altitude_loss_gal > 2:
@@ -2958,53 +2985,63 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
         savings_gal = altitude_loss_gal * 0.20  # Only 20% reduction possible
         savings_usd = savings_gal * FUEL_PRICE
         annual_savings = savings_usd * 365 / days_back
-        
+
         impl_cost = 500  # Route optimization software/analysis
         payback_days = (impl_cost / savings_usd) if savings_usd > 0 else 999
-        
-        enhanced_insights.append({
-            "id": "ROUTE_ALTITUDE",
-            "severity": "LOW",
-            "category": "ROUTING",
-            "title": "High Altitude Route Inefficiency",
-            "finding": f"Fleet loses {altitude_loss_gal:.1f} gal/day to high altitude routes (>3000 ft)",
-            "affected_trucks": "FLEET-WIDE",
-            "root_causes": [
-                "Mountain routes unavoidable",
-                "Altitude compensation not optimized",
-                "Heavy loads at altitude"
-            ],
-            "recommendation": {
-                "action": "Route optimization & load management",
-                "steps": [
-                    "1. Analyze alternate routes with lower elevations",
-                    "2. Schedule lighter loads for mountain routes",
-                    "3. Optimize gear selection for altitude",
-                    "4. Consider altitude-compensating fuel injection tuning"
+
+        enhanced_insights.append(
+            {
+                "id": "ROUTE_ALTITUDE",
+                "severity": "LOW",
+                "category": "ROUTING",
+                "title": "High Altitude Route Inefficiency",
+                "finding": f"Fleet loses {altitude_loss_gal:.1f} gal/day to high altitude routes (>3000 ft)",
+                "affected_trucks": "FLEET-WIDE",
+                "root_causes": [
+                    "Mountain routes unavoidable",
+                    "Altitude compensation not optimized",
+                    "Heavy loads at altitude",
                 ],
-                "difficulty": "HIGH",
-                "implementation_time_days": 30,
-            },
-            "roi": {
-                "savings_per_period_gal": round(savings_gal, 1),
-                "savings_per_period_usd": round(savings_usd, 2),
-                "annual_savings_usd": round(annual_savings, 2),
-                "implementation_cost_usd": impl_cost,
-                "payback_period_days": round(payback_days, 0),
-                "roi_percent": round((annual_savings / impl_cost - 1) * 100, 0) if impl_cost > 0 else 0,
-                "confidence": "LOW (limited control over routes)"
-            },
-            "priority_score": 30,  # Low - hard to change
-            "quick_win": False,
-        })
-    
+                "recommendation": {
+                    "action": "Route optimization & load management",
+                    "steps": [
+                        "1. Analyze alternate routes with lower elevations",
+                        "2. Schedule lighter loads for mountain routes",
+                        "3. Optimize gear selection for altitude",
+                        "4. Consider altitude-compensating fuel injection tuning",
+                    ],
+                    "difficulty": "HIGH",
+                    "implementation_time_days": 30,
+                },
+                "roi": {
+                    "savings_per_period_gal": round(savings_gal, 1),
+                    "savings_per_period_usd": round(savings_usd, 2),
+                    "annual_savings_usd": round(annual_savings, 2),
+                    "implementation_cost_usd": impl_cost,
+                    "payback_period_days": round(payback_days, 0),
+                    "roi_percent": (
+                        round((annual_savings / impl_cost - 1) * 100, 0)
+                        if impl_cost > 0
+                        else 0
+                    ),
+                    "confidence": "LOW (limited control over routes)",
+                },
+                "priority_score": 30,  # Low - hard to change
+                "quick_win": False,
+            }
+        )
+
     # Sort insights by priority score (highest first)
     enhanced_insights.sort(key=lambda x: x["priority_score"], reverse=True)
-    
+
     # Calculate total potential savings
-    total_potential_savings_usd = sum(i["roi"]["annual_savings_usd"] for i in enhanced_insights)
-    total_impl_cost = sum(i["roi"]["implementation_cost_usd"] for i in enhanced_insights)
-    
+    total_potential_savings_usd = sum(
+        i["roi"]["annual_savings_usd"] for i in enhanced_insights
+    )
+    total_impl_cost = sum(
+        i["roi"]["implementation_cost_usd"] for i in enhanced_insights
+    )
+
     # Build enhanced response
     return {
         **base_analysis,  # Include all original data
@@ -3013,17 +3050,25 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
         "action_summary": {
             "total_potential_annual_savings_usd": round(total_potential_savings_usd, 2),
             "total_implementation_cost_usd": total_impl_cost,
-            "net_annual_benefit_usd": round(total_potential_savings_usd - total_impl_cost, 2),
-            "fleet_roi_percent": round((total_potential_savings_usd / total_impl_cost - 1) * 100, 0) if total_impl_cost > 0 else 0,
+            "net_annual_benefit_usd": round(
+                total_potential_savings_usd - total_impl_cost, 2
+            ),
+            "fleet_roi_percent": (
+                round((total_potential_savings_usd / total_impl_cost - 1) * 100, 0)
+                if total_impl_cost > 0
+                else 0
+            ),
             "quick_wins": [i["title"] for i in enhanced_insights if i["quick_win"]],
-            "critical_actions": [i["title"] for i in enhanced_insights if i["severity"] == "CRITICAL"],
+            "critical_actions": [
+                i["title"] for i in enhanced_insights if i["severity"] == "CRITICAL"
+            ],
         },
         "severity_distribution": {
             "CRITICAL": len([t for t in trucks if t.get("severity_v2") == "CRITICAL"]),
             "HIGH": len([t for t in trucks if t.get("severity_v2") == "HIGH"]),
             "MEDIUM": len([t for t in trucks if t.get("severity_v2") == "MEDIUM"]),
             "LOW": len([t for t in trucks if t.get("severity_v2") == "LOW"]),
-        }
+        },
     }
 
 
