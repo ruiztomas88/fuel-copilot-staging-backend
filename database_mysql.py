@@ -1148,14 +1148,14 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
     5. MECHANICAL/OTHER (~10%): Catch-all for other inefficiencies
 
     Args:
-    """
-    # 🔒 SECURITY: Prevent division by zero
-    days_back = max(days_back, 1)
         days_back: Number of days to analyze (1, 7, or 30)
 
     Returns:
         Dict with loss breakdown by cause, totals, and per-truck details
     """
+    # 🔒 SECURITY: Prevent division by zero
+    days_back = max(days_back, 1)
+    
     # 🔧 FIX v3.9.2: Use centralized config for baseline values
     BASELINE_MPG = FUEL.BASELINE_MPG
     FUEL_PRICE = FUEL.PRICE_PER_GALLON
