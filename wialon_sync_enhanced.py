@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import mysql.connector  # 🆕 v6.5.1: For MPG state loading
 import pymysql
 import yaml
 from dotenv import load_dotenv
@@ -110,9 +111,15 @@ LOCAL_DB_CONFIG = {
     "autocommit": True,
 }
 
+# Alias for MPG loading function
+DB_CONFIG = LOCAL_DB_CONFIG
+
 # Security: Ensure password is set
 if not LOCAL_DB_CONFIG["password"]:
     raise RuntimeError("MYSQL_PASSWORD environment variable is required")
+
+# 🆕 v6.5.1: Global MPG config for state initialization
+mpg_config = MPGConfig()
 
 # State persistence paths
 DATA_DIR = Path(__file__).parent / "data"
@@ -271,11 +278,60 @@ class StateManager:
             return self.estimators[truck_id]
 
     def get_mpg_state(self, truck_id: str) -> MPGState:
-        """Get or create MPG state for a truck (thread-safe)"""
+        """Get or create MPG state for a truck (thread-safe)
+        
+        🔧 v6.5.1: Load last valid MPG from DB if state doesn't exist
+        This prevents "N.A" display after service restart - shows last known value
+        """
         with self._lock:
             if truck_id not in self.mpg_states:
-                self.mpg_states[truck_id] = MPGState()
+                # Try to load last valid MPG from database
+                last_mpg = self._load_last_mpg_from_db(truck_id)
+                self.mpg_states[truck_id] = MPGState(mpg_current=last_mpg)
             return self.mpg_states[truck_id]
+    
+    def _load_last_mpg_from_db(self, truck_id: str) -> Optional[float]:
+        """Load last valid MPG from fuel_metrics table
+        
+        Args:
+            truck_id: Truck identifier
+            
+        Returns:
+            Last valid MPG (4.0-7.5 range) or None if not found
+        """
+        try:
+            conn = mysql.connector.connect(**DB_CONFIG)
+            cursor = conn.cursor()
+            
+            # Get last valid MPG from recent data (last 7 days)
+            query = """
+                SELECT mpg_current 
+                FROM fuel_metrics 
+                WHERE truck_id = %s 
+                  AND mpg_current IS NOT NULL
+                  AND mpg_current BETWEEN 4.0 AND 7.5
+                  AND timestamp_utc >= NOW() - INTERVAL 7 DAY
+                ORDER BY timestamp_utc DESC 
+                LIMIT 1
+            """
+            cursor.execute(query, (truck_id,))
+            result = cursor.fetchone()
+            
+            cursor.close()
+            conn.close()
+            
+            if result:
+                mpg = float(result[0])
+                logger.debug(f"[{truck_id}] Loaded last valid MPG from DB: {mpg:.2f}")
+                return mpg
+            else:
+                # No valid MPG in last 7 days - use fallback
+                logger.debug(f"[{truck_id}] No valid MPG in DB, using fallback: {mpg_config.fallback_mpg}")
+                return mpg_config.fallback_mpg
+                
+        except Exception as e:
+            logger.warning(f"[{truck_id}] Could not load MPG from DB: {e}, using fallback")
+            return mpg_config.fallback_mpg
 
     def get_anchor_detector(self, truck_id: str) -> AnchorDetector:
         """Get or create anchor detector for a truck (thread-safe)"""
