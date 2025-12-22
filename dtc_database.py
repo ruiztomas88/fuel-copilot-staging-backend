@@ -1826,10 +1826,13 @@ def get_spn_info(spn: int) -> Optional[SPNInfo]:
     Returns:
         SPNInfo if found, None otherwise
     """
+    logger.debug(f"🔍 Looking up SPN {spn}")
+
     # First, try main database (curated, detailed info)
     spn_info = SPN_DATABASE.get(spn)
 
     if spn_info:
+        logger.debug(f"✅ SPN {spn} found in main database: {spn_info.name_en}")
         return spn_info
 
     # Fallback to J1939 complete database (2000+ SPNs)
@@ -1838,6 +1841,7 @@ def get_spn_info(spn: int) -> Optional[SPNInfo]:
 
         j1939_data = J1939_SPN_MAP.get(spn)
         if j1939_data:
+            logger.debug(f"✅ SPN {spn} found in J1939 complete database")
             # Create SPNInfo from J1939 complete data
             # Map category to system
             category = j1939_data.get("category", "unknown")
@@ -1878,10 +1882,14 @@ def get_spn_info(spn: int) -> Optional[SPNInfo]:
                 description_es=f"{component} - {name}",
                 action_es=f"Revisar {component.lower()} en próxima mantención",
             )
-    except (ImportError, Exception) as e:
-        # J1939 complete database not available or error
-        pass
+        else:
+            logger.warning(f"❌ SPN {spn} NOT FOUND in J1939 complete database")
+    except ImportError as e:
+        logger.error(f"❌ Failed to import J1939 complete database: {e}")
+    except Exception as e:
+        logger.error(f"❌ Error looking up SPN {spn} in J1939: {e}")
 
+    logger.warning(f"⚠️ SPN {spn} UNKNOWN - not in any database")
     return None
 
 

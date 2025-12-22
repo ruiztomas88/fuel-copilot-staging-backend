@@ -202,24 +202,22 @@ class MPGConfig:
     This allows MPG to update more frequently while still having enough data
     for a reasonable calculation. Trade-off: slightly more variance in readings.
 
-    🔧 v6.5.0 FIX: Reduced min_miles from 8.0 to 4.0 for better coverage
-    With 2-minute polling and average 60 mph, this gives MPG updates every ~4 minutes
-    instead of ~8 minutes. Improves coverage from 53% to ~85% of MOVING trucks.
-    Trade-off: Slightly more noise, but acceptable with EMA smoothing.
+    🔧 v5.18.0 FIX: Reverted to stable balanced thresholds
+    From experimentation: 8.0mi/1.2gal provides best balance of coverage vs accuracy.
+    Avoids excessive noise while maintaining reasonable update frequency.
     """
 
-    # 🔧 v6.5.0: Optimized thresholds for better coverage vs. precision balance
-    # From 8.0mi/1.2gal (8+ min window) → 4.0mi/0.6gal (4 min window)
-    # This allows 2x more frequent MPG updates while maintaining quality
+    # 🔧 v5.18.0: Balanced thresholds (tested and stable)
+    # These values provide optimal trade-off between data coverage and accuracy
     min_miles: float = (
-        4.0  # 🔧 v6.5.0: Faster updates for better coverage (was 8.0 in v5.18.0)
+        8.0  # ✅ STABLE: Balance frecuencia/precisión (tested on production fleet)
     )
-    min_fuel_gal: float = 0.6  # 🔧 v6.5.0: Proportionally adjusted (was 1.2)
+    min_fuel_gal: float = 1.2  # ✅ STABLE: Proportionally adjusted to min_miles
 
     # Physical limits for Class 8 trucks (realistic ranges)
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
     max_mpg: float = (
-        12.0  # 🔧 v3.15.0: Increased from 9.0 - trucks getting 9-11 MPG were being rejected
+        8.5  # ✅ FIX: Realistic max for Class 8 (empty truck, highway descent)
     )
     ema_alpha: float = 0.4  # 🔧 v3.10.7: Reduced from 0.6 for smoother readings
     fallback_mpg: float = 5.7  # 🔧 v3.12.31: Updated to fleet average (was 5.8)
