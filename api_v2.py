@@ -2465,24 +2465,22 @@ async def get_fleet_summary():
         with get_pymysql_connection() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 # Calculate metrics from fuel_metrics (last 7 days)
-                # Using: odometer_mi OR odom_delta_mi, estimated_gallons, mpg_current
+                # Using: odometer_mi, estimated_gallons, mpg_current
                 # Cost estimate: $3.50/gallon
-                # ✅ FIX: Use odom_delta_mi for trucks without odometer_mi
                 cursor.execute(
                     """
                     SELECT 
                         AVG(CASE 
                             WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi
-                            WHEN odom_delta_mi > 0 THEN (estimated_gallons * 3.50) / odom_delta_mi
                             ELSE 0 
                         END) as avg_cost_per_mile,
                         COUNT(DISTINCT truck_id) as active_trucks,
                         AVG(mpg_current) as avg_mpg,
-                        SUM(COALESCE(odometer_mi, odom_delta_mi, 0)) as total_miles,
+                        SUM(odometer_mi) as total_miles,
                         SUM(estimated_gallons * 3.50) as total_fuel_cost
                     FROM fuel_metrics
                     WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-                        AND (odometer_mi > 0 OR odom_delta_mi > 0)
+                        AND odometer_mi > 0
                 """
                 )
 
@@ -2566,18 +2564,16 @@ async def get_fleet_cost_analysis():
         total_labor = total_fuel * 0.40  # 40% of fuel cost
 
         # Get per-truck cost breakdown
-        # ✅ FIX: Use odom_delta_mi as fallback
         cursor.execute(
             """
             SELECT 
                 truck_id,
                 AVG(CASE 
                     WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi 
-                    WHEN odom_delta_mi > 0 THEN (estimated_gallons * 3.50) / odom_delta_mi
                     ELSE 0 
                 END) as cost_per_mile,
                 SUM(estimated_gallons * 3.50) as total_cost,
-                SUM(COALESCE(odometer_mi, odom_delta_mi, 0)) as total_miles
+                SUM(odometer_mi) as total_miles
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             GROUP BY truck_id
