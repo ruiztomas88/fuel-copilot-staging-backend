@@ -279,7 +279,7 @@ class StateManager:
 
     def get_mpg_state(self, truck_id: str) -> MPGState:
         """Get or create MPG state for a truck (thread-safe)
-        
+
         🔧 v6.5.1: Load last valid MPG from DB if state doesn't exist
         This prevents "N.A" display after service restart - shows last known value
         """
@@ -289,20 +289,20 @@ class StateManager:
                 last_mpg = self._load_last_mpg_from_db(truck_id)
                 self.mpg_states[truck_id] = MPGState(mpg_current=last_mpg)
             return self.mpg_states[truck_id]
-    
+
     def _load_last_mpg_from_db(self, truck_id: str) -> Optional[float]:
         """Load last valid MPG from fuel_metrics table
-        
+
         Args:
             truck_id: Truck identifier
-            
+
         Returns:
             Last valid MPG (4.0-7.5 range) or None if not found
         """
         try:
             conn = mysql.connector.connect(**DB_CONFIG)
             cursor = conn.cursor()
-            
+
             # Get last valid MPG from recent data (last 7 days)
             query = """
                 SELECT mpg_current 
@@ -316,21 +316,25 @@ class StateManager:
             """
             cursor.execute(query, (truck_id,))
             result = cursor.fetchone()
-            
+
             cursor.close()
             conn.close()
-            
+
             if result:
                 mpg = float(result[0])
                 logger.debug(f"[{truck_id}] Loaded last valid MPG from DB: {mpg:.2f}")
                 return mpg
             else:
                 # No valid MPG in last 7 days - use fallback
-                logger.debug(f"[{truck_id}] No valid MPG in DB, using fallback: {mpg_config.fallback_mpg}")
+                logger.debug(
+                    f"[{truck_id}] No valid MPG in DB, using fallback: {mpg_config.fallback_mpg}"
+                )
                 return mpg_config.fallback_mpg
-                
+
         except Exception as e:
-            logger.warning(f"[{truck_id}] Could not load MPG from DB: {e}, using fallback")
+            logger.warning(
+                f"[{truck_id}] Could not load MPG from DB: {e}, using fallback"
+            )
             return mpg_config.fallback_mpg
 
     def get_anchor_detector(self, truck_id: str) -> AnchorDetector:
@@ -1492,9 +1496,7 @@ def process_truck(
     rpm = sensor_data.get("rpm")
     fuel_lvl = sensor_data.get("fuel_lvl")  # Percentage
     fuel_rate = sensor_data.get("fuel_rate")  # L/h
-    odometer = sensor_data.get(
-        "odometer_mi"
-    )  # miles - ✅ Fixed: usar odometer_mi consistentemente
+    odometer = sensor_data.get("odometer")  # ✅ FIXED Dec 22: odometer not odometer_mi
     altitude = sensor_data.get("altitude")  # feet
     latitude = sensor_data.get("latitude")
     longitude = sensor_data.get("longitude")
@@ -1740,7 +1742,9 @@ def process_truck(
         if mpg_state.last_odometer_mi is not None and odometer and odometer > 0:
             # Method 1: Odometer delta (preferred)
             delta_miles = odometer - mpg_state.last_odometer_mi
-            if delta_miles < 0 or delta_miles > 50:  # Reset or invalid
+            if (
+                delta_miles < 0 or delta_miles > 500
+            ):  # ✅ DEC 22: Increased from 50 to 500 (trucks can travel 12h × 65mph = 780mi)
                 # Fallback to speed × time
                 delta_miles = speed * dt_hours if dt_hours > 0 else 0.0
                 logger.debug(
@@ -1751,37 +1755,103 @@ def process_truck(
             # ✅ CRITICAL: Este fallback permite MPG calculation sin odometer
             delta_miles = speed * dt_hours if dt_hours > 0 else 0.0
 
-        # 🔧 v6.5.0 REVERT: Restored Dec 19 logic - SENSOR first, CAN as fallback
-        # Reason: consumption_gph subestima consumo real → MPG inflados (8-10 vs 4-7.5)
-        # Dec 19 showed correct 4.13-7.49 MPG range with sensor-first approach
+        # 🔧 v2.0.1 DEC 22 FIX: NUEVO orden de prioridad para fuel consumption
+        # PRIORITY 1: Fuel level sensor (más confiable - cambio real en tanque)
+        # PRIORITY 2: ECU total_fuel_used (cumulative counter - muy preciso)
+        # PRIORITY 3: fuel_rate_gph (instantáneo - ruidoso, último recurso)
+
+        total_fuel_used = sensor_data.get("total_fuel_used_gal")
+        last_total_fuel = (
+            mpg_state.last_total_fuel_gal
+            if hasattr(mpg_state, "last_total_fuel_gal")
+            else None
+        )
+
         if mpg_state.last_fuel_lvl_pct is not None and sensor_pct is not None:
-            # Method 1: Fuel sensor delta (PREFERRED - more conservative)
+            # PRIORITY 1: Fuel sensor delta (PREFERRED - más conservador)
             fuel_drop_pct = mpg_state.last_fuel_lvl_pct - sensor_pct
-            if fuel_drop_pct > 0:
+            if 0.05 < fuel_drop_pct < 50:  # Entre 0.05% y 50% drop (sanity check)
                 delta_gallons = (fuel_drop_pct / 100) * tank_capacity_gal
                 mpg_state.fuel_source_stats["sensor"] += 1
-            elif consumption_gph and dt_hours > 0:
-                # Fallback to CAN consumption rate only if sensor shows no drop
-                delta_gallons = consumption_gph * dt_hours
-                mpg_state.fuel_source_stats["fallback"] += 1
+            elif last_total_fuel is not None and total_fuel_used is not None:
+                # Fallback to ECU if sensor doesn't show drop
+                delta_fuel_ecu = total_fuel_used - last_total_fuel
+                if 0 < delta_fuel_ecu < 25:  # Sanity check: <25 gal per window
+                    delta_gallons = delta_fuel_ecu
+                    mpg_state.fuel_source_stats["ecu_cumulative"] = (
+                        mpg_state.fuel_source_stats.get("ecu_cumulative", 0) + 1
+                    )
+        elif last_total_fuel is not None and total_fuel_used is not None:
+            # PRIORITY 2: ECU cumulative fuel counter (muy confiable)
+            delta_fuel_ecu = total_fuel_used - last_total_fuel
+            if 0 < delta_fuel_ecu < 25:  # Sanity: max 25 gal per window
+                delta_gallons = delta_fuel_ecu
+                mpg_state.fuel_source_stats["ecu_cumulative"] = (
+                    mpg_state.fuel_source_stats.get("ecu_cumulative", 0) + 1
+                )
         elif consumption_gph and dt_hours > 0:
-            # Method 2: CAN bus consumption rate (FALLBACK when no sensor data)
+            # PRIORITY 3: CAN instantaneous rate (ÚLTIMO RECURSO - ruidoso)
             if 0.5 <= consumption_gph <= 20:
                 delta_gallons = consumption_gph * dt_hours
                 mpg_state.fuel_source_stats["fallback"] += 1
 
-        # Update MPG state (only if both values are reasonable)
-        if delta_miles > 0.1 and delta_gallons > 0.001:
-            mpg_state = update_mpg_state(
-                mpg_state, delta_miles, delta_gallons, mpg_config, truck_id
+        # 🔧 v2.0.1: VALIDACIONES ESTRICTAS antes de calcular MPG
+        # Evita corruption por deltas irreales (odometer jumps, sensor glitches)
+        MAX_DELTA_MILES = 500  # ✅ DEC 22: Increased from 100 to 500 (long haul trucks)
+        MAX_DELTA_FUEL = (
+            100  # ✅ DEC 22: Increased from 25 to 100 (500mi ÷ 5mpg = 100 gal)
+        )
+        MIN_DELTA_MILES = 0.1  # Al menos 0.1 milla
+        MIN_DELTA_FUEL = 0.01  # Al menos 0.01 galón
+
+        # Validar deltas antes de actualizar MPG
+        if (
+            MIN_DELTA_MILES < delta_miles < MAX_DELTA_MILES
+            and MIN_DELTA_FUEL < delta_gallons < MAX_DELTA_FUEL
+        ):
+            # ✅ DEC 22: Add MPG physics validation (Class 8 loaded: 2-12 MPG max)
+            instant_mpg = delta_miles / delta_gallons if delta_gallons > 0 else 0
+
+            if 2.0 <= instant_mpg <= 12.0:
+                # Determine fuel source for logging
+                fuel_source = "unknown"
+                if delta_gallons > 0:
+                    if mpg_state.fuel_source_stats.get(
+                        "sensor", 0
+                    ) > mpg_state.fuel_source_stats.get("ecu_cumulative", 0):
+                        fuel_source = "tank_level"
+                    elif mpg_state.fuel_source_stats.get("ecu_cumulative", 0) > 0:
+                        fuel_source = "ecu_cumulative"
+                    else:
+                        fuel_source = "fuel_rate"
+
+                logger.info(
+                    f"[{truck_id}] ✓ MPG={instant_mpg:.2f} (Δmi={delta_miles:.1f}, Δgal={delta_gallons:.2f}, source={fuel_source})"
+                )
+
+                mpg_state = update_mpg_state(
+                    mpg_state, delta_miles, delta_gallons, mpg_config, truck_id
+                )
+                mpg_current = mpg_state.mpg_current
+            else:
+                logger.warning(
+                    f"[{truck_id}] ❌ MPG {instant_mpg:.2f} out of range (2-12), discarding "
+                    f"(Δmi={delta_miles:.1f}, Δgal={delta_gallons:.2f})"
+                )
+        elif delta_miles > 0 or delta_gallons > 0:
+            logger.debug(
+                f"[{truck_id}] Deltas fuera de rango - descartados: "
+                f"miles={delta_miles:.2f} (max={MAX_DELTA_MILES}), "
+                f"fuel={delta_gallons:.3f} (max={MAX_DELTA_FUEL})"
             )
-            mpg_current = mpg_state.mpg_current
 
         # Update tracking values
-        if odometer and odometer > 0:
+        if odometer and odometer > 0 and odometer < 10_000_000:  # Validar odometer
             mpg_state.last_odometer_mi = odometer
         mpg_state.last_fuel_lvl_pct = sensor_pct
         mpg_state.last_timestamp = timestamp.timestamp()
+        if total_fuel_used is not None:
+            mpg_state.last_total_fuel_gal = total_fuel_used
 
     # Idle consumption calculation
     idle_gph = 0.0
@@ -1893,7 +1963,14 @@ def process_truck(
         "sensor_gallons": round(sensor_gallons, 2) if sensor_gallons else None,
         "consumption_lph": round(consumption_lph, 2) if consumption_lph else None,
         "consumption_gph": round(consumption_gph, 3) if consumption_gph else None,
-        "mpg_current": round(mpg_current, 2) if mpg_current else None,
+        # ✅ DEC 22: Cap MPG at realistic maximum (8.2 for Class 8)
+        "mpg_current": round(min(mpg_current, 8.2), 2) if mpg_current else None,
+        # 🆕 v2.0.1: Cost per mile calculation (fuel_price / mpg)
+        "cost_per_mile": (
+            round(3.50 / min(mpg_current, 8.2), 3)
+            if mpg_current and mpg_current > 0
+            else None
+        ),
         # 🆕 v5.7.10: Weather-adjusted MPG for display
         "mpg_weather_adjusted": (
             round(weather_adjusted_mpg, 2) if weather_adjusted_mpg else None
@@ -2044,7 +2121,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  latitude, longitude, speed_mph,
                  estimated_liters, estimated_gallons, estimated_pct,
                  sensor_pct, sensor_liters, sensor_gallons,
-                 consumption_lph, consumption_gph, mpg_current,
+                 consumption_lph, consumption_gph, mpg_current, cost_per_mile,
                  rpm, engine_hours, odometer_mi,
                  altitude_ft, hdop, coolant_temp_f,
                  idle_gph, idle_method, idle_mode, drift_pct, drift_warning,
@@ -2055,7 +2132,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  trans_temp_f, fuel_temp_f, intercooler_temp_f, intake_press_kpa, retarder_level,
                  sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu,
                  dtc, dtc_code)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -2070,6 +2147,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     consumption_lph = VALUES(consumption_lph),
                     consumption_gph = VALUES(consumption_gph),
                     mpg_current = VALUES(mpg_current),
+                    cost_per_mile = VALUES(cost_per_mile),
                     rpm = VALUES(rpm),
                     engine_hours = VALUES(engine_hours),
                     odometer_mi = VALUES(odometer_mi),
@@ -2120,6 +2198,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 metrics["consumption_lph"],
                 metrics["consumption_gph"],
                 metrics["mpg_current"],
+                metrics.get("cost_per_mile"),
                 metrics["rpm"],
                 metrics["engine_hours"],
                 metrics["odometer_mi"],
@@ -2481,16 +2560,18 @@ def sync_cycle(
                 # 🆕 v5.10.1: Full Pacific Track sensor suite
                 # Temperatures
                 "fuel_temp": getattr(truck_data, "fuel_temp", None),
-                "fuel_t": getattr(truck_data, "fuel_temp", None),  # Alias for cache
+                "fuel_t": getattr(truck_data, "fuel_temp", None),  # ✅ RAW Wialon name
                 "intercooler_temp": getattr(truck_data, "intercooler_temp", None),
-                "intrclr_t": getattr(truck_data, "intercooler_temp", None),  # Alias
+                "intrclr_t": getattr(
+                    truck_data, "intercooler_temp", None
+                ),  # ✅ RAW Wialon name
                 "turbo_temp": getattr(truck_data, "turbo_temp", None),
                 "trans_temp": getattr(truck_data, "trans_temp", None),
                 # Temperatures - Additional
                 "def_temp": getattr(truck_data, "def_temp", None),
                 "egr_temp": getattr(truck_data, "egr_temp", None),
-                "cool_temp": truck_data.coolant_temp,  # Alias for coolant_temp
-                "intk_t": truck_data.intake_air_temp,  # Alias for intake_air_temp
+                "cool_temp": truck_data.coolant_temp,  # ✅ RAW Wialon name
+                "intk_t": truck_data.intake_air_temp,  # ✅ RAW Wialon name
                 # Pressures
                 "intake_press": getattr(truck_data, "intake_press", None),
                 "intake_pressure": getattr(truck_data, "intake_press", None),  # Alias
@@ -2517,7 +2598,20 @@ def sync_cycle(
                 "alternator_status": getattr(
                     truck_data, "alternator_status", None
                 ),  # 🔧 Correct name
-                "odom": truck_data.odometer,  # 🔧 Wialon usa 'odom' para odómetro
+                "odom": truck_data.odometer,  # ✅ RAW Wialon name for odometer
+                # Counters (need RAW names)
+                "engine_hours": truck_data.engine_hours,  # Already mapped correctly
+                "idle_hours": truck_data.idle_hours,  # Already mapped correctly
+                "total_fuel_used": truck_data.total_fuel_used,  # Already mapped correctly
+                "total_idle_fuel": (
+                    truck_data.total_idle_fuel
+                    if hasattr(truck_data, "total_idle_fuel")
+                    else None
+                ),
+                # Brake
+                "brake_switch": getattr(
+                    truck_data, "brake_switch", None
+                ),  # ✅ RAW Wialon name
                 # Counters
                 "pto_hours": getattr(truck_data, "pto_hours", None),
                 # Brake Info

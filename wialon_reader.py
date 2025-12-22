@@ -62,7 +62,7 @@ class WialonConfig:
         "fuel_lvl": "fuel_lvl",  # Fuel Level %
         "speed": "speed",  # GPS Speed
         "rpm": "rpm",  # RPM
-        "odometer": "odom",  # Odometer
+        "odometer": "odom",  # ✅ Odometer (miles) - verified Dec 22, 2025
         "fuel_rate": "fuel_rate",  # Fuel Rate L/h
         "coolant_temp": "cool_temp",  # Coolant Temperature
         "hdop": "hdop",  # GPS HDOP
@@ -415,7 +415,9 @@ class WialonReader:
                 latest_epoch = results[0]["epoch_time"]
 
                 # 🐛 DEBUG v6.4.2: Log query result count
-                logger.info(f"[{truck_id}/{unit_id}] Query returned {len(results)} rows, latest_epoch: {latest_epoch}")
+                logger.info(
+                    f"[{truck_id}/{unit_id}] Query returned {len(results)} rows, latest_epoch: {latest_epoch}"
+                )
 
                 # Build sensor dict
                 sensor_data = {
@@ -444,25 +446,29 @@ class WialonReader:
                                 if wialon_name == param_name:
                                     sensor_data[our_name] = param_value
                                     break
-                
+
                 # 🐛 DEBUG v6.4.2: Log ALL params found for LC6799
-                if truck_id == 'LC6799':
-                    logger.info(f"[LC6799] Params at latest_epoch {latest_epoch}: {sorted(params_found)}")
+                if truck_id == "LC6799":
+                    logger.info(
+                        f"[LC6799] Params at latest_epoch {latest_epoch}: {sorted(params_found)}"
+                    )
                     logger.info(f"[LC6799] Total rows in query result: {len(results)}")
-                
+
                 # 🐛 DEBUG: Log if health sensors are missing
                 missing_health = []
-                if 'cool_temp' not in params_found:
-                    missing_health.append('cool_temp')
-                if 'oil_temp' not in params_found:
-                    missing_health.append('oil_temp')
-                if 'def_level' not in params_found:
-                    missing_health.append('def_level')
-                if 'rpm' not in params_found:
-                    missing_health.append('rpm')
-                
+                if "cool_temp" not in params_found:
+                    missing_health.append("cool_temp")
+                if "oil_temp" not in params_found:
+                    missing_health.append("oil_temp")
+                if "def_level" not in params_found:
+                    missing_health.append("def_level")
+                if "rpm" not in params_found:
+                    missing_health.append("rpm")
+
                 if missing_health:
-                    logger.warning(f"[Unit {unit_id}] Missing health sensors in query results: {missing_health}. Found params: {sorted(params_found)}")
+                    logger.warning(
+                        f"[Unit {unit_id}] Missing health sensors in query results: {missing_health}. Found params: {sorted(params_found)}"
+                    )
 
                 # 2. Second pass: Fill missing values from recent history
                 # This handles fragmented packets where sensors arrive with slightly different timestamps
@@ -730,8 +736,17 @@ class WialonReader:
                         if param_name == "fuel_lvl":
                             max_age = 14400  # 4 hours for fuel level
                         elif param_name in ("j1939_spn", "j1939_fmi"):
-                            max_age = 172800  # 48 hours for DTC sensors (update infrequently)
-                        elif param_name in ("cool_temp", "oil_temp", "rpm", "engine_load", "oil_press", "def_level"):
+                            max_age = (
+                                172800  # 48 hours for DTC sensors (update infrequently)
+                            )
+                        elif param_name in (
+                            "cool_temp",
+                            "oil_temp",
+                            "rpm",
+                            "engine_load",
+                            "oil_press",
+                            "def_level",
+                        ):
                             max_age = 14400  # 🔧 DEC22: 4 hours for health sensors (update less frequently than GPS)
 
                         if age_sec > max_age:

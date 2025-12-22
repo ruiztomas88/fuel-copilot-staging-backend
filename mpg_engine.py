@@ -148,6 +148,9 @@ class MPGState:
     last_fuel_lvl_pct: Optional[float] = None  # Previous fuel level %
     last_odometer_mi: Optional[float] = None  # Previous odometer in miles
     last_timestamp: Optional[float] = None  # Epoch of last reading
+    last_total_fuel_gal: Optional[float] = (
+        None  # 🆕 v2.0.1: Previous ECU cumulative fuel
+    )
 
     # History for variance-based adaptive alpha
     mpg_history: list = field(default_factory=list)
@@ -220,15 +223,18 @@ class MPGConfig:
     Avoids excessive noise while maintaining reasonable update frequency.
     """
 
-    # 🔧 v5.18.1 FIX: Restaurar thresholds conservadores - evita MPG inflados
-    # De 5.0mi/0.75gal (poco combustible = errores amplificados) → 10.0mi/2.0gal
-    # Esto requiere más distancia/combustible antes de calcular MPG → más preciso
-    min_miles: float = 10.0  # Balance frecuencia/precisión (MÁS conservador)
-    min_fuel_gal: float = 2.0  # Ajustado proporcionalmente (MÁS conservador)
+    # 🔧 v3.12.18 DEC 4: Reduced for faster updates (5mi vs 10mi)
+    # 🔧 v2.0.1 DEC 22: Restored with tighter max_mpg cap (8.2 vs 9.0)
+    # Basado en datos reales de flota: Flatbed/Reefer/Dry Van cargados
+    min_miles: float = 5.0  # ✅ Fast updates - MPG muestra después de 5mi
+    min_fuel_gal: float = 0.75  # ✅ Proportional reduction for faster updates
 
     # Physical limits for Class 8 trucks (44,000 lbs realistic ranges)
-    min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
-    max_mpg: float = 8.5  # 🔧 v2.0 REDUCED from 12.0 - realistic max for 44k lbs trucks
+    # Loaded (44k): 4.0-6.5 MPG | Empty (10k): 6.5-8.0 MPG
+    min_mpg: float = 3.8  # Absolute minimum (reefer on, loaded, mountain, city)
+    max_mpg: float = (
+        8.2  # ✅ DEC 22: Realistic max (was 9.0, capped to prevent inflation)
+    )
     ema_alpha: float = 0.4  # 🔧 v3.10.7: Reduced from 0.6 for smoother readings
     fallback_mpg: float = 5.7  # 🔧 v3.12.31: Updated to fleet average (was 5.8)
 
