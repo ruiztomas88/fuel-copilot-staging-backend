@@ -472,11 +472,20 @@ def calculate_consumption(
         if fuel_rate >= min_lph:
             return fuel_rate
 
-    # Physics-based fallback
+    # Physics-based fallback for Class 8 trucks (44k lbs loaded)
     if truck_status == "MOVING" and speed is not None and speed > 5:
-        # Approximate: base + speed factor
-        # ~15 L/100km at highway speeds
-        return 15.0 + (speed * 0.15)
+        # 🔧 FIX Dec 22: Realistic consumption for heavy trucks
+        # Highway (60-75 mph): 35-50 L/h (9-13 gph) → 4-7 MPG
+        # City (20-40 mph): 25-35 L/h (6.5-9 gph) → 3-5 MPG
+        if speed >= 60:
+            # Highway: base 20 L/h + speed factor
+            return 20.0 + (speed * 0.35)  # ~44 L/h at 70 mph = 11.6 gph → 6 MPG
+        elif speed >= 40:
+            # Mixed: base 15 L/h + speed factor
+            return 15.0 + (speed * 0.30)  # ~27 L/h at 40 mph = 7.1 gph → 5.6 MPG
+        else:
+            # City: base 12 L/h + speed factor
+            return 12.0 + (speed * 0.25)  # ~18 L/h at 25 mph = 4.8 gph → 5.2 MPG
     elif truck_status == "STOPPED":
         return 2.5  # Idle consumption
     else:
