@@ -1695,29 +1695,24 @@ def process_truck(
             # ✅ CRITICAL: Este fallback permite MPG calculation sin odometer
             delta_miles = speed * dt_hours if dt_hours > 0 else 0.0
 
-        # 🔧 FIX v6.3.3: PRIORIZE consumption_gph from CAN bus (more accurate)
-        # Fuel sensor has noise, consumption_gph is more reliable for instant consumption
-        if consumption_gph and consumption_gph > 0.5 and dt_hours > 0:
-            # Method 1: CAN bus consumption rate (PREFERRED - more accurate)
-            # Validate: 0.5-20 GPH is realistic for Class 8 moving
-            if 0.5 <= consumption_gph <= 20:
-                delta_gallons = consumption_gph * dt_hours
-                mpg_state.fuel_source_stats[
-                    "fallback"
-                ] += 1  # Actually CAN, but using existing counter
-        elif mpg_state.last_fuel_lvl_pct is not None and sensor_pct is not None:
-            # Method 2: Fuel sensor delta (FALLBACK - has noise)
+        # 🔧 v6.5.0 REVERT: Restored Dec 19 logic - SENSOR first, CAN as fallback
+        # Reason: consumption_gph subestima consumo real → MPG inflados (8-10 vs 4-7.5)
+        # Dec 19 showed correct 4.13-7.49 MPG range with sensor-first approach
+        if mpg_state.last_fuel_lvl_pct is not None and sensor_pct is not None:
+            # Method 1: Fuel sensor delta (PREFERRED - more conservative)
             fuel_drop_pct = mpg_state.last_fuel_lvl_pct - sensor_pct
-            # 🔧 FIX v6.4.0: Only use if drop is significant but not unreasonably large
-            # >0.5% to filter noise, <10% to avoid IDLE consumption contamination
-            if 0.5 < fuel_drop_pct < 10.0:
+            if fuel_drop_pct > 0:
                 delta_gallons = (fuel_drop_pct / 100) * tank_capacity_gal
                 mpg_state.fuel_source_stats["sensor"] += 1
-            elif fuel_drop_pct >= 10.0:
-                # Large drop likely includes IDLE consumption - skip this sample
-                logger.debug(
-                    f"[{truck_id}] Fuel drop too large ({fuel_drop_pct:.1f}%) - likely includes IDLE, skipping"
-                )
+            elif consumption_gph and dt_hours > 0:
+                # Fallback to CAN consumption rate only if sensor shows no drop
+                delta_gallons = consumption_gph * dt_hours
+                mpg_state.fuel_source_stats["fallback"] += 1
+        elif consumption_gph and dt_hours > 0:
+            # Method 2: CAN bus consumption rate (FALLBACK when no sensor data)
+            if 0.5 <= consumption_gph <= 20:
+                delta_gallons = consumption_gph * dt_hours
+                mpg_state.fuel_source_stats["fallback"] += 1
 
         # Update MPG state (only if both values are reasonable)
         if delta_miles > 0.1 and delta_gallons > 0.001:
