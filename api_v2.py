@@ -2465,22 +2465,21 @@ async def get_fleet_summary():
         with get_pymysql_connection() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 # Calculate metrics from fuel_metrics (last 7 days)
-                # Using: odometer_mi, estimated_gallons, mpg_current
-                # Cost estimate: $3.50/gallon
+                # ✅ FIX DEC22: Don't filter by odometer for MPG avg - include all trucks
+                # Only filter for cost_per_mile and total_miles where odometer exists
                 cursor.execute(
                     """
                     SELECT 
                         AVG(CASE 
                             WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi
-                            ELSE 0 
+                            ELSE NULL
                         END) as avg_cost_per_mile,
                         COUNT(DISTINCT truck_id) as active_trucks,
                         AVG(mpg_current) as avg_mpg,
-                        SUM(odometer_mi) as total_miles,
+                        SUM(CASE WHEN odometer_mi > 0 THEN odometer_mi ELSE 0 END) as total_miles,
                         SUM(estimated_gallons * 3.50) as total_fuel_cost
                     FROM fuel_metrics
                     WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-                        AND odometer_mi > 0
                 """
                 )
 
@@ -2564,16 +2563,17 @@ async def get_fleet_cost_analysis():
         total_labor = total_fuel * 0.40  # 40% of fuel cost
 
         # Get per-truck cost breakdown
+        # ✅ FIX DEC22: Only calculate cost_per_mile where odometer exists
         cursor.execute(
             """
             SELECT 
                 truck_id,
                 AVG(CASE 
                     WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi 
-                    ELSE 0 
+                    ELSE NULL
                 END) as cost_per_mile,
                 SUM(estimated_gallons * 3.50) as total_cost,
-                SUM(odometer_mi) as total_miles
+                SUM(CASE WHEN odometer_mi > 0 THEN odometer_mi ELSE 0 END) as total_miles
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             GROUP BY truck_id

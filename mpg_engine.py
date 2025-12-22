@@ -9,6 +9,8 @@ Version: v3.15.0
 Date: December 20, 2025
 
 Changelog:
+- v3.15.2: RESTORED Wednesday Dec 18 config (5.0mi/0.75gal/9.0max) - was showing correct 4-7.5 range
+- v3.15.1: Fix MPG config - min_miles 4.0/max_mpg 7.8 for accurate tracking (44k lbs trucks)
 - v3.15.0: Increased max_mpg from 9.0 to 12.0 - trucks were getting rejected with valid 9-11 MPG
 - v3.14.0: Improved filter_outliers_iqr (empty list on total corruption)
 - v3.14.0: Added auto-save/load for TruckBaselineManager
@@ -207,18 +209,13 @@ class MPGConfig:
     Avoids excessive noise while maintaining reasonable update frequency.
     """
 
-    # 🔧 v5.18.0: Balanced thresholds (tested and stable)
-    # These values provide optimal trade-off between data coverage and accuracy
-    min_miles: float = (
-        8.0  # ✅ STABLE: Balance frecuencia/precisión (tested on production fleet)
-    )
-    min_fuel_gal: float = 1.2  # ✅ STABLE: Proportionally adjusted to min_miles
+    # 🔧 RESTORED: Wednesday Dec 18 config that was working correctly
+    min_miles: float = 5.0  # Miércoles working value (balanced)
+    min_fuel_gal: float = 0.75  # Miércoles working value (proportional)
 
     # Physical limits for Class 8 trucks (realistic ranges)
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
-    max_mpg: float = (
-        8.5  # ✅ FIX: Realistic max for Class 8 (empty truck, highway descent)
-    )
+    max_mpg: float = 9.0  # Miércoles working value (showed 4.13-7.49 range)
     ema_alpha: float = 0.4  # 🔧 v3.10.7: Reduced from 0.6 for smoother readings
     fallback_mpg: float = 5.7  # 🔧 v3.12.31: Updated to fleet average (was 5.8)
 

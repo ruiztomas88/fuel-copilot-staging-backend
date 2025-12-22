@@ -414,6 +414,9 @@ class WialonReader:
                 # Using epoch_time ensures correct UTC conversion
                 latest_epoch = results[0]["epoch_time"]
 
+                # 🐛 DEBUG v6.4.2: Log query result count
+                logger.info(f"[{truck_id}/{unit_id}] Query returned {len(results)} rows, latest_epoch: {latest_epoch}")
+
                 # Build sensor dict
                 sensor_data = {
                     "epoch_time": latest_epoch,
@@ -424,12 +427,15 @@ class WialonReader:
 
                 # Extract all sensor parameters (Last Known Value strategy)
                 # 1. First pass: Get values from the latest timestamp
+                # 🐛 DEBUG: Track which params are found
+                params_found = set()
                 for row in results:
                     if row["epoch_time"] == latest_epoch:
                         param_name = row.get("param_name")
                         param_value = row.get("value")
 
                         if param_name and param_value is not None:
+                            params_found.add(param_name)
                             # Map Wialon parameter names to our standard names
                             for (
                                 our_name,
@@ -438,6 +444,25 @@ class WialonReader:
                                 if wialon_name == param_name:
                                     sensor_data[our_name] = param_value
                                     break
+                
+                # 🐛 DEBUG v6.4.2: Log ALL params found for LC6799
+                if truck_id == 'LC6799':
+                    logger.info(f"[LC6799] Params at latest_epoch {latest_epoch}: {sorted(params_found)}")
+                    logger.info(f"[LC6799] Total rows in query result: {len(results)}")
+                
+                # 🐛 DEBUG: Log if health sensors are missing
+                missing_health = []
+                if 'cool_temp' not in params_found:
+                    missing_health.append('cool_temp')
+                if 'oil_temp' not in params_found:
+                    missing_health.append('oil_temp')
+                if 'def_level' not in params_found:
+                    missing_health.append('def_level')
+                if 'rpm' not in params_found:
+                    missing_health.append('rpm')
+                
+                if missing_health:
+                    logger.warning(f"[Unit {unit_id}] Missing health sensors in query results: {missing_health}. Found params: {sorted(params_found)}")
 
                 # 2. Second pass: Fill missing values from recent history
                 # This handles fragmented packets where sensors arrive with slightly different timestamps
@@ -525,9 +550,11 @@ class WialonReader:
 
         try:
             with self.connection.cursor() as cursor:
-                # Calculate cutoff epoch (1 hour ago)
-                # 🔧 v3.15.1: Reverted to 1 hour - Wialon delay issue was resolved
-                cutoff_epoch = int(time.time()) - 3600  # 1 hour = 3600 seconds
+                # Calculate cutoff epoch
+                # 🔧 DEC22 2025: Extended to 4 hours for engine health sensors
+                # Engine sensors (rpm, coolant, oil temp/press) arrive less frequently
+                # than GPS data, especially when truck is idling or moving slowly
+                cutoff_epoch = int(time.time()) - 14400  # 4 hours = 14400 seconds
 
                 # Get relevant parameter names
                 relevant_params = list(self.config.SENSOR_PARAMS.values())
@@ -703,9 +730,9 @@ class WialonReader:
                         if param_name == "fuel_lvl":
                             max_age = 14400  # 4 hours for fuel level
                         elif param_name in ("j1939_spn", "j1939_fmi"):
-                            max_age = (
-                                172800  # 48 hours for DTC sensors (update infrequently)
-                            )
+                            max_age = 172800  # 48 hours for DTC sensors (update infrequently)
+                        elif param_name in ("cool_temp", "oil_temp", "rpm", "engine_load", "oil_press", "def_level"):
+                            max_age = 14400  # 🔧 DEC22: 4 hours for health sensors (update less frequently than GPS)
 
                         if age_sec > max_age:
                             continue
@@ -948,15 +975,14 @@ def load_truck_config(yaml_path: str = "tanks.yaml") -> Dict[str, Dict]:
     return trucks
 
 
-# Load configuration - try database first, fallback to yaml
-TRUCK_CONFIG = load_truck_config_from_db()
+# 🔧 FIX v6.4.2: Load configuration directly from tanks.yaml (units_map has duplicates/errors)
+# Load configuration - use tanks.yaml as source of truth
+TRUCK_CONFIG = load_truck_config()
 
 # Extract unit ID mapping
 TRUCK_UNIT_MAPPING = {
     truck_id: config["unit_id"] for truck_id, config in TRUCK_CONFIG.items()
 }
-
-logger.info(f"📋 Truck mapping: {len(TRUCK_UNIT_MAPPING)} trucks configured")
 
 
 if __name__ == "__main__":

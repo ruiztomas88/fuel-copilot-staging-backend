@@ -14,7 +14,7 @@ import logging
 import os
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Generator, List, Optional
 
 import pandas as pd
@@ -630,6 +630,7 @@ def get_fleet_summary() -> Dict[str, Any]:
 
                 # 🆕 v6.5.0: Get truck_details with all sensor data (fixes N/A display)
                 # 🐛 FIX: Use truck_sensors_cache (not truck_sensors)
+                # 🔧 FIX Dec 22 2025: JOIN with latest fuel_metrics record per truck
                 truck_details = []
                 sensor_query = text(
                     """
@@ -673,11 +674,20 @@ def get_fleet_summary() -> Dict[str, Any]:
                         fm.sensor_pct,
                         fm.drift_pct,
                         fm.mpg_current,
-                        fm.idle_consumption_gph,
+                        fm.idle_gph,
                         fm.truck_status
                     FROM truck_sensors_cache s
-                    LEFT JOIN fuel_metrics fm ON s.truck_id = fm.truck_id 
-                        AND fm.timestamp_utc > NOW() - INTERVAL 5 MINUTE
+                    LEFT JOIN (
+                        SELECT fm1.* 
+                        FROM fuel_metrics fm1
+                        INNER JOIN (
+                            SELECT truck_id, MAX(timestamp_utc) as max_time
+                            FROM fuel_metrics
+                            WHERE timestamp_utc > NOW() - INTERVAL 2 HOUR
+                            GROUP BY truck_id
+                        ) fm2 ON fm1.truck_id COLLATE utf8mb4_unicode_ci = fm2.truck_id COLLATE utf8mb4_unicode_ci
+                            AND fm1.timestamp_utc = fm2.max_time
+                    ) fm ON s.truck_id COLLATE utf8mb4_unicode_ci = fm.truck_id COLLATE utf8mb4_unicode_ci
                     WHERE s.truck_id IN ({})
                       AND s.data_age_seconds < 300
                     ORDER BY s.truck_id
@@ -687,6 +697,10 @@ def get_fleet_summary() -> Dict[str, Any]:
                 )
 
                 sensor_result = conn.execute(sensor_query).fetchall()
+
+                # 🐛 DEBUG: Log first row to verify sensor_pct column index
+                if sensor_result:
+                    logger.info(f"🔍 DEBUG: First row columns: truck_id={sensor_result[0][0]}, sensor_pct(row[36])={sensor_result[0][36]}, estimated_pct(row[35])={sensor_result[0][35]}")
 
                 for row in sensor_result:
                     truck_details.append(
