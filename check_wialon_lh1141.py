@@ -1,11 +1,14 @@
 import mysql.connector
 import time
+from config import get_wialon_db_config
 
+# Convert pymysql config to mysql.connector format
+wialon_config = get_wialon_db_config()
 conn = mysql.connector.connect(
-    host='20.127.200.135',
-    user='tomas',
-    password='Tomas2025',
-    database='wialon_collect'
+    host=wialon_config['host'],
+    user=wialon_config['user'],
+    password=wialon_config['password'],
+    database=wialon_config['database']
 )
 cursor = conn.cursor(dictionary=True)
 

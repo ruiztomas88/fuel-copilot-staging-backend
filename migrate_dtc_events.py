@@ -3,13 +3,9 @@ Migración: Actualizar dtc_events con columnas necesarias para el pull
 """
 import pymysql
 import os
+from config import get_local_db_config
 
-conn = pymysql.connect(
-    host='localhost',
-    user='fuel_admin',
-    password='FuelCopilot2025!',
-    database='fuel_copilot'
-)
+conn = pymysql.connect(**get_local_db_config())
 
 cursor = conn.cursor()
 

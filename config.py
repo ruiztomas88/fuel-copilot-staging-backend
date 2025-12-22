@@ -260,6 +260,76 @@ def get_baseline_mpg() -> float:
     return FUEL.BASELINE_MPG
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# DATABASE CONNECTION HELPERS - SECURITY FIX Dec 22 2025
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_local_db_config() -> dict:
+    """
+    Get local MySQL connection parameters from environment variables.
+    
+    Returns:
+        dict: Connection parameters for fuel_copilot database
+        
+    Raises:
+        ValueError: If MYSQL_PASSWORD environment variable not set
+        
+    Example:
+        import pymysql
+        from config import get_local_db_config
+        
+        conn = pymysql.connect(**get_local_db_config())
+    """
+    password = os.getenv('MYSQL_PASSWORD')
+    if not password:
+        raise ValueError(
+            "MYSQL_PASSWORD environment variable not set. "
+            "Please set it in .env file or environment."
+        )
+    
+    return {
+        'host': os.getenv('MYSQL_HOST', 'localhost'),
+        'port': int(os.getenv('MYSQL_PORT', '3306')),
+        'user': os.getenv('MYSQL_USER', 'fuel_admin'),
+        'password': password,
+        'database': os.getenv('MYSQL_DATABASE', 'fuel_copilot'),
+        'charset': 'utf8mb4'
+    }
+
+
+def get_wialon_db_config() -> dict:
+    """
+    Get Wialon MySQL connection parameters from environment variables.
+    
+    Returns:
+        dict: Connection parameters for wialon_collect database
+        
+    Raises:
+        ValueError: If WIALON_MYSQL_PASSWORD environment variable not set
+        
+    Example:
+        import pymysql
+        from config import get_wialon_db_config
+        
+        conn = pymysql.connect(**get_wialon_db_config())
+    """
+    password = os.getenv('WIALON_MYSQL_PASSWORD')
+    if not password:
+        raise ValueError(
+            "WIALON_MYSQL_PASSWORD environment variable not set. "
+            "Please set it in .env file or environment."
+        )
+    
+    return {
+        'host': os.getenv('WIALON_MYSQL_HOST', '20.127.200.135'),
+        'port': int(os.getenv('WIALON_MYSQL_PORT', '3306')),
+        'user': os.getenv('WIALON_MYSQL_USER', 'tomas'),
+        'password': password,
+        'database': os.getenv('WIALON_MYSQL_DATABASE', 'wialon_collect'),
+        'charset': 'utf8mb4'
+    }
+
+
 # Export all for easy importing
 __all__ = [
     "FUEL",
@@ -280,4 +350,6 @@ __all__ = [
     "get_baseline_mpg",
     "get_allowed_trucks",
     "reload_allowed_trucks",
+    "get_local_db_config",
+    "get_wialon_db_config",
 ]

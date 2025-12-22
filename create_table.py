@@ -1,5 +1,7 @@
 ﻿import pymysql
-conn = pymysql.connect(host='localhost', port=3306, user='fuel_admin', password='FuelCopilot2025!', database='fuel_copilot')
+from config import get_local_db_config
+
+conn = pymysql.connect(**get_local_db_config())
 cur = conn.cursor()
 cur.execute('''
 CREATE TABLE IF NOT EXISTS fuel_metrics (

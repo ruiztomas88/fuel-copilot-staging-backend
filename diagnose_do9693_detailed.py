@@ -4,18 +4,12 @@ Check DO9693 sensor data in Wialon - detailed analysis
 import pymysql
 import sys
 from datetime import datetime, timedelta
+from config import get_wialon_db_config
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
-wialon_conn = pymysql.connect(
-    host="20.127.200.135",
-    port=3306,
-    user="tomas",
-    password="Tomas2025",
-    database="wialon_collect",
-    cursorclass=pymysql.cursors.DictCursor
-)
+wialon_conn = pymysql.connect(**get_wialon_db_config(), cursorclass=pymysql.cursors.DictCursor)
 
 print("="*80)
 print("DO9693 SENSOR ANALYSIS")

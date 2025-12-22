@@ -5,17 +5,13 @@ Diagnóstico completo del sistema - verificar TODAS las funcionalidades
 from datetime import datetime
 
 import pymysql
+from config import get_local_db_config
 
 print("=" * 80)
 print("🔍 DIAGNÓSTICO COMPLETO DEL SISTEMA")
 print("=" * 80)
 
-conn = pymysql.connect(
-    host="localhost",
-    user="fuel_admin",
-    password="FuelCopilot2025!",
-    database="fuel_copilot",
-)
+conn = pymysql.connect(**get_local_db_config())
 cursor = conn.cursor()
 
 # 1. FUEL_METRICS - datos básicos

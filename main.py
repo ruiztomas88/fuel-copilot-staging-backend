@@ -403,6 +403,15 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Cost router not available: {e}")
 
+# 🆕 v7.0.0: Register ML/AI Router (LSTM + Isolation Forest)
+try:
+    from routers.ml import router as ml_router
+
+    app.include_router(ml_router)
+    logger.info("✅ Machine Learning router registered (LSTM + Theft Detection)")
+except ImportError as e:
+    logger.warning(f"⚠️ ML router not available: {e}")
+
 # Prometheus metrics instrumentation
 if PROMETHEUS_AVAILABLE:
     from prometheus_client import REGISTRY

@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
 """Check actual Wialon database schema"""
 import pymysql
-
-WIALON_DB = {
-    "host": "20.127.200.135",
-    "port": 3306,
-    "user": "tomas",
-    "password": "Tomas2025",
-    "database": "wialon_collect",
-}
+from config import get_wialon_db_config
+from sql_security import validate_table_name, safe_describe
 
 try:
-    conn = pymysql.connect(**WIALON_DB)
+    conn = pymysql.connect(**get_wialon_db_config())
     cursor = conn.cursor()
 
     print("📊 WIALON DATABASE TABLES:")
@@ -28,13 +22,19 @@ try:
     for table in tables:
         table_name = table[0]
         print(f"\n{table_name}:")
-        cursor.execute(f"DESCRIBE {table_name}")
-        columns = cursor.fetchall()
-        for col in columns:
-            print(f"   {col[0]:20} {col[1]}")
+        
+        # Use safe DESCRIBE
+        try:
+            cursor.execute(safe_describe(table_name))
+            columns = cursor.fetchall()
+            for col in columns:
+                print(f"   {col[0]:20} {col[1]}")
+        except Exception as e:
+            print(f"   ⚠️ Could not describe table: {e}")
+            continue
 
-        # Show sample data
-        cursor.execute(f"SELECT * FROM {table_name} LIMIT 3")
+        # Use parameterized query for sample data
+        cursor.execute("SELECT * FROM " + validate_table_name(table_name, allow_wialon=True) + " LIMIT 3")
         sample = cursor.fetchall()
         if sample:
             print(f"   Sample data: {len(sample)} rows")
