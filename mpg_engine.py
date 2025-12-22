@@ -5,10 +5,11 @@ This module provides pure functions for MPG tracking with proper validation,
 windowing, and EMA smoothing. Designed for easy testing and reusability.
 
 Author: Fuel Copilot Team
-Version: v3.15.0
-Date: December 20, 2025
+Version: v3.15.3
+Date: December 22, 2025
 
 Changelog:
+- v3.15.3: FIXED MPG inflados - restaurar thresholds 8.0mi/1.2gal (era 5.0mi/0.75gal que amplificaba errores)
 - v3.15.2: RESTORED Wednesday Dec 18 config (5.0mi/0.75gal/9.0max) - was showing correct 4-7.5 range
 - v3.15.1: Fix MPG config - min_miles 4.0/max_mpg 7.8 for accurate tracking (44k lbs trucks)
 - v3.15.0: Increased max_mpg from 9.0 to 12.0 - trucks were getting rejected with valid 9-11 MPG
@@ -200,6 +201,15 @@ class MPGConfig:
     - Dry van empty, highway: 6.5 - 7.5 MPG
     - Optimal (descent, empty): 7.0 - 8.5 MPG
 
+    🔧 v3.15.3 FIX CRÍTICO: MPG inflados por thresholds muy bajos
+    Problema: min_fuel_gal = 0.75 gal → cálculos con muy poco combustible
+    - Errores pequeños del sensor (10-20%) se amplifican enormemente en MPG
+    - Ejemplo: 5mi / 0.5gal (error 33%) = 10 MPG falso vs 5mi / 0.75gal = 6.67 MPG correcto
+    
+    Solución: Volver a thresholds más conservadores (8.0mi/1.2gal)
+    - Requiere más distancia y combustible antes de calcular → más preciso
+    - Trade-off: MPG se actualiza menos frecuentemente, pero es más confiable
+    
     🔧 v3.12.18: Reduced min_miles from 10.0 to 5.0 for faster MPG updates
     This allows MPG to update more frequently while still having enough data
     for a reasonable calculation. Trade-off: slightly more variance in readings.
@@ -209,13 +219,15 @@ class MPGConfig:
     Avoids excessive noise while maintaining reasonable update frequency.
     """
 
-    # 🔧 RESTORED: Wednesday Dec 18 config that was working correctly
-    min_miles: float = 5.0  # Miércoles working value (balanced)
-    min_fuel_gal: float = 0.75  # Miércoles working value (proportional)
+    # 🔧 v5.18.1 FIX: Restaurar thresholds conservadores - evita MPG inflados
+    # De 5.0mi/0.75gal (poco combustible = errores amplificados) → 8.0mi/1.2gal
+    # Esto requiere más distancia/combustible antes de calcular MPG → más preciso
+    min_miles: float = 8.0  # Balance frecuencia/precisión (más conservador)
+    min_fuel_gal: float = 1.2  # Ajustado proporcionalmente (más conservador)
 
     # Physical limits for Class 8 trucks (realistic ranges)
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
-    max_mpg: float = 9.0  # Miércoles working value (showed 4.13-7.49 range)
+    max_mpg: float = 12.0  # Máximo realista para permitir lecturas válidas altas
     ema_alpha: float = 0.4  # 🔧 v3.10.7: Reduced from 0.6 for smoother readings
     fallback_mpg: float = 5.7  # 🔧 v3.12.31: Updated to fleet average (was 5.8)
 
