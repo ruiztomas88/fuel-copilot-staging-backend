@@ -1,9 +1,11 @@
 ﻿import pymysql
+
 from config import get_local_db_config
 
 conn = pymysql.connect(**get_local_db_config())
 cur = conn.cursor()
-cur.execute('''
+cur.execute(
+    """
 CREATE TABLE IF NOT EXISTS fuel_metrics (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     timestamp_utc DATETIME NOT NULL,
@@ -26,6 +28,7 @@ CREATE TABLE IF NOT EXISTS fuel_metrics (
     INDEX idx_timestamp (timestamp_utc),
     INDEX idx_status (truck_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-''')
-print('Table fuel_metrics created!')
+"""
+)
+print("Table fuel_metrics created!")
 conn.close()

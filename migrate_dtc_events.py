@@ -1,8 +1,11 @@
 """
 Migración: Actualizar dtc_events con columnas necesarias para el pull
 """
-import pymysql
+
 import os
+
+import pymysql
+
 from config import get_local_db_config
 
 conn = pymysql.connect(**get_local_db_config())
@@ -27,17 +30,21 @@ columns_to_add = [
 for col_name, col_type, position in columns_to_add:
     try:
         # Check if column exists
-        cursor.execute(f"""
+        cursor.execute(
+            f"""
             SELECT COUNT(*) 
             FROM information_schema.COLUMNS 
             WHERE TABLE_SCHEMA = 'fuel_copilot' 
             AND TABLE_NAME = 'dtc_events' 
             AND COLUMN_NAME = '{col_name}'
-        """)
-        
+        """
+        )
+
         if cursor.fetchone()[0] == 0:
             # Column doesn't exist, add it
-            cursor.execute(f"ALTER TABLE dtc_events ADD COLUMN {col_name} {col_type} {position}")
+            cursor.execute(
+                f"ALTER TABLE dtc_events ADD COLUMN {col_name} {col_type} {position}"
+            )
             print(f"✅ Agregada columna: {col_name}")
         else:
             print(f"⏭️  Columna ya existe: {col_name}")

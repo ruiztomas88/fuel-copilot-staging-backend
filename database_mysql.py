@@ -1224,8 +1224,10 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
             
             -- Moving stats for efficiency calculation (speed-based, not mpg_current)
             -- Calculate miles from speed * time (15-second intervals)
+            -- 🔧 DEC22 FIX: Add speed validation to prevent absurd values (199M miles)
             SUM(CASE 
-                WHEN truck_status = 'MOVING' AND speed_mph > 5
+                WHEN truck_status = 'MOVING' 
+                AND speed_mph > 5 AND speed_mph <= 85  -- 🆕 Realistic speed range
                 THEN speed_mph * (15.0/3600.0)
                 ELSE 0 
             END) as calculated_miles,
@@ -1320,6 +1322,17 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                 # Calculate actual vs expected consumption (row[9-11]) - CHANGED FROM row[5-8]
                 # Now using speed-based miles calculation instead of mpg_current
                 calculated_miles = float(row[9] or 0)
+                
+                # 🔧 DEC22 FIX: Sanity check for absurd mileage values
+                # RT9127 was showing 199M miles due to bad speed data
+                max_possible_miles = days_back * 24 * 85  # Max 85mph for entire period
+                if calculated_miles > max_possible_miles:
+                    logger.warning(
+                        f"[{truck_id}] Absurd calculated_miles: {calculated_miles:,.0f} "
+                        f"(max possible: {max_possible_miles:,.0f} in {days_back} days). Setting to 0."
+                    )
+                    calculated_miles = 0
+                
                 moving_fuel_consumed = float(row[10] or 0)
                 moving_records = int(row[11] or 0)
 

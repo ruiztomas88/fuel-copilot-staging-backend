@@ -5,6 +5,7 @@ Diagnóstico completo del sistema - verificar TODAS las funcionalidades
 from datetime import datetime
 
 import pymysql
+
 from config import get_local_db_config
 
 print("=" * 80)

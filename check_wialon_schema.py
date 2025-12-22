@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check actual Wialon database schema"""
 import pymysql
+
 from config import get_wialon_db_config
-from sql_security import validate_table_name, safe_describe
+from sql_security import safe_describe, validate_table_name
 
 try:
     conn = pymysql.connect(**get_wialon_db_config())
@@ -22,7 +23,7 @@ try:
     for table in tables:
         table_name = table[0]
         print(f"\n{table_name}:")
-        
+
         # Use safe DESCRIBE
         try:
             cursor.execute(safe_describe(table_name))
@@ -34,7 +35,11 @@ try:
             continue
 
         # Use parameterized query for sample data
-        cursor.execute("SELECT * FROM " + validate_table_name(table_name, allow_wialon=True) + " LIMIT 3")
+        cursor.execute(
+            "SELECT * FROM "
+            + validate_table_name(table_name, allow_wialon=True)
+            + " LIMIT 3"
+        )
         sample = cursor.fetchall()
         if sample:
             print(f"   Sample data: {len(sample)} rows")

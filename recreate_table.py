@@ -1,14 +1,16 @@
 ﻿import pymysql
+
 from config import get_local_db_config
 
 conn = pymysql.connect(**get_local_db_config())
 cur = conn.cursor()
 
 # Drop old table
-cur.execute('DROP TABLE IF EXISTS fuel_metrics')
+cur.execute("DROP TABLE IF EXISTS fuel_metrics")
 
 # Create with correct columns
-cur.execute('''
+cur.execute(
+    """
 CREATE TABLE fuel_metrics (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     timestamp_utc DATETIME NOT NULL,
@@ -31,6 +33,7 @@ CREATE TABLE fuel_metrics (
     INDEX idx_timestamp (timestamp_utc),
     INDEX idx_status (truck_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-''')
-print('Table recreated!')
+"""
+)
+print("Table recreated!")
 conn.close()

@@ -2465,21 +2465,31 @@ async def get_fleet_summary():
         with get_pymysql_connection() as conn:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 # Calculate metrics from fuel_metrics (last 7 days)
-                # ✅ FIX DEC22: Don't filter by odometer for MPG avg - include all trucks
-                # Only filter for cost_per_mile and total_miles where odometer exists
+                # ✅ FIX DEC22: Calculate real miles traveled per truck (MAX - MIN odometer)
+                # NOT sum of odometers (that's accumulative values)
                 cursor.execute(
                     """
+                    WITH truck_miles AS (
+                        SELECT 
+                            truck_id,
+                            MAX(odometer_mi) - MIN(odometer_mi) as miles_traveled,
+                            SUM(estimated_gallons) as total_fuel_gal
+                        FROM fuel_metrics
+                        WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                            AND odometer_mi IS NOT NULL AND odometer_mi > 0
+                        GROUP BY truck_id
+                        HAVING miles_traveled > 0 AND total_fuel_gal > 0
+                    )
                     SELECT 
-                        AVG(CASE 
-                            WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi
-                            ELSE NULL
-                        END) as avg_cost_per_mile,
-                        COUNT(DISTINCT truck_id) as active_trucks,
-                        AVG(mpg_current) as avg_mpg,
-                        SUM(CASE WHEN odometer_mi > 0 THEN odometer_mi ELSE 0 END) as total_miles,
-                        SUM(estimated_gallons * 3.50) as total_fuel_cost
-                    FROM fuel_metrics
-                    WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                        AVG((total_fuel_gal * 3.50) / miles_traveled) as avg_cost_per_mile,
+                        (SELECT COUNT(DISTINCT truck_id) FROM fuel_metrics 
+                         WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)) as active_trucks,
+                        (SELECT AVG(mpg_current) FROM fuel_metrics 
+                         WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                         AND mpg_current IS NOT NULL) as avg_mpg,
+                        SUM(miles_traveled) as total_miles,
+                        SUM(total_fuel_gal * 3.50) as total_fuel_cost
+                    FROM truck_miles
                 """
                 )
 
@@ -2563,19 +2573,21 @@ async def get_fleet_cost_analysis():
         total_labor = total_fuel * 0.40  # 40% of fuel cost
 
         # Get per-truck cost breakdown
-        # ✅ FIX DEC22: Only calculate cost_per_mile where odometer exists
+        # ✅ FIX DEC22: Calculate real miles traveled (MAX - MIN odometer per truck)
         cursor.execute(
             """
             SELECT 
                 truck_id,
-                AVG(CASE 
-                    WHEN odometer_mi > 0 THEN (estimated_gallons * 3.50) / odometer_mi 
+                CASE 
+                    WHEN (MAX(odometer_mi) - MIN(odometer_mi)) > 0 
+                    THEN (SUM(estimated_gallons) * 3.50) / (MAX(odometer_mi) - MIN(odometer_mi))
                     ELSE NULL
-                END) as cost_per_mile,
+                END as cost_per_mile,
                 SUM(estimated_gallons * 3.50) as total_cost,
-                SUM(CASE WHEN odometer_mi > 0 THEN odometer_mi ELSE 0 END) as total_miles
+                MAX(odometer_mi) - MIN(odometer_mi) as total_miles
             FROM fuel_metrics
             WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                AND odometer_mi IS NOT NULL AND odometer_mi > 0
             GROUP BY truck_id
             HAVING total_miles > 0
             ORDER BY cost_per_mile DESC

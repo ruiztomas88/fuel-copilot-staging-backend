@@ -28,10 +28,10 @@ Version: 5.7.6
 """
 
 import logging
-import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
+import statistics
 
 logger = logging.getLogger(__name__)
 
@@ -154,38 +154,38 @@ def filter_outliers_iqr(data: list[float], multiplier: float = 1.5) -> list[floa
 def calculate_percentile(data: list[float], percentile: int) -> float:
     """
     Calculate percentile of data using linear interpolation.
-
+    
     Improved algorithm (from 190h refactoring):
     - Uses proper interpolation for values between ranks
     - Handles edge cases (empty data, single value)
     - More accurate than simple index-based approach
-
+    
     Args:
         data: List of numeric values
         percentile: Percentile to calculate (0-100)
-
+        
     Returns:
         Percentile value
     """
     if not data:
         return 0.0
-
+    
     if len(data) == 1:
         return data[0]
-
+    
     sorted_data = sorted(data)
-
+    
     # Linear interpolation between ranks
     # Formula: P = (N-1) * p/100 where N is data size, p is percentile
     rank = (len(sorted_data) - 1) * percentile / 100
     lower_idx = int(rank)
     upper_idx = min(lower_idx + 1, len(sorted_data) - 1)
-
+    
     # Interpolate between lower and upper values
     fraction = rank - lower_idx
     lower_value = sorted_data[lower_idx]
     upper_value = sorted_data[upper_idx]
-
+    
     return lower_value + (upper_value - lower_value) * fraction
 
 

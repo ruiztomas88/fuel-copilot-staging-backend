@@ -12,61 +12,68 @@ Author: Fuel Copilot Team
 Date: December 22, 2025
 """
 
-import mysql.connector
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+import mysql.connector
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # Database connection
 DB_CONFIG = {
-    'host': 'localhost',
-    'user': 'fuel_admin',
-    'password': 'FuelCopilot2025!',
-    'database': 'fuel_copilot'
+    "host": "localhost",
+    "user": "fuel_admin",
+    "password": "FuelCopilot2025!",
+    "database": "fuel_copilot",
 }
+
 
 def reset_inflated_mpg():
     """Reset MPG values > 9.0 to force recalculation"""
-    
+
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
-    
+
     try:
         # Step 1: Find trucks with inflated MPG
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT DISTINCT truck_id, MAX(mpg_current) as max_mpg
             FROM fuel_metrics
             WHERE mpg_current > 9.0
             GROUP BY truck_id
             ORDER BY max_mpg DESC
-        """)
-        
+        """
+        )
+
         inflated_trucks = cursor.fetchall()
-        
+
         if not inflated_trucks:
             logger.info("✅ No inflated MPG values found (all ≤ 9.0)")
             return
-        
+
         logger.info(f"🔍 Found {len(inflated_trucks)} trucks with MPG > 9.0:")
         for truck_id, max_mpg in inflated_trucks:
             logger.info(f"   - {truck_id}: {max_mpg:.2f} MPG")
-        
+
         # Step 2: Reset to NULL to force recalculation
-        cursor.execute("""
+        cursor.execute(
+            """
             UPDATE fuel_metrics
             SET mpg_current = NULL
             WHERE mpg_current > 9.0
-        """)
-        
+        """
+        )
+
         rows_updated = cursor.rowcount
         conn.commit()
-        
+
         logger.info(f"✅ Reset {rows_updated} records with MPG > 9.0")
         logger.info("📊 Trucks will recalculate MPG on next sync cycle")
-        
+
         # Step 3: Show current distribution
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT 
                 CASE 
                     WHEN mpg_current IS NULL THEN 'NULL'
@@ -91,19 +98,21 @@ def reset_inflated_mpg():
             ) as latest
             GROUP BY mpg_range
             ORDER BY mpg_range
-        """)
-        
+        """
+        )
+
         distribution = cursor.fetchall()
         logger.info("\n📊 Current MPG distribution (last hour):")
         for mpg_range, count in distribution:
             logger.info(f"   {mpg_range:12s}: {count:3d} trucks")
-        
+
     except Exception as e:
         logger.error(f"❌ Error: {e}")
         conn.rollback()
     finally:
         cursor.close()
         conn.close()
+
 
 if __name__ == "__main__":
     reset_inflated_mpg()
