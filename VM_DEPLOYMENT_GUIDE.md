@@ -1,105 +1,438 @@
-# 🚀 Deployment en VM Windows - Wialon Full Sync
+# 🚀 Deployment en VM Windows - Fuel Analytics v7.0.0
 
-## ✅ Ya Completado en VM
-
-- ✅ Tabla `truck_sensors_cache` creada
-- ✅ Backend API corriendo
+**Fecha:** 22 Diciembre 2025  
+**Build:** ✅ Backend dd94dbb | ✅ Frontend f9629c7  
+**Features:** ML v7.0.0 (LSTM + Isolation Forest) + MPG fix
 
 ---
 
-## 📋 Pasos para Deployar el Nuevo Commit
+## ✅ Prerequisitos en VM Windows
 
-### Paso 1: Pull los Cambios del Backend
+- ✅ Windows Server 2019/2022 o Windows 10/11 Pro
+- ✅ Python 3.10+ instalado
+- ✅ MySQL 8.0+ instalado y corriendo
+- ✅ Git instalado
+- ✅ IIS o Nginx para Windows (frontend)
+- ✅ Acceso RDP a la VM
 
+---
+
+## 1️⃣ Actualizar Backend en VM
+
+### Conectar a VM
 ```powershell
-# Conectar a la VM (Remote Desktop o PowerShell remoting)
-# Abrir PowerShell como Administrador
+# Via Remote Desktop (RDP)
+mstsc /v:YOUR_VM_IP
 
-# Ir al directorio del backend
-cd C:\path\to\Fuel-Analytics-Backend
-
-# Pull los últimos cambios
-git pull origin main
+# O via PowerShell remoting
+Enter-PSSession -ComputerName YOUR_VM_IP -Credential $cred
 ```
 
-**Commits nuevos que se bajarán:**
-- `16cb028` - feat: Add comprehensive Wialon data sync (trips, speeding, driver behavior)
-- `0344edc` - docs: Add Wialon sync deployment guide
-- `21b47c2` - docs: Add comprehensive Wialon sync implementation summary
+### Pull Últimos Cambios
+```powershell
+# Abrir PowerShell como Administrador
+cd C:\FuelAnalytics\Backend
+
+# Pull cambios desde GitHub
+git pull origin main
+
+# Verificar commit actual
+git log --oneline -1
+# Esperado: dd94dbb feat: Security & ML Enhancement v7.0.0
+```
+
+**Cambios incluidos:**
+- ✅ ML v7.0.0: LSTM maintenance + Isolation Forest theft detection
+- ✅ MPG fix: Restored miércoles config (5.0mi/0.75gal/9.0max)
+- ✅ Security: API key auth + rate limiting
+- ✅ 13 nuevas APIs para ML predictions
 
 ---
 
-### Paso 2: Crear las Nuevas Tablas
+## 2️⃣ Limpiar MPG Inflados
 
 ```powershell
-# Ejecutar la migración para las nuevas tablas
-python migrations\create_wialon_sync_tables.py
+# Ejecutar script de limpieza
+python reset_inflated_mpg.py
 ```
 
 **Salida esperada:**
 ```
-Creating Wialon sync tables...
-✅ Created truck_trips table
-✅ Created truck_speeding_events table
-✅ Created truck_ignition_events table
-✅ All tables created!
+🔍 Found 13 trucks with MPG > 9.0
+✅ Reset 3611 records with MPG > 9.0
+📊 Trucks will recalculate MPG on next sync cycle
 ```
 
 ---
 
-### Paso 3: Verificar las Tablas
+## 3️⃣ Instalar Dependencias ML
 
 ```powershell
-# Conectar a MySQL (ajusta la ruta según tu instalación)
-mysql -u root -p fuel_copilot
-# O si MySQL está en el PATH:
-# C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe -u root -p fuel_copilot
-```
+# Activar entorno virtual (si usas uno)
+.\venv\Scripts\Activate.ps1
 
-```sql
--- Ver todas las tablas
-SHOW TABLES;
+# O instalar directo
+pip install --upgrade pip
+pip install scikit-learn tensorflow pandas numpy joblib
 
--- Debería mostrar:
--- truck_sensors_cache (ya existente)
--- truck_trips (nueva)
--- truck_speeding_events (nueva)
--- truck_ignition_events (nueva)
-
--- Ver estructura de las nuevas tablas
-DESCRIBE truck_trips;
-DESCRIBE truck_speeding_events;
-DESCRIBE truck_ignition_events;
-
--- Salir
-EXIT;
+# Verificar instalación
+python -c "import sklearn, tensorflow; print('✅ ML libs OK')"
 ```
 
 ---
 
-### Paso 4: Iniciar el Servicio de Sincronización
-powershell
-# Ejecutar y ver los logs en tiempo real
-python
+## 4️⃣ Entrenar Modelos ML
+
+```powershell
+# Entrenar modelo de robo (Isolation Forest)
+# Tarda ~2-3 minutos
+python train_theft_model.py
+```
+
+**Salida esperada:**
+```
+🎯 Training Theft Detection Model (Isolation Forest)
+📊 Loading training data from last 30 days...
+✅ Loaded 45,231 fuel events
+🔧 Training model...
+✅ Model trained! Accuracy: 94.2%
+💾 Model saved to: ml_models/theft_detector.pkl
+```
+
+```powershell
+# Entrenar modelo de mantenimiento (LSTM)
+# Tarda ~5-8 minutos
+python train_maintenance_model.py
+```
+
+**Salida esperada:**
+```
+🎯 Training Maintenance Prediction Model (LSTM)
+📊 Loading sensor data from last 90 days...
+✅ Loaded 128,445 sensor readings
+🔧 Training LSTM neural network...
+Epoch 1/10 ████████████████████ 100% - Loss: 0.045
+Epoch 2/10 ████████████████████ 100% - Loss: 0.032
+...
+Epoch 10/10 ████████████████████ 100% - Loss: 0.018
+✅ Model trained! Validation Accuracy: 91.7%
+💾 Model saved to: ml_models/maintenance_predictor.h5
+```
+
+---
+
+## 5️⃣ Reiniciar Servicios
+
+### Opción A: Servicios Windows (Recomendado)
+
+```powershell
+# Si tienes configurado como servicio Windows
+Restart-Service FuelAnalytics-API
+Restart-Service FuelAnalytics-Sync
+
+# Ver estado
+Get-Service FuelAnalytics-*
+```
+
+### Opción B: Proceso Manual
+
+```powershell
+# Detener procesos actuales
+Get-Process python | Where-Object {$_.MainWindowTitle -like "*wialon*"} | Stop-Process -Force
+Get-Process uvicorn | Stop-Process -Force
+
+# Iniciar wialon_sync en background
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd C:\FuelAnalytics\Backend; python wialon_sync_enhanced.py" -WindowStyle Minimized
+
+# Iniciar API en background  
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd C:\FuelAnalytics\Backend; python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4" -WindowStyle Minimized
+```
+
+### Opción C: Usar NSSM (Non-Sucking Service Manager)
+
+```powershell
+# Descargar NSSM desde https://nssm.cc/download
+# Descomprimir a C:\nssm
+
+# Crear servicio para API
+C:\nssm\nssm.exe install FuelAnalytics-API "C:\Python310\python.exe"
+C:\nssm\nssm.exe set FuelAnalytics-API AppParameters "-m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4"
+C:\nssm\nssm.exe set FuelAnalytics-API AppDirectory "C:\FuelAnalytics\Backend"
+C:\nssm\nssm.exe set FuelAnalytics-API Start SERVICE_AUTO_START
+
+# Crear servicio para Sync
+C:\nssm\nssm.exe install FuelAnalytics-Sync "C:\Python310\python.exe"
+C:\nssm\nssm.exe set FuelAnalytics-Sync AppParameters "wialon_sync_enhanced.py"
+C:\nssm\nssm.exe set FuelAnalytics-Sync AppDirectory "C:\FuelAnalytics\Backend"
+C:\nssm\nssm.exe set FuelAnalytics-Sync Start SERVICE_AUTO_START
+
+# Iniciar servicios
+Start-Service FuelAnalytics-API
+Start-Service FuelAnalytics-Sync
+```
+
+---
+
+## 6️⃣ Actualizar Frontend
+
+### En tu Mac (Local)
 ```bash
-# Ejecutar y ver los logs en tiempo real
-python3 wialon_full_sync_service.py
+cd /Users/tomasruiz/Desktop/Fuel-Analytics-Frontend
+
+# Build de producción
+npm run build
+
+# Copiar a VM via RDP o SCP
+# Opción 1: Comprimir
+tar -czf dist.tar.gz dist/
+
+# Copiar manualmente via RDP drag-and-drop
+# O usar WinSCP/FileZilla
 ```
 
-Verás algo como:
-```
-🚀 Starting Wialon Full Sync Service
-   Wialon DB: 20.127.200.135:3306/wialon_collect
-   Local DB: localhost:3306/fuel_copilot
-   Sensors: Every 30 seconds
-   Trips/Events: Every 60 seconds
-============================================================
+### En VM Windows
+```powershell
+# Descomprimir (si usaste tar)
+# Instalar 7-Zip primero si no lo tienes
+# Descargar de: https://www.7-zip.org/
 
-============================================================
-🔄 Sync Cycle #1 - 2025-01-03 10:30:00
-============================================================
-🔄 Starting sensor sync...
-📊 Retrieved 45 trucks from Wialon sensors
+# Extraer
+cd C:\FuelAnalytics
+7z x dist.tar.gz
+7z x dist.tar
+
+# Copiar archivos a IIS o Nginx
+Copy-Item -Path dist\* -Destination C:\inetpub\wwwroot\fuelanalytics\ -Recurse -Force
+```
+
+### Configurar IIS (si usas IIS)
+```powershell
+# Abrir IIS Manager
+inetmgr
+
+# O via PowerShell
+Import-Module WebAdministration
+
+# Crear sitio si no existe
+New-WebSite -Name "FuelAnalytics" `
+    -Port 80 `
+    -PhysicalPath "C:\inetpub\wwwroot\fuelanalytics" `
+    -ApplicationPool "DefaultAppPool"
+
+# Configurar reverse proxy para /api/
+# Necesitas instalar URL Rewrite y ARR primero
+# https://www.iis.net/downloads/microsoft/url-rewrite
+# https://www.iis.net/downloads/microsoft/application-request-routing
+
+# Crear web.config en C:\inetpub\wwwroot\fuelanalytics\
+```
+
+**web.config:**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <system.webServer>
+        <rewrite>
+            <rules>
+                <!-- API Reverse Proxy -->
+                <rule name="ReverseProxyAPI" stopProcessing="true">
+                    <match url="^api/(.*)" />
+                    <action type="Rewrite" url="http://localhost:8000/{R:1}" />
+                </rule>
+                <!-- SPA Fallback -->
+                <rule name="SPA" stopProcessing="true">
+                    <match url=".*" />
+                    <conditions logicalGrouping="MatchAll">
+                        <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
+                        <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
+                    </conditions>
+                    <action type="Rewrite" url="/index.html" />
+                </rule>
+            </rules>
+        </rewrite>
+        <staticContent>
+            <mimeMap fileExtension=".json" mimeType="application/json" />
+            <mimeMap fileExtension=".woff" mimeType="application/font-woff" />
+            <mimeMap fileExtension=".woff2" mimeType="application/font-woff2" />
+        </staticContent>
+    </system.webServer>
+</configuration>
+```
+
+---
+
+## 7️⃣ Verificación Post-Deploy
+
+```powershell
+# 1. API responde
+Invoke-WebRequest -Uri http://localhost:8000/health | Select-Object -Expand Content
+# Esperado: {"status":"healthy"}
+
+# 2. ML endpoints funcionan
+Invoke-WebRequest -Uri http://localhost:8000/api/v2/ml/theft/predictions | Select-Object -Expand Content
+Invoke-WebRequest -Uri http://localhost:8000/api/v2/ml/maintenance/predictions | Select-Object -Expand Content
+
+# 3. Sync está corriendo
+Get-Process python | Where-Object {$_.CommandLine -like "*wialon*"}
+
+# 4. Base de datos actualizada
+mysql -u fuel_admin -p fuel_copilot -e "SELECT COUNT(*) FROM fuel_metrics WHERE timestamp_utc >= NOW() - INTERVAL 1 HOUR;"
+
+# 5. MPG valores correctos (4-7.5 range)
+mysql -u fuel_admin -p fuel_copilot -e "SELECT truck_id, mpg_current FROM fuel_metrics WHERE mpg_current IS NOT NULL AND mpg_current > 0 ORDER BY timestamp_utc DESC LIMIT 20;"
+```
+
+**MPG esperado:**
+```
++----------+-------------+
+| truck_id | mpg_current |
++----------+-------------+
+| CO0681   |        6.82 |
+| OM7769   |        5.91 |
+| JR7099   |        7.12 |
+| RT9127   |        5.45 |
+| RR1272   |        6.23 |
+```
+
+❌ **NO deberías ver:**
+- MPG > 9.0 (inflado)
+- MPG < 3.5 (demasiado bajo)
+
+---
+
+## 8️⃣ Monitoreo y Logs
+
+```powershell
+# Logs en tiempo real
+Get-Content C:\FuelAnalytics\Backend\logs\sync_$(Get-Date -Format "yyyyMMdd").log -Wait -Tail 50
+
+# Errores recientes
+Get-Content C:\FuelAnalytics\Backend\logs\sync_$(Get-Date -Format "yyyyMMdd").log | Select-String "ERROR"
+
+# Performance
+Get-Counter '\Processor(_Total)\% Processor Time'
+Get-Counter '\Memory\Available MBytes'
+
+# Procesos Python
+Get-Process python | Format-Table Id, CPU, WorkingSet, ProcessName -AutoSize
+```
+
+---
+
+## 9️⃣ Backup Automático
+
+```powershell
+# Crear script de backup
+New-Item -Path "C:\FuelAnalytics\Scripts" -ItemType Directory -Force
+notepad C:\FuelAnalytics\Scripts\backup_daily.ps1
+```
+
+**backup_daily.ps1:**
+```powershell
+$BackupDir = "C:\FuelAnalytics\Backups"
+$Date = Get-Date -Format "yyyyMMdd_HHmmss"
+
+# Crear directorio si no existe
+New-Item -Path $BackupDir -ItemType Directory -Force
+
+# Backup MySQL
+$mysqldump = "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe"
+& $mysqldump -u fuel_admin -p'TU_PASSWORD' fuel_copilot | Out-File "$BackupDir\db_$Date.sql"
+
+# Comprimir
+Compress-Archive -Path "$BackupDir\db_$Date.sql" -DestinationPath "$BackupDir\db_$Date.zip"
+Remove-Item "$BackupDir\db_$Date.sql"
+
+# Backup modelos ML
+Compress-Archive -Path "C:\FuelAnalytics\Backend\ml_models" -DestinationPath "$BackupDir\models_$Date.zip"
+
+# Limpiar backups antiguos (> 7 días)
+Get-ChildItem $BackupDir -Filter "*.zip" | Where-Object {$_.LastWriteTime -lt (Get-Date).AddDays(-7)} | Remove-Item
+
+Write-Host "✅ Backup completado: $Date"
+```
+
+```powershell
+# Programar tarea diaria (3 AM)
+$Action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-File C:\FuelAnalytics\Scripts\backup_daily.ps1"
+$Trigger = New-ScheduledTaskTrigger -Daily -At 3am
+$Settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+Register-ScheduledTask -TaskName "FuelAnalytics-Backup" -Action $Action -Trigger $Trigger -Settings $Settings -User "SYSTEM"
+```
+
+---
+
+## 🔟 Troubleshooting
+
+### API no inicia
+```powershell
+# Ver procesos bloqueando puerto 8000
+netstat -ano | findstr :8000
+
+# Matar proceso
+Stop-Process -Id PID_AQUI -Force
+
+# Iniciar manualmente para ver errores
+cd C:\FuelAnalytics\Backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### Sync no sincroniza
+```powershell
+# Ver errores en logs
+Get-Content C:\FuelAnalytics\Backend\logs\sync_$(Get-Date -Format "yyyyMMdd").log | Select-String "ERROR" -Context 3
+
+# Verificar conexión Wialon
+python -c "from wialon_reader import WialonReader; w = WialonReader(); print(w.login())"
+```
+
+### Frontend no carga
+```powershell
+# Verificar IIS
+Get-Website | Format-Table Name, State, PhysicalPath
+
+# Reiniciar IIS
+iisreset /restart
+
+# Ver logs IIS
+Get-Content "C:\inetpub\logs\LogFiles\W3SVC1\u_ex$(Get-Date -Format 'yyMMdd').log" -Tail 20
+```
+
+### MySQL lento
+```powershell
+# Optimizar tablas
+mysql -u fuel_admin -p fuel_copilot -e "OPTIMIZE TABLE fuel_metrics;"
+
+# Ver queries lentas
+mysql -u fuel_admin -p fuel_copilot -e "SHOW FULL PROCESSLIST;"
+```
+
+---
+
+## ✅ Checklist Final
+
+- [ ] Backend actualizado a commit dd94dbb
+- [ ] MPG inflados reseteados (script ejecutado)
+- [ ] Modelos ML entrenados (theft + maintenance)
+- [ ] API corriendo en puerto 8000
+- [ ] Wialon sync activo
+- [ ] Frontend desplegado en IIS
+- [ ] Reverse proxy /api/ configurado
+- [ ] Backup automático programado
+- [ ] Logs monitoreables
+- [ ] MPG mostrando 4-7.5 range
+
+---
+
+## 📞 Soporte
+
+**GitHub:** fleetBooster/Fuel-Analytics-Backend  
+**Logs:** `C:\FuelAnalytics\Backend\logs\`  
+**Config:** Ver `.env` y `config.py`
+
+---
+
+**¡Deployment completado en Windows!** 🎉
 ✅ Synced 45 trucks' sensor data
 🔄 Starting trips sync...
 📊 Retrieved 1247 trips from last 7 days
