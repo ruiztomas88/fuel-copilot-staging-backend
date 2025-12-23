@@ -1,23 +1,26 @@
 """
 Wialon to MySQL Sync - Enhanced Real-time Data Bridge v3.0
-🚀 FULL KALMAN FILTER INTEGRATION
+🚀 FULL KALMAN FILTER INTEGRATION + QUICK WINS
 
 This enhanced sync script properly integrates:
 - FuelEstimator (Kalman Filter) from estimator.py
 - MPG tracking from mpg_engine.py
 - Idle consumption calculation from idle_engine.py
 - State persistence for continuity across restarts
+- 🆕 v3.12.32: Quick Wins (Adaptive Thresholds, Confidence Scoring, Smart Notifications, Sensor Health)
 
 FIXES ALL DASHBOARD ISSUES:
 ✅ Kalman vs Sensor values (not just N/A)
 ✅ Proper drift calculation (estimated - sensor)
 ✅ Real MPG tracking with EMA smoothing
 ✅ Idle consumption with temperature adjustment
-✅ Refuel detection
+✅ Refuel detection with adaptive thresholds
 ✅ Emergency reset for extreme drift
+✅ Confidence scoring for all estimations
+✅ Sensor health monitoring
 
 Author: Fuel Copilot Team
-Version: 3.12.31
+Version: 3.12.32
 Date: December 2025
 """
 
@@ -38,6 +41,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# 🆕 v3.12.32: Import Quick Wins modules
+from adaptive_refuel_thresholds import get_adaptive_thresholds
+
 # 🆕 v3.12.27: Import fuel event classifier for theft/sensor differentiation
 from alert_service import (
     get_alert_manager,
@@ -47,6 +53,7 @@ from alert_service import (
     send_theft_confirmed_alert,
     send_voltage_alert,
 )
+from confidence_scoring import calculate_estimation_confidence
 from config import (
     get_allowed_trucks,
 )  # 🆕 v5.4.6: Filter to only process configured trucks
@@ -79,6 +86,8 @@ from mpg_engine import MPGConfig, MPGState, reset_mpg_state, update_mpg_state
 
 # 🆕 v5.11.0: Import predictive maintenance engine
 from predictive_maintenance_engine import get_predictive_maintenance_engine
+from sensor_health_monitor import get_sensor_health_monitor
+from smart_refuel_notifications import get_refuel_notifier
 
 # 🆕 v3.12.28: Import terrain factor for altitude-based consumption adjustment
 from terrain_factor import get_terrain_fuel_factor
@@ -428,7 +437,7 @@ def determine_truck_status(
 ) -> str:
     """
     Enhanced truck status determination v4 - Fixed timestamp validation
-    
+
     🔧 FIX v3.12.31 (BUG-008): Validate sensor timestamps to prevent stale data mismatches
     Problem: Speed from 5 min ago + RPM from 30 sec ago = wrong status
     Solution: Use only sensors with similar timestamps (within 2 min of each other)
@@ -445,20 +454,20 @@ def determine_truck_status(
     - Fuel rate > 0.3 L/h
     - Engine load > 0%
     - Coolant temp > 120°F (engine at operating temp)
-    
+
     Args:
         sensor_timestamps: Dict with sensor ages in seconds: {'speed': 300, 'rpm': 30, ...}
     """
     # Check for offline - stale data (no communication in 15+ minutes)
     if data_age_min > 15:
         return "OFFLINE"
-    
+
     # 🆕 BUG-008 FIX: Validate sensor timestamps before using them
     # If speed data is >2 min older than RPM, don't trust speed (may be stale)
     if sensor_timestamps:
-        speed_age = sensor_timestamps.get('speed', 0)
-        rpm_age = sensor_timestamps.get('rpm', 0)
-        
+        speed_age = sensor_timestamps.get("speed", 0)
+        rpm_age = sensor_timestamps.get("rpm", 0)
+
         # If speed is MUCH older than RPM (>2 min difference), ignore speed
         # This prevents "speed=0 from 5 min ago" + "rpm=1500 now" = wrong STOPPED
         if speed is not None and rpm is not None:
@@ -467,11 +476,15 @@ def determine_truck_status(
                 if speed_age > rpm_age + 120:
                     # Speed is stale compared to RPM - ignore it
                     speed = None
-                    logger.debug(f"Ignoring stale speed (age={speed_age}s vs rpm age={rpm_age}s)")
+                    logger.debug(
+                        f"Ignoring stale speed (age={speed_age}s vs rpm age={rpm_age}s)"
+                    )
                 elif rpm_age > speed_age + 120:
                     # RPM is stale compared to speed - ignore it
                     rpm = None
-                    logger.debug(f"Ignoring stale rpm (age={rpm_age}s vs speed age={speed_age}s)")
+                    logger.debug(
+                        f"Ignoring stale rpm (age={rpm_age}s vs speed age={speed_age}s)"
+                    )
 
     # 🔧 FIX v3.12.1: Check engine indicators FIRST (before speed check)
     # This ensures trucks with RPM > 0 but speed=None are marked STOPPED, not OFFLINE
@@ -651,8 +664,16 @@ def detect_refuel(
     from settings import get_settings
 
     _settings = get_settings()
-    min_increase_pct = _settings.fuel.min_refuel_jump_pct  # Default 10.0 (was 15.0)
-    min_increase_gal = _settings.fuel.min_refuel_gallons  # Default 5.0 (was 10.0)
+
+    # 🆕 v3.12.32 QUICK WIN #1: Adaptive Refuel Thresholds
+    # Learn optimal thresholds per truck based on confirmed refuel history
+    adaptive = get_adaptive_thresholds()
+    min_increase_pct, min_increase_gal = adaptive.get_thresholds(truck_id)
+
+    # Fallback to settings if adaptive returns None
+    if min_increase_pct is None or min_increase_gal is None:
+        min_increase_pct = _settings.fuel.min_refuel_jump_pct  # Default 10.0 (was 15.0)
+        min_increase_gal = _settings.fuel.min_refuel_gallons  # Default 5.0 (was 10.0)
 
     # 🔧 v3.12.28: Apply refuel_factor for sensor calibration
     refuel_factor = get_refuel_factor(truck_id)
@@ -1619,19 +1640,25 @@ def process_truck(
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
     data_age_min = (now_utc - timestamp).total_seconds() / 60.0
-    
+
     # 🆕 BUG-008 FIX: Build sensor timestamp dict for validation
     # This allows determine_truck_status to check if sensors have similar timestamps
     sensor_timestamps = {
-        'speed': int(data_age_min * 60),  # Convert back to seconds
-        'rpm': int(data_age_min * 60),
-        'fuel_rate': int(data_age_min * 60),
+        "speed": int(data_age_min * 60),  # Convert back to seconds
+        "rpm": int(data_age_min * 60),
+        "fuel_rate": int(data_age_min * 60),
     }
 
     # Determine truck status (enhanced with multiple sensors + timestamp validation)
     truck_status = determine_truck_status(
-        speed, rpm, fuel_rate, data_age_min, pwr_ext, engine_load, coolant_temp,
-        sensor_timestamps=sensor_timestamps  # 🆕 BUG-008: Pass timestamps for validation
+        speed,
+        rpm,
+        fuel_rate,
+        data_age_min,
+        pwr_ext,
+        engine_load,
+        coolant_temp,
+        sensor_timestamps=sensor_timestamps,  # 🆕 BUG-008: Pass timestamps for validation
     )
 
     # Calculate time delta from last update
@@ -1701,6 +1728,16 @@ def process_truck(
         satellites=sats,
         voltage=pwr_int,
         is_engine_running=is_engine_running,
+    )
+    
+    # 🆕 v3.12.32 QUICK WIN #4: Feed Sensor Health Monitor
+    sensor_monitor = get_sensor_health_monitor()
+    sensor_monitor.add_reading(
+        truck_id=truck_id,
+        fuel_pct=sensor_pct,
+        timestamp=timestamp,
+        speed=speed or 0,
+        consumption_gph=consumption_gph or 0
     )
 
     # 🔧 v5.8.2: Update adaptive Q_r based on truck status BEFORE predict
@@ -1799,7 +1836,7 @@ def process_truck(
     estimated_liters = estimator.level_liters
     estimated_gallons = estimated_liters / 3.78541
     fuel_source = "kalman"
-    
+
     # Fallback if Kalman failed
     if estimated_pct is None or estimated_pct < 0 or estimated_pct > 100:
         # Try raw sensor
@@ -1873,7 +1910,9 @@ def process_truck(
         # Validate delta_miles is reasonable before storing
         MIN_DELTA_MILES = 0.1
         MAX_DELTA_MILES = 500
-        odom_delta_mi = delta_miles if (MIN_DELTA_MILES < delta_miles < MAX_DELTA_MILES) else None
+        odom_delta_mi = (
+            delta_miles if (MIN_DELTA_MILES < delta_miles < MAX_DELTA_MILES) else None
+        )
 
         # 🔧 v2.0.1 DEC 22 FIX: NUEVO orden de prioridad para fuel consumption
         # PRIORITY 1: Fuel level sensor (más confiable - cambio real en tanque)
@@ -2096,6 +2135,20 @@ def process_truck(
                 f"raw_mpg={mpg_current:.2f}, adjusted={weather_adjusted_mpg:.2f}"
             )
 
+    # 🆕 v3.12.32 QUICK WIN #2: Calculate Confidence Score
+    confidence = calculate_estimation_confidence(
+        sensor_pct=sensor_pct,
+        time_gap_hours=time_gap_hours,
+        gps_satellites=sats,
+        battery_voltage=pwr_ext,
+        kalman_variance=estimator.P if estimator else 50.0,
+        sensor_age_seconds=int(data_age_min * 60),
+        ecu_available=total_fuel_used is not None,
+        speed=speed,
+        drift_pct=abs(drift_pct) if drift_pct is not None else 0,
+        rpm=rpm
+    )
+
     # Return complete metrics
     return {
         "timestamp_utc": timestamp,
@@ -2184,6 +2237,10 @@ def process_truck(
         # P is covariance, lower = more confident (typical range 0.5-10)
         "kalman_confidence": round(1.0 / (1.0 + estimator.P), 3) if estimator else None,
         "kalman_P": round(estimator.P, 3) if estimator else None,
+        # 🆕 v3.12.32 QUICK WIN #2: Confidence Scoring
+        "confidence_score": confidence.score,
+        "confidence_level": confidence.level.value,
+        "confidence_warnings": '; '.join(confidence.warnings) if confidence.warnings else None,
     }
 
 
@@ -3156,7 +3213,7 @@ def sync_cycle(
                         f"confidence={refuel_evt.get('confidence', 0):.0f}% "
                         f"location={metrics.get('latitude', 'N/A')},{metrics.get('longitude', 'N/A')}"
                     )
-                    
+
                     was_saved = save_refuel_event(
                         connection=local_conn,
                         truck_id=truck_id,
@@ -3174,6 +3231,17 @@ def sync_cycle(
                             f"{fuel_before:.1f}% → {fuel_after:.1f}% "
                             f"(+{gallons_added:.1f} gal)"
                         )
+
+                        # 🆕 v3.12.32 QUICK WIN #1: Register confirmed refuel for adaptive learning
+                        pct_jump = fuel_after - fuel_before
+                        adaptive = get_adaptive_thresholds()
+                        adaptive.record_confirmed_refuel(
+                            truck_id=truck_id,
+                            pct_jump=pct_jump,
+                            gallons=gallons_added,
+                            confidence=0.9,  # High confidence for saved refuels
+                        )
+
                         # Send notification for successfully saved refuels
                         send_refuel_notification(
                             truck_id=truck_id,
