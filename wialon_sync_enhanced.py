@@ -639,16 +639,18 @@ def detect_refuel(
     kalman_method_triggered = (
         fuel_increase_pct >= min_increase_pct and increase_gal >= min_increase_gal
     )
-    
+
     sensor_method_triggered = False
     sensor_increase_gal = 0
     if sensor_to_sensor_jump is not None:
-        sensor_increase_gal = (sensor_to_sensor_jump / 100) * tank_capacity_gal * refuel_factor
+        sensor_increase_gal = (
+            (sensor_to_sensor_jump / 100) * tank_capacity_gal * refuel_factor
+        )
         sensor_method_triggered = (
-            sensor_to_sensor_jump >= min_increase_pct 
+            sensor_to_sensor_jump >= min_increase_pct
             and sensor_increase_gal >= min_increase_gal
         )
-    
+
     # Use whichever method shows larger refuel (more conservative)
     if kalman_method_triggered or sensor_method_triggered:
         # Pick the method that shows LARGER refuel (more accurate)
@@ -701,7 +703,9 @@ def detect_refuel(
         }
     else:
         # 🆕 v5.19.1: Log near-misses for debugging
-        if fuel_increase_pct > 5 or (sensor_to_sensor_jump and sensor_to_sensor_jump > 5):
+        if fuel_increase_pct > 5 or (
+            sensor_to_sensor_jump and sensor_to_sensor_jump > 5
+        ):
             logger.debug(
                 f"⏭️ [{truck_id}] Near-miss refuel: "
                 f"Kalman: +{fuel_increase_pct:.1f}% ({increase_gal:.1f} gal), "
