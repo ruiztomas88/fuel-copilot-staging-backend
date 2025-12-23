@@ -1,21 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Auto Database Backup Service
-Backs up fuel_copilot DB every 6 hours
+Single Database Backup Script
+Creates one backup of fuel_copilot DB and exits
+For use with Windows Task Scheduler
 """
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime
 
-# Fix Windows console encoding for emojis
+# Fix Windows console encoding
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 BACKUP_DIR = r"C:\Users\devteam\Proyectos\fuel-analytics-backend\backups"
-BACKUP_INTERVAL = 6 * 60 * 60  # 6 hours in seconds
 
 
 def backup_database():
@@ -39,8 +38,10 @@ def backup_database():
             "--lock-tables=false",
         ]
 
-        with open(backup_file, "w") as f:
-            subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=True)
+        with open(backup_file, "w", encoding="utf-8") as f:
+            result = subprocess.run(
+                cmd, stdout=f, stderr=subprocess.PIPE, check=True, text=True
+            )
 
         file_size = os.path.getsize(backup_file) / (1024 * 1024)  # MB
         print(
@@ -49,9 +50,11 @@ def backup_database():
 
         # Keep only last 7 backups
         cleanup_old_backups()
+        return True
 
     except Exception as e:
         print(f"[{datetime.now()}] ❌ Backup failed: {e}")
+        return False
 
 
 def cleanup_old_backups():
@@ -78,14 +81,6 @@ def cleanup_old_backups():
 
 
 if __name__ == "__main__":
-    print(
-        f"[{datetime.now()}] 🚀 Auto Backup Service started (interval: {BACKUP_INTERVAL/3600}h)"
-    )
-
-    # Initial backup on startup
-    backup_database()
-
-    # Run every 6 hours
-    while True:
-        time.sleep(BACKUP_INTERVAL)
-        backup_database()
+    print(f"[{datetime.now()}] 🚀 Starting database backup...")
+    success = backup_database()
+    sys.exit(0 if success else 1)

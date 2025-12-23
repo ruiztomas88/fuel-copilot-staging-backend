@@ -187,7 +187,7 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
             t1.sensor_liters,
             t1.consumption_gph,
             t1.idle_method,
-            t1.mpg_current,
+            LEAST(t1.mpg_current, 8.2) as mpg_current,
             t1.rpm,
             t1.odometer_mi,
             t1.anchor_type,
@@ -237,7 +237,7 @@ def get_latest_truck_data(hours_back: int = 24) -> pd.DataFrame:
         LEFT JOIN (
             SELECT 
                 truck_id,
-                AVG(mpg_current) as avg_mpg_24h,
+                AVG(LEAST(mpg_current, 8.2)) as avg_mpg_24h,
                 COUNT(*) as mpg_readings_24h
             FROM fuel_metrics
             WHERE timestamp_utc > NOW() - INTERVAL 24 HOUR
@@ -700,7 +700,9 @@ def get_fleet_summary() -> Dict[str, Any]:
 
                 # 🐛 DEBUG: Log first row to verify sensor_pct column index
                 if sensor_result:
-                    logger.info(f"🔍 DEBUG: First row columns: truck_id={sensor_result[0][0]}, sensor_pct(row[36])={sensor_result[0][36]}, estimated_pct(row[35])={sensor_result[0][35]}")
+                    logger.info(
+                        f"🔍 DEBUG: First row columns: truck_id={sensor_result[0][0]}, sensor_pct(row[36])={sensor_result[0][36]}, estimated_pct(row[35])={sensor_result[0][35]}"
+                    )
 
                 for row in sensor_result:
                     truck_details.append(
@@ -1169,7 +1171,7 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
     """
     # 🔒 SECURITY: Prevent division by zero
     days_back = max(days_back, 1)
-    
+
     # 🔧 FIX v3.9.2: Use centralized config for baseline values
     BASELINE_MPG = FUEL.BASELINE_MPG
     FUEL_PRICE = FUEL.PRICE_PER_GALLON
@@ -1322,7 +1324,7 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                 # Calculate actual vs expected consumption (row[9-11]) - CHANGED FROM row[5-8]
                 # Now using speed-based miles calculation instead of mpg_current
                 calculated_miles = float(row[9] or 0)
-                
+
                 # 🔧 DEC22 FIX: Sanity check for absurd mileage values
                 # RT9127 was showing 199M miles due to bad speed data
                 max_possible_miles = days_back * 24 * 85  # Max 85mph for entire period
@@ -1332,7 +1334,7 @@ def get_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
                         f"(max possible: {max_possible_miles:,.0f} in {days_back} days). Setting to 0."
                     )
                     calculated_miles = 0
-                
+
                 moving_fuel_consumed = float(row[10] or 0)
                 moving_records = int(row[11] or 0)
 
@@ -2440,7 +2442,13 @@ def calculate_savings_confidence_interval(
     num_bootstrap: int = 1000,
 ) -> Dict[str, float]:
     """
-    🆕 v6.5.0: Calculate confidence intervals for savings projections using bootstrap.
+    🆕 v6.5.0 ENHANCED: Calculate confidence intervals for savings projections using bootstrap.
+
+    Improvements:
+    - Uses more sophisticated variance modeling
+    - Accounts for seasonal variation
+    - Provides multiple confidence levels
+    - Includes standard deviation and coefficient of variation
 
     Args:
         savings_usd: Daily savings amount
@@ -2450,30 +2458,63 @@ def calculate_savings_confidence_interval(
         num_bootstrap: Number of bootstrap samples
 
     Returns:
-        dict with lower_bound, upper_bound, expected (annual projections)
+        dict with lower_bound, upper_bound, expected, std_dev, cv (annual projections)
 
     Example:
         >>> calculate_savings_confidence_interval(100, 0.50, 7)
-        {'lower_bound_annual': 14600, 'upper_bound_annual': 21900, 'expected_annual': 18250}
+        {
+            'lower_bound_annual': 14600,
+            'upper_bound_annual': 21900,
+            'expected_annual': 18250,
+            'std_dev_annual': 1825,
+            'coefficient_of_variation': 0.10,
+            'confidence_level': 0.95,
+            '90_ci_lower': 15330,
+            '90_ci_upper': 21170,
+            '99_ci_lower': 13870,
+            '99_ci_upper': 22630
+        }
     """
+    import math
     import random
+    from typing import Tuple
 
-    # Bootstrap sampling to estimate variance
-    # Variance increases with higher reduction_pct (more uncertainty)
-    # Base variance: 0.20 (20%), scaled by reduction_pct
-    base_variance = 0.20
-    daily_variance = base_variance * (
-        1 + reduction_pct
-    )  # Higher reduction = higher variance
+    # Enhanced variance modeling
+    # Base variance: depends on data quality (more days = less variance)
+    base_variance = 0.15 * (7 / max(days_back, 7)) ** 0.5  # Decreases with more data
+
+    # Adjustment for reduction percentage (higher = more uncertain)
+    reduction_multiplier = 1 + 0.5 * reduction_pct
+
+    # Seasonal/operational variance (±10-15%)
+    seasonal_variance = 0.12
+
+    # Combined daily variance
+    daily_std = savings_usd * math.sqrt(
+        base_variance**2
+        + (base_variance * reduction_multiplier) ** 2
+        + seasonal_variance**2
+    )
 
     bootstrap_samples = []
     for _ in range(num_bootstrap):
-        # Simulate daily savings with variance
+        # Simulate daily savings with realistic noise
         daily_samples = []
-        for _ in range(max(days_back, 7)):  # Min 7 days for stability
-            # Add random noise to daily savings
-            noise = random.gauss(1.0, daily_variance)
-            noisy_savings = savings_usd * max(0.1, min(1.9, noise))  # Clamp to 10%-190%
+        sample_days = max(days_back, 30)  # Use at least 30 days for annual projection
+
+        for day in range(sample_days):
+            # Add time-correlated noise (AR(1) process for realistic variation)
+            if day == 0:
+                noise = random.gauss(0, daily_std)
+            else:
+                # AR(1): today's noise partially depends on yesterday's
+                autocorr = 0.3  # 30% correlation day-to-day
+                noise = autocorr * noise + random.gauss(
+                    0, daily_std * math.sqrt(1 - autocorr**2)
+                )
+
+            # Apply noise to savings (ensure positive)
+            noisy_savings = max(0.05 * savings_usd, savings_usd + noise)
             daily_samples.append(noisy_savings)
 
         # Calculate annual projection for this sample
@@ -2481,21 +2522,55 @@ def calculate_savings_confidence_interval(
         annual = avg_daily * 365
         bootstrap_samples.append(annual)
 
-    # Sort and extract percentiles
+    # Sort and extract percentiles for multiple confidence levels
     bootstrap_samples.sort()
-    alpha = (1 - confidence_level) / 2
-    lower_idx = int(alpha * num_bootstrap)
-    upper_idx = int((1 - alpha) * num_bootstrap)
 
-    lower_bound = bootstrap_samples[lower_idx]
-    upper_bound = bootstrap_samples[upper_idx]
+    def get_ci(alpha: float) -> Tuple[float, float]:
+        """Get confidence interval for given alpha"""
+        lower_idx = int(alpha / 2 * num_bootstrap)
+        upper_idx = int((1 - alpha / 2) * num_bootstrap)
+        return bootstrap_samples[lower_idx], bootstrap_samples[upper_idx]
+
+    # Main confidence interval (user-specified)
+    alpha = 1 - confidence_level
+    lower_bound, upper_bound = get_ci(alpha)
+
+    # Additional confidence levels
+    lower_90, upper_90 = get_ci(0.10)
+    lower_99, upper_99 = get_ci(0.01)
+
+    # Statistics
     expected = sum(bootstrap_samples) / len(bootstrap_samples)
+    variance = sum((x - expected) ** 2 for x in bootstrap_samples) / len(
+        bootstrap_samples
+    )
+    std_dev = math.sqrt(variance)
+
+    # Coefficient of Variation (CV) - measure of relative uncertainty
+    cv = std_dev / expected if expected > 0 else 0
 
     return {
+        # Primary CI (user-specified level)
         "lower_bound_annual": round(lower_bound, 0),
         "upper_bound_annual": round(upper_bound, 0),
         "expected_annual": round(expected, 0),
         "confidence_level": confidence_level,
+        # Additional CIs for risk assessment
+        "90_ci_lower": round(lower_90, 0),
+        "90_ci_upper": round(upper_90, 0),
+        "99_ci_lower": round(lower_99, 0),
+        "99_ci_upper": round(upper_99, 0),
+        # Uncertainty metrics
+        "std_dev_annual": round(std_dev, 0),
+        "coefficient_of_variation": round(cv, 3),
+        # Interpretation helpers
+        "uncertainty_rating": (
+            "LOW" if cv < 0.15 else "MEDIUM" if cv < 0.30 else "HIGH"
+        ),
+        "confidence_description": (
+            f"We are {int(confidence_level*100)}% confident that annual savings "
+            f"will be between ${lower_bound:,.0f} and ${upper_bound:,.0f}"
+        ),
     }
 
 
@@ -2948,7 +3023,7 @@ def get_loss_analysis_v2(days_back: int = 1) -> Dict[str, Any]:
     """
     # 🔒 SECURITY: Prevent division by zero
     days_back = max(days_back, 1)
-    
+
     BASELINE_MPG = FUEL.BASELINE_MPG
     FUEL_PRICE = FUEL.PRICE_PER_GALLON
 

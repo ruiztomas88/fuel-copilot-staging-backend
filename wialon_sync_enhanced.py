@@ -309,7 +309,7 @@ class StateManager:
                 FROM fuel_metrics 
                 WHERE truck_id = %s 
                   AND mpg_current IS NOT NULL
-                  AND mpg_current BETWEEN 4.0 AND 7.5
+                  AND mpg_current BETWEEN 3.8 AND 8.2
                   AND timestamp_utc >= NOW() - INTERVAL 7 DAY
                 ORDER BY timestamp_utc DESC 
                 LIMIT 1
