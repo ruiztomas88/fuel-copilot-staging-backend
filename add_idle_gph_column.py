@@ -1,6 +1,7 @@
 """
 Script para agregar la columna idle_gph a fuel_metrics
 """
+import os
 import pymysql
 
 try:
@@ -8,7 +9,7 @@ try:
         host="localhost",
         port=3306,
         user="fuel_admin",
-        password="FuelCopilot2025!",
+        password=os.getenv("DB_PASSWORD"),
         database="fuel_copilot",
         charset="utf8mb4",
     )

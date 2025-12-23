@@ -11,6 +11,7 @@ SOLUTION:
 - Read correct unit_id from tanks.yaml
 - Update units_map table with correct values
 """
+import os
 
 import mysql.connector
 import yaml
@@ -210,7 +211,7 @@ if __name__ == "__main__":
     conn = mysql.connector.connect(
         host='20.127.200.135',
         user='tomas',
-        password='Tomas2025',
+        password=os.getenv("WIALON_MYSQL_PASSWORD"),
         database='wialon_collect',
         port=3306
     )

@@ -1,6 +1,7 @@
 """
 Verify odometer is now being saved for CO0681
 """
+import os
 
 import time
 
@@ -13,7 +14,7 @@ time.sleep(30)
 conn = mysql.connector.connect(
     host="localhost",
     user="fuel_admin",
-    password="FuelCopilot2025!",
+    password=os.getenv("DB_PASSWORD"),
     database="fuel_copilot",
 )
 

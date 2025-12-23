@@ -3,6 +3,7 @@
 
 Queries the database for current idle readings and shows which method is being used
 """
+import os
 
 import pymysql
 from datetime import datetime, timedelta
@@ -94,7 +95,7 @@ wialon_conn = pymysql.connect(
     host="20.127.200.135",
     port=3306,
     user="tomas",
-    password="Tomas2025",
+    password=os.getenv("WIALON_MYSQL_PASSWORD"),
     database="wialon_collect",
     charset="utf8mb4",
     cursorclass=pymysql.cursors.DictCursor,

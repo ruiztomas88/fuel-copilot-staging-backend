@@ -3,7 +3,7 @@ import pymysql
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 
@@ -18,6 +18,7 @@ cur.execute('''
         MAX(last_updated) as last_update
     FROM truck_sensors_cache
 ''')
+import os
 result = cur.fetchone()
 print(f'📊 Total registros: {result[0]}')
 print(f'   Con odometer: {result[1]}')

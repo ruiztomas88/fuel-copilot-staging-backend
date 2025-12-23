@@ -1,6 +1,7 @@
 """
 Verificar fuel_rate para FF7702, JB6858, RT9127
 """
+import os
 import pymysql
 
 # Unit IDs conocidos (desde tanks.yaml)
@@ -14,7 +15,7 @@ conn = pymysql.connect(
     host="20.127.200.135",
     port=3306,
     user="tomas",
-    password="Tomas2025",
+    password=os.getenv("WIALON_MYSQL_PASSWORD"),
     database="wialon_collect",
     charset="utf8mb4",
     cursorclass=pymysql.cursors.DictCursor,

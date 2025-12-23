@@ -6,6 +6,7 @@ Verifica:
 2. Si fuel_rate existe en Wialon
 3. Qué método de idle está siendo usado
 """
+import os
 
 import pymysql
 from datetime import datetime
@@ -91,7 +92,7 @@ try:
         host="20.127.200.135",
         port=3306,
         user="tomas",
-        password="Tomas2025",
+        password=os.getenv("WIALON_MYSQL_PASSWORD"),
         database="wialon_collect",
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,

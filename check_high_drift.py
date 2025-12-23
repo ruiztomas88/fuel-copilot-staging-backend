@@ -4,7 +4,7 @@ from datetime import datetime
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 cursor = conn.cursor()
@@ -28,6 +28,7 @@ cursor.execute("""
     ORDER BY ABS(drift_pct) DESC
     LIMIT 20
 """)
+import os
 
 rows = cursor.fetchall()
 if rows:

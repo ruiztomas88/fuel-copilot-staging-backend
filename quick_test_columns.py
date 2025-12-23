@@ -11,13 +11,14 @@ print("\n1️⃣ Testing intake_air_temp_f column...")
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 cursor = conn.cursor()
 
 # Test alias query
 query = """
+import os
 SELECT 
     truck_id,
     intake_air_temp_f as intake_temp_f

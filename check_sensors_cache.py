@@ -4,7 +4,7 @@ from datetime import datetime
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 cursor = conn.cursor(pymysql.cursors.DictCursor)
@@ -17,6 +17,7 @@ cursor.execute("""
     ORDER BY timestamp DESC
     LIMIT 10
 """)
+import os
 
 results = cursor.fetchall()
 print('=' * 60)

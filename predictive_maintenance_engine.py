@@ -870,21 +870,28 @@ class PredictiveMaintenanceEngine:
         days_to_warning = None
         days_to_critical = None
 
-        if trend is not None and abs(trend) > 0.01:
+        # 🔧 FIX P2: Add NaN check to prevent invalid calculations
+        import math
+        if trend is not None and not math.isnan(trend) and abs(trend) > 0.01:
             if config.is_higher_bad:
                 # Subiendo hacia umbral (temp subiendo es malo)
                 if trend > 0:
                     if current < config.warning:
                         days_to_warning = (config.warning - current) / trend
+                        # Cap to reasonable max (1 year)
+                        days_to_warning = min(days_to_warning, 365)
                     if current < config.critical:
                         days_to_critical = (config.critical - current) / trend
+                        days_to_critical = min(days_to_critical, 365)
             else:
                 # Bajando hacia umbral (pressure bajando es malo)
                 if trend < 0:
                     if current > config.warning:
                         days_to_warning = (current - config.warning) / abs(trend)
+                        days_to_warning = min(days_to_warning, 365)
                     if current > config.critical:
                         days_to_critical = (current - config.critical) / abs(trend)
+                        days_to_critical = min(days_to_critical, 365)
 
         # Determinar urgencia
         urgency = self._calculate_urgency(

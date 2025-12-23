@@ -1,6 +1,7 @@
 """
 Verificar datos recientes de idle en fuel_metrics para los trucks de interés
 """
+import os
 import pymysql
 from datetime import datetime
 
@@ -10,7 +11,7 @@ try:
         host="localhost",
         port=3306,
         user="fuel_admin",
-        password="FuelCopilot2025!",
+        password=os.getenv("DB_PASSWORD"),
         database="fuel_copilot",
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,

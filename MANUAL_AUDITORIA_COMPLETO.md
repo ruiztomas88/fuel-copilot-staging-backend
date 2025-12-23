@@ -1,4 +1,5 @@
 # 📋 Manual de Auditoría Completo - Fuel Analytics System
+
 **Versión:** 1.0  
 **Fecha:** 22 Diciembre 2025  
 **Proyecto:** Fleet Fuel Analytics Backend + Frontend
@@ -8,6 +9,7 @@
 ## 🎯 Objetivo de la Auditoría
 
 Este manual guía una revisión exhaustiva del sistema de analíticas de combustible para identificar y corregir:
+
 - Algoritmos con lógica incorrecta o inflación de valores
 - Bugs en cálculos de métricas críticas
 - Problemas de rendimiento y estabilidad
@@ -21,14 +23,17 @@ Este manual guía una revisión exhaustiva del sistema de analíticas de combust
 ### 1. 🚗 MPG (Miles Per Gallon) - MÁXIMA PRIORIDAD
 
 #### 1.1 Backend - Algoritmo de Cálculo
+
 **Archivo:** `mpg_engine.py` (líneas 236-500)
 
 **Problemas Conocidos:**
+
 - ✅ **RESUELTO:** Inflación de valores (10.3 MPG, 8.9 MPG) por EMA smoothing reteniendo estados viejos
 - ✅ **RESUELTO:** Thresholds muy altos (8mi/1.5gal) causaban lag en actualización
 - ✅ **RESUELTO:** Max MPG sin cap permitía valores físicamente imposibles
 
 **Checklist de Auditoría:**
+
 ```python
 # 1. Verificar configuración actual en MPGConfig
 # Ubicación: mpg_engine.py líneas 236-239
@@ -76,6 +81,7 @@ Este manual guía una revisión exhaustiva del sistema de analíticas de combust
 ```
 
 **Tests a Ejecutar:**
+
 ```bash
 # Test 1: Verificar MPG realista para RH1522
 python quick_mpg_sensor_check.py RH1522
@@ -92,10 +98,12 @@ SELECT truck_id, mpg_current FROM truck_sensors_cache WHERE mpg_current > 8.2;
 #### 1.2 Frontend - Visualización MPG
 
 **Problemas Conocidos:**
+
 - Muestra valores fallback (5.7) cuando backend no tiene suficientes datos
 - No indica visualmente si MPG es calculado vs. fallback
 
 **Checklist de Auditoría:**
+
 ```
 Dashboard: Vista de Flota
 - [ ] Verificar que MPG mostrado coincide con API /fleet/summary
@@ -115,13 +123,16 @@ Dashboard: Vista Individual Camión
 ### 2. ⏱️ Idle Time & Fuel - ALTA PRIORIDAD
 
 #### 2.1 Backend - Detección de Idle
+
 **Archivo:** `idle_engine.py`
 
 **Problemas Conocidos:**
+
 - Configuración de thresholds puede ser muy sensible
 - No distingue idle productivo (waiting to load) vs. idle improductivo
 
 **Checklist de Auditoría:**
+
 ```python
 # Ubicación: idle_engine.py IdleConfig
 - [ ] idle_speed_threshold: 0.5 mph (ajustar según vibración GPS)
@@ -137,13 +148,14 @@ Dashboard: Vista Individual Camión
 ```
 
 **Tests a Ejecutar:**
+
 ```sql
 -- Test 1: Verificar idle fuel realista
-SELECT truck_id, 
+SELECT truck_id,
        SUM(idle_fuel_gal) as total_idle_fuel,
        SUM(idle_duration_min) as total_idle_min,
        (SUM(idle_fuel_gal) / (SUM(idle_duration_min)/60)) as avg_idle_gph
-FROM daily_truck_metrics 
+FROM daily_truck_metrics
 WHERE date >= CURDATE() - INTERVAL 7 DAY
 GROUP BY truck_id
 HAVING total_idle_fuel > 50; -- Identificar anomalías
@@ -157,6 +169,7 @@ SELECT AVG(idle_duration_min / (24*60)) as pct_idle FROM daily_truck_metrics;
 #### 2.2 Frontend - Visualización Idle
 
 **Checklist:**
+
 ```
 Dashboard: Idle Analysis
 - [ ] Mostrar top 10 camiones con mayor idle time
@@ -171,14 +184,17 @@ Dashboard: Idle Analysis
 ### 3. 📊 Metrics Tab - ALTA PRIORIDAD
 
 #### 3.1 Backend - Cálculos de Métricas
+
 **Archivo:** `api_v2.py` (líneas 2450-2630)
 
 **Problemas Conocidos:**
+
 - ❌ **BUG:** Cost per mile muestra $0.00 en un lugar, $0.82 en otro
 - ❌ **BUG:** Mileage muestra 4950, 4580 millas en 2-3 días (físicamente imposible)
 - ❌ **BUG:** Usa odómetros absolutos en vez de deltas
 
 **Checklist de Auditoría:**
+
 ```python
 # Endpoint: /fleet/summary
 # Ubicación: api_v2.py líneas 2450-2530
@@ -187,9 +203,9 @@ Dashboard: Idle Analysis
 - [ ] DEBE usar: MAX(odometer_mi) - MIN(odometer_mi) per truck
 - [ ] NO DEBE usar: SUM(odometer_mi) (suma valores absolutos!)
 - [ ] Ejemplo correcto:
-      SELECT truck_id, 
+      SELECT truck_id,
              MAX(odometer_mi) - MIN(odometer_mi) as miles_traveled
-      FROM fuel_metrics 
+      FROM fuel_metrics
       WHERE timestamp >= CURDATE() - INTERVAL 7 DAY
       GROUP BY truck_id
 
@@ -207,6 +223,7 @@ Dashboard: Idle Analysis
 ```
 
 **Tests SQL:**
+
 ```sql
 -- Test 1: Verificar mileage realista últimos 7 días
 SELECT truck_id,
@@ -231,6 +248,7 @@ HAVING cost_per_mile NOT BETWEEN 0.40 AND 1.50;
 #### 3.2 Frontend - Dashboard Metrics
 
 **Checklist:**
+
 ```
 Tab: Metrics
 - [ ] Verificar que llama a endpoint correcto: /fleet/summary
@@ -248,10 +266,12 @@ Tab: Metrics
 **Archivo:** `api_v2.py` `/loss-analysis` endpoint
 
 **Problemas Conocidos:**
+
 - ❌ **BUG CRÍTICO:** Muestra 199,000,000 millas (suma odómetros absolutos)
 - ❌ Usa MPG de estado en vez de calcular desde datos reales
 
 **Checklist de Auditoría:**
+
 ```python
 # Endpoint: /loss-analysis
 # Ubicación: api_v2.py (buscar "loss_analysis")
@@ -279,6 +299,7 @@ Tab: Metrics
 ```
 
 **Tests SQL:**
+
 ```sql
 -- Test 1: Verificar mileage calculation
 SELECT DATE(timestamp) as date,
@@ -286,7 +307,7 @@ SELECT DATE(timestamp) as date,
        SUM(daily_miles) as total_miles,
        SUM(daily_miles) / COUNT(DISTINCT truck_id) as avg_miles_per_truck
 FROM (
-    SELECT truck_id, 
+    SELECT truck_id,
            DATE(timestamp) as date,
            MAX(odometer_mi) - MIN(odometer_mi) as daily_miles
     FROM fuel_metrics
@@ -321,10 +342,12 @@ HAVING ABS(loss_usd) > 200; -- Investigar pérdidas >$200/día
 **Archivo:** `predictive_maintenance_engine.py`
 
 **Problemas Conocidos:**
+
 - ❌ **BUG:** Confidence score muestra >100% (7500%, 9200%)
 - Algoritmo no valida límites superiores
 
 **Checklist de Auditoría:**
+
 ```python
 # Ubicación: predictive_maintenance_engine.py
 
@@ -341,7 +364,7 @@ HAVING ABS(loss_usd) > 200; -- Investigar pérdidas >$200/día
 
 # Algoritmo de score
 - [ ] Usar weighted average de múltiples sensores
-- [ ] Weights: coolant_temp (30%), oil_pressure (25%), 
+- [ ] Weights: coolant_temp (30%), oil_pressure (25%),
               voltage (15%), engine_hours (20%), DTCs (10%)
 - [ ] Score 0-40: Good (verde)
 - [ ] Score 41-70: Warning (amarillo)
@@ -349,6 +372,7 @@ HAVING ABS(loss_usd) > 200; -- Investigar pérdidas >$200/día
 ```
 
 **Tests:**
+
 ```sql
 -- Test 1: Verificar confidence scores
 SELECT truck_id, confidence_score, status
@@ -375,10 +399,12 @@ WHERE (coolant_temp_f > 220 AND confidence_score < 60)
 **Archivo:** `api_v2.py` `/dtc-events` endpoint
 
 **Problemas Conocidos:**
+
 - ❌ **BUG:** Muestra "Unknown" en description a pesar de tener 3000+ SPNs en j1939_spn_lookup
 - Query no está usando la tabla de lookup correctamente
 
 **Checklist de Auditoría:**
+
 ```python
 # Endpoint: /dtc-events
 # Verificar query actual
@@ -402,6 +428,7 @@ WHERE (coolant_temp_f > 220 AND confidence_score < 60)
 ```
 
 **Tests SQL:**
+
 ```sql
 -- Test 1: Verificar coverage de DTC lookup
 SELECT COUNT(*) as total_dtcs,
@@ -434,10 +461,12 @@ LIMIT 20;
 **Archivo:** `estimator.py` (Kalman implementation)
 
 **Problemas Conocidos:**
+
 - Puede sobre-suavizar datos causando lag en alertas
 - No valida valores físicamente imposibles antes de filtrar
 
 **Checklist de Auditoría:**
+
 ```python
 # Ubicación: estimator.py KalmanEstimator class
 
@@ -458,6 +487,7 @@ LIMIT 20;
 ```
 
 **Tests:**
+
 ```python
 # Test 1: Verificar lag del filtro
 # Simular cambio abrupto (refuel) y medir tiempo de convergencia
@@ -475,10 +505,12 @@ LIMIT 20;
 **Archivo:** `wialon_reader.py`, `wialon_sync_enhanced.py`
 
 **Problemas Conocidos:**
+
 - Sensor name mapping inconsistente (odometer_mi vs. odom)
 - No todos los camiones tienen todos los sensores
 
 **Checklist de Auditoría:**
+
 ```python
 # Archivo: wialon_reader.py línea 68 SENSOR_PARAMS
 
@@ -506,9 +538,10 @@ LIMIT 20;
 ```
 
 **Tests:**
+
 ```sql
 -- Test 1: Verificar timestamp freshness
-SELECT truck_id, 
+SELECT truck_id,
        MAX(last_update) as last_seen,
        TIMESTAMPDIFF(MINUTE, MAX(last_update), NOW()) as minutes_ago
 FROM truck_sensors_cache
@@ -519,7 +552,7 @@ HAVING minutes_ago > 60; -- Camiones sin datos >1h
 -- Test 2: Verificar que sensores críticos están poblados
 SELECT COUNT(*) as trucks_missing_critical
 FROM truck_sensors_cache
-WHERE odometer_mi IS NULL 
+WHERE odometer_mi IS NULL
    OR fuel_lvl_pct IS NULL;
 -- Esperado: <5 trucks (algunos pueden no tener ECU moderno)
 ```
@@ -529,10 +562,12 @@ WHERE odometer_mi IS NULL
 ### 9. 🗄️ Database Schema - BAJA PRIORIDAD
 
 **Problemas Conocidos:**
+
 - Algunas tablas tienen columnas obsoletas o duplicadas
 - Indexes faltantes en queries frecuentes
 
 **Checklist de Auditoría:**
+
 ```sql
 -- Verificar indexes en tablas críticas
 
@@ -563,11 +598,13 @@ EXPLAIN SELECT ... ; -- Verificar que usa indexes
 ### 10. 🎨 Frontend - UX/UI
 
 **Problemas Conocidos:**
+
 - Loading states inconsistentes
 - Algunos gráficos no muestran labels
 - Color coding no intuitivo
 
 **Checklist de Auditoría:**
+
 ```
 General UX
 - [ ] Loading spinners durante fetch de datos
@@ -601,6 +638,7 @@ Charts & Graphs
 ## 🧪 Plan de Testing Completo
 
 ### Test Suite 1: MPG Accuracy
+
 ```bash
 # 1. Test cálculo básico
 python quick_mpg_sensor_check.py RH1522
@@ -615,6 +653,7 @@ python comprehensive_sensor_analysis.py
 ```
 
 ### Test Suite 2: Metrics Consistency
+
 ```sql
 -- Test 1: Verificar cost per mile
 SELECT AVG((fuel_consumed * 3.50) / NULLIF(miles, 0)) as avg_cpm
@@ -638,6 +677,7 @@ HAVING total > 25000;
 ```
 
 ### Test Suite 3: End-to-End Frontend
+
 ```
 Manual Testing Checklist:
 1. [ ] Login y autenticación funciona
@@ -655,24 +695,28 @@ Manual Testing Checklist:
 ## 🚀 Priorización de Fixes
 
 ### P0 - CRÍTICO (Fix Inmediato)
+
 1. Loss Analysis mileage (199M → cálculo delta correcto)
 2. Predictive Maintenance confidence >100% (aplicar cap)
 3. Metrics tab cost per mile inconsistencia ($0.00 vs $0.82)
 4. DTC "Unknown" descriptions (usar j1939_spn_lookup)
 
 ### P1 - ALTA (Fix en 1-2 días)
+
 5. MPG validation ranges (aplicar caps 3.8-8.2)
 6. Idle fuel calculation (validar <50 gal/día)
 7. Metrics mileage físicamente imposible (4950 mi/2 días)
 8. Sensor mapping inconsistencias (odom vs odometer_mi)
 
 ### P2 - MEDIA (Fix en 1 semana)
+
 9. Kalman filter tuning (reducir lag)
 10. Database indexes en queries lentos
 11. Frontend loading states y error handling
 12. Refuel detection en loss analysis
 
 ### P3 - BAJA (Backlog)
+
 13. UI/UX improvements (tooltips, color coding)
 14. Export features (PDF reports)
 15. Mobile responsive design
@@ -684,7 +728,7 @@ Manual Testing Checklist:
 
 Al encontrar un bug, documentar así:
 
-```markdown
+````markdown
 ### BUG-XXX: [Título descriptivo]
 
 **Severidad:** P0/P1/P2/P3  
@@ -704,14 +748,17 @@ Al encontrar un bug, documentar así:
 [Análisis técnico de la causa]
 
 **Fix Propuesto:**
+
 ```python
 # Código propuesto
 ```
+````
 
 **Tests de Validación:**
 [Cómo verificar que el fix funciona]
 
 **Estimación:** X horas/días
+
 ```
 
 ---
@@ -721,7 +768,9 @@ Al encontrar un bug, documentar así:
 Antes de marcar auditoría como completa:
 
 ```
+
 Backend
+
 - [ ] Todos los tests SQL pasan (0 rows anómalas)
 - [ ] Coverage >50% en pytest
 - [ ] 0 errores en logs última 24h
@@ -730,6 +779,7 @@ Backend
 - [ ] Documentación actualizada en README
 
 Frontend
+
 - [ ] 0 errores en browser console
 - [ ] Lighthouse score >80
 - [ ] Todos los KPIs muestran valores realistas
@@ -737,33 +787,36 @@ Frontend
 - [ ] Mobile responsive funciona
 
 Integración
+
 - [ ] Wialon sync actualiza cada 15 segundos
 - [ ] Dashboard refleja cambios en <1 minuto
 - [ ] Alertas se disparan correctamente
 - [ ] Backup automático DB funciona
 
 Seguridad
+
 - [ ] Credenciales en .env (NO hardcoded)
 - [ ] API endpoints requieren autenticación
 - [ ] SQL queries usan prepared statements
 - [ ] Logs NO incluyen datos sensibles
+
 ```
 
 ---
 
 ## 📞 Contactos y Escalación
 
-**Issues Críticos (P0):**  
+**Issues Críticos (P0):**
 Reportar inmediatamente a: [Lead Developer]
 
-**Issues Alta/Media (P1/P2):**  
+**Issues Alta/Media (P1/P2):**
 Crear ticket en: [Sistema de tracking]
 
-**Preguntas sobre Algoritmos:**  
+**Preguntas sobre Algoritmos:**
 Consultar documentación en: `/docs` folder
 
-**Acceso a Logs:**  
-Servidor: `ssh user@server`  
+**Acceso a Logs:**
+Servidor: `ssh user@server`
 Logs ubicación: `/var/log/fuel-analytics/`
 
 ---
@@ -778,6 +831,7 @@ Logs ubicación: `/var/log/fuel-analytics/`
 
 ---
 
-**Última Actualización:** 22 Diciembre 2025  
-**Versión Backend:** beca578  
+**Última Actualización:** 22 Diciembre 2025
+**Versión Backend:** beca578
 **Autor:** Fuel Analytics Team
+```

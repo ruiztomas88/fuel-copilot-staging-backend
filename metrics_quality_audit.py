@@ -5,6 +5,7 @@ METRICS ANALYSIS - Find data quality issues
 3. Verify cost calculations
 4. Check MPG calculations
 """
+import os
 
 from datetime import datetime, timedelta
 
@@ -13,7 +14,7 @@ import mysql.connector
 conn = mysql.connector.connect(
     host="localhost",
     user="fuel_admin",
-    password="FuelCopilot2025!",
+    password=os.getenv("DB_PASSWORD"),
     database="fuel_copilot",
 )
 

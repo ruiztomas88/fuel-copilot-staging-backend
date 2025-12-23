@@ -3,7 +3,7 @@ import pymysql
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 cursor = conn.cursor()
@@ -27,6 +27,7 @@ cursor.execute("""
       AND timestamp_utc > DATE_SUB(NOW(), INTERVAL 30 DAY)
     ORDER BY timestamp_utc DESC
 """)
+import os
 
 refuels = cursor.fetchall()
 if refuels:

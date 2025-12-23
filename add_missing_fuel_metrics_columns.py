@@ -2,12 +2,13 @@
 Script para agregar columnas faltantes a fuel_metrics
 Basado en los errores del pull: idle_hours, intake_temp_f
 """
+import os
 import pymysql
 
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 

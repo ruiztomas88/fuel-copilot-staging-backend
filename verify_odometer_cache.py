@@ -1,6 +1,7 @@
 """
 Verify odometer in truck_sensors_cache for CO0681
 """
+import os
 
 import time
 
@@ -13,7 +14,7 @@ time.sleep(20)
 conn = mysql.connector.connect(
     host="localhost",
     user="fuel_admin",
-    password="FuelCopilot2025!",
+    password=os.getenv("DB_PASSWORD"),
     database="fuel_copilot",
 )
 

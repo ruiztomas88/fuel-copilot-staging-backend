@@ -11,7 +11,7 @@ conn = pymysql.connect(
     host="20.127.200.135",
     port=3306,
     user="tomas",
-    password="Tomas2025",
+    password=os.getenv("WIALON_MYSQL_PASSWORD"),
     database="wialon_collect",
     cursorclass=pymysql.cursors.DictCursor,
 )
@@ -30,6 +30,7 @@ try:
         for sensor in mpg_sensors:
             cursor.execute(
                 """
+import os
                 SELECT COUNT(DISTINCT unit) as count
                 FROM sensors
                 WHERE p = %s

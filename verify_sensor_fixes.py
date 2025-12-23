@@ -1,6 +1,7 @@
 """
 Verify sensor fixes - check if previously NULL sensors now have data
 """
+import os
 
 import time
 
@@ -12,7 +13,7 @@ time.sleep(30)
 conn = mysql.connector.connect(
     host="localhost",
     user="fuel_admin",
-    password="FuelCopilot2025!",
+    password=os.getenv("DB_PASSWORD"),
     database="fuel_copilot",
 )
 

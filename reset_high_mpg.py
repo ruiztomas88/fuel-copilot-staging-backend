@@ -1,13 +1,14 @@
 """
 Reset MPG for trucks with invalid high values
 """
+import os
 
 import pymysql
 
 conn = pymysql.connect(
     host="localhost",
     user="fuel_admin",
-    password="FuelCopilot2025!",
+    password=os.getenv("DB_PASSWORD"),
     database="fuel_copilot",
 )
 

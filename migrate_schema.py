@@ -3,12 +3,13 @@ Schema Migration Script
 Adds missing columns to fuel_metrics table to match SQLAlchemy model
 Run once after deploying to update database schema
 """
+import os
 import pymysql
 
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 

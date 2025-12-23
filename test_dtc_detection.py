@@ -1,6 +1,7 @@
 """
 Script para probar la detección de DTCs desde Wialon para un camión específico
 """
+import os
 import sys
 sys.path.insert(0, '.')
 
@@ -124,7 +125,7 @@ print(f"\n5. Verificando dtc_events en base de datos...")
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 

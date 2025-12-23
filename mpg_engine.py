@@ -225,9 +225,10 @@ class MPGConfig:
 
     # 🔧 v3.12.18 DEC 4: Reduced for faster updates (5mi vs 10mi)
     # 🔧 v2.0.1 DEC 22: Restored with tighter max_mpg cap (8.2 vs 9.0)
+    # 🔧 v3.13.0 DEC 23: Increased min_fuel_gal to reduce variance (FIX P0 - Auditoría)
     # Basado en datos reales de flota: Flatbed/Reefer/Dry Van cargados
     min_miles: float = 5.0  # ✅ Fast updates - MPG muestra después de 5mi
-    min_fuel_gal: float = 0.75  # ✅ Proportional reduction for faster updates
+    min_fuel_gal: float = 1.5  # 🔧 FIX: Increased from 0.75 to reduce sensor noise variance
 
     # Physical limits for Class 8 trucks (44,000 lbs realistic ranges)
     # Loaded (44k): 4.0-6.5 MPG | Empty (10k): 6.5-8.0 MPG
@@ -348,6 +349,11 @@ def update_mpg_state(
                 # Apply EMA: new_value = alpha * raw + (1-alpha) * old
                 old_mpg = state.mpg_current
                 state.mpg_current = alpha * raw_mpg + (1 - alpha) * state.mpg_current
+                
+                # 🔧 CRITICAL FIX: Clamp post-EMA to prevent values exceeding physical limits
+                # Even if raw_mpg is valid, EMA can push current value out of bounds
+                state.mpg_current = max(config.min_mpg, min(state.mpg_current, config.max_mpg))
+                
                 variance = state.get_variance()
                 logger.info(
                     f"[{truck_id}] MPG updated: {old_mpg:.2f} → {state.mpg_current:.2f} "

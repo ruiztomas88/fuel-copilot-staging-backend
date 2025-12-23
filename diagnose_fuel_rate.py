@@ -1,13 +1,14 @@
 """
 Diagnóstico de fuel_rate_gph para entender variabilidad y calidad de datos
 """
+import os
 
 from datetime import datetime, timedelta
 
 import pymysql
 
 conn = pymysql.connect(
-    host="localhost", user="fuel_admin", password="FuelCopilot2025!", db="fuel_copilot"
+    host="localhost", user="fuel_admin", password=os.getenv("DB_PASSWORD"), db="fuel_copilot"
 )
 
 print("=" * 80)

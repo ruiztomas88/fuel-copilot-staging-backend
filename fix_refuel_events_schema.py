@@ -2,6 +2,7 @@
 """
 Fix refuel_events table schema - agregar columnas faltantes que wialon_sync necesita
 """
+import os
 import pymysql
 
 print("=" * 80)
@@ -11,7 +12,7 @@ print("=" * 80)
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 cursor = conn.cursor()

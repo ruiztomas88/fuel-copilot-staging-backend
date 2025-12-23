@@ -4,7 +4,7 @@ import time
 conn = mysql.connector.connect(
     host='20.127.200.135',
     user='tomas',
-    password='Tomas2025',
+    password=os.getenv("WIALON_MYSQL_PASSWORD"),
     database='wialon_collect'
 )
 cursor = conn.cursor(dictionary=True)
@@ -19,6 +19,7 @@ cursor.execute("""
         AND m >= %s 
     ORDER BY p
 """, [cutoff])
+import os
 
 all_params = cursor.fetchall()
 

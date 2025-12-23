@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 cursor = conn.cursor()
@@ -24,6 +24,7 @@ for truck_id in trucks:
           AND DATE(timestamp_utc) = %s
         ORDER BY timestamp_utc ASC
     """, (truck_id, today))
+import os
     
     rows = cursor.fetchall()
     if not rows:

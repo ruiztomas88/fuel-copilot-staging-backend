@@ -3,7 +3,7 @@ import pymysql
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 cursor = conn.cursor()
@@ -29,6 +29,7 @@ cursor.execute("""
     WHERE rn = 1
     ORDER BY ABS(drift_pct) DESC
 """)
+import os
 
 rows = cursor.fetchall()
 if rows:

@@ -1,6 +1,7 @@
 """
 Quick diagnostic to check DO9693 sensors in Wialon database
 """
+import os
 import pymysql
 import sys
 from datetime import datetime, timedelta
@@ -14,7 +15,7 @@ wialon_conn = pymysql.connect(
     host="20.127.200.135",
     port=3306,
     user="tomas",
-    password="Tomas2025",
+    password=os.getenv("WIALON_MYSQL_PASSWORD"),
     database="wialon_collect",
     cursorclass=pymysql.cursors.DictCursor
 )

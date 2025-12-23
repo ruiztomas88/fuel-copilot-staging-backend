@@ -265,7 +265,7 @@ class RealTimePredictiveEngine:
                     severity="CRITICAL",
                     message=f"🚨 PRESIÓN DE ACEITE CRÍTICA: {oil_press:.0f} PSI (mín: {self.THRESHOLDS['oil_press_critical_low']})",
                     predicted_failure_hours=0,  # Imminent
-                    confidence=95,
+                    confidence=0.95,  # Normalized to 0-1 range
                     sensor_evidence=[
                         {
                             "sensor": "oil_press",
@@ -292,7 +292,7 @@ class RealTimePredictiveEngine:
                         severity="CRITICAL",
                         message=f"🔥 MOTOR SOBRECALENTADO: {cool_temp_f:.0f}°F (máx: {self.THRESHOLDS['cool_temp_critical']})",
                         predicted_failure_hours=0,
-                        confidence=98,
+                        confidence=0.98,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {
                                 "sensor": "cool_temp",
@@ -319,7 +319,7 @@ class RealTimePredictiveEngine:
                         severity="CRITICAL",
                         message=f"🔥 TRANSMISIÓN CRÍTICA: {trans_temp_f:.0f}°F (máx: {self.THRESHOLDS['trans_temp_critical']})",
                         predicted_failure_hours=0.5,  # Minutes to failure
-                        confidence=92,
+                        confidence=0.92,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {
                                 "sensor": "trams_t",
@@ -341,9 +341,9 @@ class RealTimePredictiveEngine:
                     truck_id=truck_id,
                     component="Sistema DEF",
                     severity="CRITICAL",
-                    message=f"💎 DEF CRÍTICO: {def_level:.0f}% (mín: {self.THRESHOLDS['def_level_critical']})",
+                    message=f"💧 DEF CRÍTICO: {def_level:.0f}% (mín: {self.THRESHOLDS['def_level_critical']})",
                     predicted_failure_hours=2,  # Derate in ~2 hours
-                    confidence=100,
+                    confidence=1.0,  # Normalized to 0-1 range
                     sensor_evidence=[
                         {
                             "sensor": "def_level",
@@ -367,7 +367,7 @@ class RealTimePredictiveEngine:
                     severity="CRITICAL",
                     message=f"🔋 VOLTAJE CRÍTICO: {voltage:.1f}V (mín: {self.THRESHOLDS['voltage_critical_low']})",
                     predicted_failure_hours=1,
-                    confidence=90,
+                    confidence=0.90,  # Normalized to 0-1 range
                     sensor_evidence=[
                         {
                             "sensor": "voltage",
@@ -406,7 +406,7 @@ class RealTimePredictiveEngine:
                         severity="WARNING",
                         message=f"⚠️ Presión de aceite baja: {oil_press:.0f} PSI",
                         predicted_failure_hours=24,
-                        confidence=75,
+                        confidence=0.75,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "oil_press", "value": oil_press, "unit": "PSI"}
                         ],
@@ -432,7 +432,7 @@ class RealTimePredictiveEngine:
                         severity="WARNING",
                         message=f"🌡️ Temperatura de aceite alta: {oil_temp_f:.0f}°F",
                         predicted_failure_hours=48,
-                        confidence=70,
+                        confidence=0.70,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "oil_temp", "value": oil_temp_f, "unit": "°F"}
                         ],
@@ -458,7 +458,7 @@ class RealTimePredictiveEngine:
                         severity="WARNING",
                         message=f"🌡️ Temperatura de coolant elevada: {cool_temp_f:.0f}°F",
                         predicted_failure_hours=12,
-                        confidence=75,
+                        confidence=0.75,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "cool_temp", "value": cool_temp_f, "unit": "°F"}
                         ],
@@ -484,7 +484,7 @@ class RealTimePredictiveEngine:
                         severity="WARNING",
                         message=f"🌡️ Temperatura de transmisión alta: {trans_temp_f:.0f}°F",
                         predicted_failure_hours=72,
-                        confidence=68,
+                        confidence=0.68,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "trams_t", "value": trans_temp_f, "unit": "°F"}
                         ],
@@ -513,7 +513,7 @@ class RealTimePredictiveEngine:
                     predicted_failure_hours=(
                         168 if severity == "WARNING" else 24
                     ),  # 1 week or 1 day
-                    confidence=60,
+                    confidence=0.60,  # Normalized to 0-1 range
                     sensor_evidence=[
                         {"sensor": "engine_load", "value": engine_load, "unit": "%"}
                     ],
@@ -535,9 +535,9 @@ class RealTimePredictiveEngine:
                         truck_id=truck_id,
                         component="Sistema DEF",
                         severity="WARNING",
-                        message=f"💎 DEF bajo: {def_level:.0f}%",
+                        message=f"💧 DEF bajo: {def_level:.0f}%",
                         predicted_failure_hours=48,
-                        confidence=95,
+                        confidence=0.95,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "def_level", "value": def_level, "unit": "%"}
                         ],
@@ -561,7 +561,7 @@ class RealTimePredictiveEngine:
                         severity="WARNING",
                         message=f"🔋 Voltaje bajo: {voltage:.1f}V",
                         predicted_failure_hours=24,
-                        confidence=80,
+                        confidence=0.80,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "voltage", "value": voltage, "unit": "V"}
                         ],
@@ -577,7 +577,7 @@ class RealTimePredictiveEngine:
                         severity="WARNING",
                         message=f"🔋 Voltaje alto: {voltage:.1f}V (sobrecarga)",
                         predicted_failure_hours=72,
-                        confidence=75,
+                        confidence=0.75,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "voltage", "value": voltage, "unit": "V"}
                         ],
@@ -635,7 +635,7 @@ class RealTimePredictiveEngine:
                                 ),
                                 message=f"📉 PREDICTIVO: Presión de aceite en declive ({current:.0f} PSI, tendencia: {slope:.2f} PSI/lectura)",
                                 predicted_failure_hours=hours_to_critical,
-                                confidence=85,
+                                confidence=0.85,  # Normalized to 0-1 range
                                 sensor_evidence=[
                                     {
                                         "sensor": "oil_press",
@@ -673,7 +673,7 @@ class RealTimePredictiveEngine:
                                 severity="WARNING",
                                 message=f"📈 PREDICTIVO: Temperatura de coolant subiendo ({current_f:.0f}°F, +{slope:.2f}°F/lectura)",
                                 predicted_failure_hours=hours_to_critical,
-                                confidence=78,
+                                confidence=0.78,  # Normalized to 0-1 range
                                 sensor_evidence=[
                                     {
                                         "sensor": "cool_temp",
@@ -709,7 +709,7 @@ class RealTimePredictiveEngine:
                                 severity="WARNING",
                                 message=f"📈 PREDICTIVO: Temperatura de transmisión subiendo ({current_f:.0f}°F, +{slope:.2f}°F/lectura)",
                                 predicted_failure_hours=hours_to_critical,
-                                confidence=72,
+                                confidence=0.72,  # Normalized to 0-1 range
                                 sensor_evidence=[
                                     {
                                         "sensor": "trams_t",
@@ -745,7 +745,7 @@ class RealTimePredictiveEngine:
                                 severity="WARNING",
                                 message=f"📉 PREDICTIVO: Voltaje en declive ({current:.1f}V, {slope:.3f}V/lectura)",
                                 predicted_failure_hours=hours_to_critical,
-                                confidence=80,
+                                confidence=0.80,  # Normalized to 0-1 range
                                 sensor_evidence=[
                                     {
                                         "sensor": "voltage",
@@ -793,7 +793,7 @@ class RealTimePredictiveEngine:
                         severity="CRITICAL",
                         message=f"🚨 CORRELACIÓN CRÍTICA: Aceite caliente ({oil_temp_f:.0f}°F) + Presión baja ({oil_press:.0f} PSI)",
                         predicted_failure_hours=12,
-                        confidence=92,
+                        confidence=0.92,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "oil_temp", "value": oil_temp_f, "unit": "°F"},
                             {"sensor": "oil_press", "value": oil_press, "unit": "PSI"},
@@ -816,7 +816,7 @@ class RealTimePredictiveEngine:
                         severity="CRITICAL",
                         message=f"🔥 CORRELACIÓN: Coolant ({cool_temp_f:.0f}°F) y aceite ({oil_temp_f:.0f}°F) ambos calientes",
                         predicted_failure_hours=6,
-                        confidence=88,
+                        confidence=0.88,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {"sensor": "cool_temp", "value": cool_temp_f, "unit": "°F"},
                             {"sensor": "oil_temp", "value": oil_temp_f, "unit": "°F"},
@@ -838,7 +838,7 @@ class RealTimePredictiveEngine:
                         severity="WARNING",
                         message=f"🌀 CORRELACIÓN: Baja presión de intake ({intake_pressure:.1f} bar) + Alta temp ({intk_t_f:.0f}°F)",
                         predicted_failure_hours=168,  # 1 week
-                        confidence=75,
+                        confidence=0.75,  # Normalized to 0-1 range
                         sensor_evidence=[
                             {
                                 "sensor": "intake_pressure",

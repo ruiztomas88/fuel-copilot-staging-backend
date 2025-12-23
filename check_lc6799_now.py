@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 conn = mysql.connector.connect(
     host="localhost",
     user="fuel_admin",
-    password="FuelCopilot2025!",
+    password=os.getenv("DB_PASSWORD"),
     database="fuel_copilot"
 )
 cursor = conn.cursor(dictionary=True)
@@ -17,6 +17,7 @@ cursor.execute("""
     ORDER BY timestamp DESC
     LIMIT 1
 """)
+import os
 r = cursor.fetchone()
 
 print(f"\nLH1141 Current Data:")

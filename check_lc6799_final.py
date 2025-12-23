@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 conn = mysql.connector.connect(
     host="localhost",
     user="fuel_admin",
-    password="FuelCopilot2025!",
+    password=os.getenv("DB_PASSWORD"),
     database="fuel_copilot"
 )
 cursor = conn.cursor(dictionary=True)
 
 cursor.execute("""
+import os
     SELECT timestamp, oil_pressure_psi, fuel_level_pct, rpm, 
            coolant_temp_f, oil_temp_f, engine_load_pct, def_level_pct
     FROM truck_sensors_cache

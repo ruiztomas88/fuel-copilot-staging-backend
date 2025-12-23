@@ -1,6 +1,7 @@
 """
 Final diagnostic - Compare Wialon sensors vs our database for DO9693
 """
+import os
 import pymysql
 import sys
 
@@ -12,7 +13,7 @@ wialon_conn = pymysql.connect(
     host="20.127.200.135",
     port=3306,
     user="tomas",
-    password="Tomas2025",
+    password=os.getenv("WIALON_MYSQL_PASSWORD"),
     database="wialon_collect",
     cursorclass=pymysql.cursors.DictCursor
 )
@@ -22,7 +23,7 @@ local_conn = pymysql.connect(
     host="localhost",
     port=3306,
     user="fuel_admin",
-    password="FuelCopilot2025!",
+    password=os.getenv("DB_PASSWORD"),
     database="fuel_copilot",
     cursorclass=pymysql.cursors.DictCursor
 )

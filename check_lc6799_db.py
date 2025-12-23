@@ -1,12 +1,13 @@
 """Check LC6799 data in database"""
 import mysql.connector
 from datetime import datetime, timezone
+import os
 
 conn = mysql.connector.connect(
-    host="localhost",
-    user="fuel_admin",
-    password="FuelCopilot2025!",
-    database="fuel_copilot"
+    host=os.getenv("DB_HOST", "localhost"),
+    user=os.getenv("DB_USER", "fuel_admin"),
+    password=os.getenv("DB_PASSWORD"),  # 🔒 Security fix: No hardcoded credentials
+    database=os.getenv("DB_NAME", "fuel_copilot")
 )
 cursor = conn.cursor(dictionary=True)
 

@@ -1,7 +1,7 @@
 import pymysql
 
 conn = pymysql.connect(
-    host="localhost", user="fuel_admin", password="FuelCopilot2025!", db="fuel_copilot"
+    host="localhost", user="fuel_admin", password=os.getenv("DB_PASSWORD"), db="fuel_copilot"
 )
 
 cur = conn.cursor()
@@ -13,6 +13,7 @@ cur.execute(
     ORDER BY created_at DESC 
     LIMIT 20
 """
+import os
 )
 
 rows = cur.fetchall()

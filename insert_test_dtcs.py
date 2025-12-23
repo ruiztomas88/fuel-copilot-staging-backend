@@ -2,13 +2,14 @@
 Script para insertar DTCs de prueba en dtc_events
 Basado en el DTC real de LH1141: SPN1548.FMI5
 """
+import os
 import pymysql
 from datetime import datetime, timezone
 
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 

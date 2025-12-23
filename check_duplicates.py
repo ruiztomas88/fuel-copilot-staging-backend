@@ -3,7 +3,7 @@ import pymysql
 conn = pymysql.connect(
     host='localhost',
     user='fuel_admin',
-    password='FuelCopilot2025!',
+    password=os.getenv("DB_PASSWORD"),
     database='fuel_copilot'
 )
 cursor = conn.cursor()
@@ -23,6 +23,7 @@ cursor.execute("""
     ORDER BY cnt DESC
     LIMIT 10
 """)
+import os
 fm_dups = cursor.fetchall()
 if fm_dups:
     print(f"   ⚠️ Found {len(fm_dups)} duplicate entries in last hour:")

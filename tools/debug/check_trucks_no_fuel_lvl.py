@@ -2,6 +2,7 @@
 Check trucks added today that have no fuel_lvl data in the last 8 hours
 These are likely J1708 trucks that don't report fuel sensor data
 """
+import os
 
 import pymysql
 from datetime import datetime, timedelta
@@ -14,7 +15,7 @@ def check_trucks():
         conn = pymysql.connect(
             host="20.127.200.135",
             user="tomas",
-            password="Tomas2025",
+            password=os.getenv("WIALON_MYSQL_PASSWORD"),
             database="wialon_collect",
             cursorclass=pymysql.cursors.DictCursor,
         )

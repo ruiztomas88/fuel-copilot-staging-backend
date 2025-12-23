@@ -147,7 +147,7 @@ def main():
     print("=" * 80)
     print(f"Total files fixed: {fixed_count + phase2_fixed}")
     print("\n⚠️  IMPORTANT: Set MYSQL_PASSWORD in environment:")
-    print("   export MYSQL_PASSWORD='FuelCopilot2025!'  # For now")
+    print("   export MYSQL_password=os.getenv("DB_PASSWORD")  # For now")
     print("\n🔐 NEXT STEP: Rotate password and update .env")
     print("=" * 80)
 

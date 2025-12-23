@@ -172,8 +172,8 @@ def main():
     print(f"✅ Fixed {fixed_count} files")
     print("=" * 80)
     print("\n⚠️  IMPORTANT: Set these environment variables:")
-    print("   export MYSQL_PASSWORD='FuelCopilot2025!'")
-    print("   export WIALON_MYSQL_PASSWORD='Tomas2025'")
+    print("   export MYSQL_password=os.getenv("DB_PASSWORD")")
+    print("   export WIALON_MYSQL_password=os.getenv("WIALON_MYSQL_PASSWORD")")
     print("\nOr add them to .env file (already done)")
 
 
