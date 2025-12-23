@@ -20,9 +20,12 @@ Version: 5.8.0
 Updated: December 2025 - Full SPN/FMI from official documentation
 """
 
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class DTCSystem(Enum):
