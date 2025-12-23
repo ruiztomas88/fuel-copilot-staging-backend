@@ -1732,13 +1732,32 @@ def process_truck(
     
     # 🆕 v3.12.32 QUICK WIN #4: Feed Sensor Health Monitor
     sensor_monitor = get_sensor_health_monitor()
-    sensor_monitor.add_reading(
+    # Feed fuel sensor reading
+    sensor_monitor.record_sensor_reading(
         truck_id=truck_id,
-        fuel_pct=sensor_pct,
+        sensor_name="fuel_pct",
+        value=sensor_pct,
         timestamp=timestamp,
-        speed=speed or 0,
-        consumption_gph=consumption_gph or 0
+        is_valid=True
     )
+    # Feed speed sensor reading  
+    if speed is not None:
+        sensor_monitor.record_sensor_reading(
+            truck_id=truck_id,
+            sensor_name="speed",
+            value=speed,
+            timestamp=timestamp,
+            is_valid=True
+        )
+    # Feed consumption reading
+    if consumption_gph is not None:
+        sensor_monitor.record_sensor_reading(
+            truck_id=truck_id,
+            sensor_name="consumption_gph",
+            value=consumption_gph,
+            timestamp=timestamp,
+            is_valid=True
+        )
 
     # 🔧 v5.8.2: Update adaptive Q_r based on truck status BEFORE predict
     # This adapts process noise to operational state (parked/idle/moving)
