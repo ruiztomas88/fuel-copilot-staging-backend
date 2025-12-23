@@ -211,9 +211,10 @@ mysql -u fuel_admin -p fuel_copilot < migrate_add_fuel_metrics_indexes.sql
 ## 📦 DEPLOYMENT
 
 ### Pre-requisitos
-1. ✅ Git pull en VM (obtener commits: e7b798b, d0f1f8f, 1534b9e, 29b4e15)
-2. ✅ Ejecutar migración SQL para MEJORA-005
-3. ✅ Ejecutar migración para Confidence Scoring (opcional Quick Wins)
+1. ✅ Git pull en VM (obtener commits: e7b798b, d0f1f8f, 1534b9e, 29b4e15, e242d2d)
+2. ✅ Ejecutar migración SQL #1 para BUG-002 (columna odom_delta_mi) **[CRÍTICO]**
+3. ✅ Ejecutar migración SQL #2 para MEJORA-005 (índices de performance)
+4. ⚠️ Ejecutar migración para Confidence Scoring (solo si vas con Opción B - Quick Wins)
 
 ### Opción A: Deploy solo fixes (Rápido - 5 min)
 ```powershell
@@ -221,7 +222,12 @@ mysql -u fuel_admin -p fuel_copilot < migrate_add_fuel_metrics_indexes.sql
 cd C:\Users\devteam\Proyectos\fuel-analytics-backend
 git pull origin main
 
-# Ejecutar migración SQL
+# ⚠️ IMPORTANTE: Ejecutar migraciones SQL en ESTE ORDEN
+# Migración 1: Agregar columna odom_delta_mi (requerida para BUG-002)
+mysql -u fuel_admin -p fuel_copilot < migrate_add_odom_delta_mi.sql
+# Password: FuelCopilot2025!
+
+# Migración 2: Agregar índices para performance (MEJORA-005)
 mysql -u fuel_admin -p fuel_copilot < migrate_add_fuel_metrics_indexes.sql
 # Password: FuelCopilot2025!
 
@@ -235,11 +241,60 @@ Get-Content -Path "C:\Users\devteam\Proyectos\fuel-analytics-backend\wialon_sync
 
 ### Opción B: Deploy completo con Quick Wins (45-60 min)
 Seguir `INTEGRATION_PLAN.md` paso a paso:
-1. DB migration para confidence columns
-2. Integrar Quick Wins en `wialon_sync_enhanced.py`
-3. Crear API endpoints
-4. Testing completo
-5. Restart servicios
+1. Ejecutar migrate_add_odom_delta_mi.sql **[CRÍTICO - hacer primero]**
+2. Ejecutar migrate_add_fuel_metrics_indexes.sql
+3. DB migration para confidence columns
+4. Integrar Quick Wins en `wialon_sync_enhanced.py`
+5. Crear API endpoints
+6. Testing completo
+7. Restart servicios
+
+---
+
+## ⚠️ MIGRACIONES SQL REQUERIDAS
+
+### CRÍTICO: Migración #1 - odom_delta_mi (BUG-002)
+**Archivo:** `migrate_add_odom_delta_mi.sql`  
+**Propósito:** Agregar columna para almacenar distancia recorrida  
+**Requerido:** ✅ SÍ - El INSERT fallará sin esta columna  
+**Cuando:** ANTES de reiniciar servicios  
+
+```sql
+-- Esta columna NO existe en fuel_metrics actual
+-- El código v3.12.31 la requiere para guardar odom_delta_mi
+ALTER TABLE fuel_metrics 
+ADD COLUMN odom_delta_mi DECIMAL(8,3) NULL 
+COMMENT 'Validated odometer delta (miles) - used for cost_per_mile'
+AFTER odometer_mi;
+```
+
+### Migración #2 - Índices de Performance (MEJORA-005)
+**Archivo:** `migrate_add_fuel_metrics_indexes.sql`  
+**Propósito:** Mejorar performance de queries 50-90%  
+**Requerido:** ⚠️ Recomendado (no crítico)  
+**Cuando:** Después de migración #1  
+
+```sql
+-- 4 índices compuestos para queries comunes
+CREATE INDEX idx_truck_timestamp ON fuel_metrics (truck_id, timestamp_utc DESC);
+CREATE INDEX idx_carrier_timestamp ON fuel_metrics (carrier_id, timestamp_utc DESC);
+CREATE INDEX idx_status_timestamp ON fuel_metrics (truck_status, timestamp_utc DESC);
+CREATE INDEX idx_refuel_detected ON fuel_metrics (refuel_detected, timestamp_utc DESC);
+```
+
+### Migración #3 - Confidence Columns (Quick Wins)
+**Archivo:** `migrate_add_confidence_columns.py`  
+**Propósito:** Agregar scoring de confianza  
+**Requerido:** ❌ Solo si implementas Quick Wins (Opción B)  
+**Cuando:** Solo si vas con integración completa  
+
+```sql
+-- Solo necesario para Quick Win #2 (Confidence Scoring)
+ALTER TABLE fuel_metrics 
+ADD COLUMN confidence_score INT NULL,
+ADD COLUMN confidence_level VARCHAR(20) NULL,
+ADD COLUMN confidence_warnings TEXT NULL;
+```
 
 ---
 
