@@ -735,6 +735,9 @@ class WialonReader:
                         max_age = 900  # 15 min default
                         if param_name == "fuel_lvl":
                             max_age = 14400  # 4 hours for fuel level
+                        elif param_name in ("speed", "rpm"):
+                            # 🔧 DEC 23 FIX (BUG-009): 30 min for speed/rpm (can be stale during idle)
+                            max_age = 1800  # 30 minutes
                         elif param_name in ("j1939_spn", "j1939_fmi"):
                             max_age = (
                                 172800  # 48 hours for DTC sensors (update infrequently)

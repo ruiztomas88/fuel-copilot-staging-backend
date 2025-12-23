@@ -1348,18 +1348,19 @@ def save_refuel_event(
     try:
         with connection.cursor() as cursor:
             # 🔧 v3.12.30: Check for duplicate refuel using fuel_after percentage
-            # Previous check used gallons_added ±5 gal, but Kalman drift can cause
-            # different gallon calculations for same actual refuel.
-            # fuel_after is more stable - same sensor reading = same after%.
+            # 🔧 DEC 23 FIX (BUG-005): Relaxed duplicate check
+            # - Reduced time window from 5min to 2min
+            # - Compare gallons_added instead of fuel_after % (more tolerant of sensor drift)
+            # - Increased tolerance from 2% to 5 gallons
             check_query = """
                 SELECT id, gallons_added FROM refuel_events 
                 WHERE truck_id = %s 
-                  AND timestamp_utc BETWEEN %s - INTERVAL 5 MINUTE AND %s + INTERVAL 5 MINUTE
-                  AND ABS(fuel_after - %s) < 2
+                  AND timestamp_utc BETWEEN %s - INTERVAL 2 MINUTE AND %s + INTERVAL 2 MINUTE
+                  AND ABS(gallons_added - %s) < 5
                 LIMIT 1
             """
             cursor.execute(
-                check_query, (truck_id, timestamp_utc, timestamp_utc, fuel_after)
+                check_query, (truck_id, timestamp_utc, timestamp_utc, gallons_added)
             )
             existing = cursor.fetchone()
 
@@ -1812,6 +1813,12 @@ def process_truck(
             # ✅ CRITICAL: Este fallback permite MPG calculation sin odometer
             delta_miles = speed * dt_hours if dt_hours > 0 else 0.0
 
+        # 🆕 DEC 23 FIX (BUG-002): Store odom_delta_mi for cost_per_mile calculation
+        # Validate delta_miles is reasonable before storing
+        MIN_DELTA_MILES = 0.1
+        MAX_DELTA_MILES = 500
+        odom_delta_mi = delta_miles if (MIN_DELTA_MILES < delta_miles < MAX_DELTA_MILES) else None
+
         # 🔧 v2.0.1 DEC 22 FIX: NUEVO orden de prioridad para fuel consumption
         # PRIORITY 1: Fuel level sensor (más confiable - cambio real en tanque)
         # PRIORITY 2: ECU total_fuel_used (cumulative counter - muy preciso)
@@ -2045,11 +2052,14 @@ def process_truck(
         # 🆕 DEC 23: Enhanced MPG (normalized for environmental factors)
         "mpg_enhanced": round(min(enhanced_mpg, 8.2), 2) if enhanced_mpg else None,
         # 🆕 v2.0.1: Cost per mile calculation (fuel_price / mpg)
+        # 🔧 DEC 23 FIX (BUG-007): Use dynamic price from settings
         "cost_per_mile": (
-            round(3.50 / min(mpg_current, 8.2), 3)
+            round(_settings.fuel.price_per_gallon / min(mpg_current, 8.2), 3)
             if mpg_current and mpg_current > 0
             else None
         ),
+        # 🆕 DEC 23 FIX (BUG-002): Add odom_delta_mi
+        "odom_delta_mi": round(odom_delta_mi, 3) if odom_delta_mi else None,
         # 🆕 v5.7.10: Weather-adjusted MPG for display (LEGACY)
         "mpg_weather_adjusted": (
             round(weather_adjusted_mpg, 2) if weather_adjusted_mpg else None
@@ -2201,7 +2211,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  estimated_liters, estimated_gallons, estimated_pct,
                  sensor_pct, sensor_liters, sensor_gallons,
                  consumption_lph, consumption_gph, mpg_current, cost_per_mile,
-                 rpm, engine_hours, odometer_mi,
+                 rpm, engine_hours, odometer_mi, odom_delta_mi,
                  altitude_ft, hdop, coolant_temp_f,
                  idle_gph, idle_method, idle_mode, drift_pct, drift_warning,
                  anchor_detected, anchor_type, data_age_min,
@@ -2211,7 +2221,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  trans_temp_f, fuel_temp_f, intercooler_temp_f, intake_press_kpa, retarder_level,
                  sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu,
                  dtc, dtc_code)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -2230,6 +2240,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     rpm = VALUES(rpm),
                     engine_hours = VALUES(engine_hours),
                     odometer_mi = VALUES(odometer_mi),
+                    odom_delta_mi = VALUES(odom_delta_mi),
                     altitude_ft = VALUES(altitude_ft),
                     hdop = VALUES(hdop),
                     coolant_temp_f = VALUES(coolant_temp_f),
@@ -2281,6 +2292,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 metrics["rpm"],
                 metrics["engine_hours"],
                 metrics["odometer_mi"],
+                metrics.get("odom_delta_mi"),  # 🆕 DEC 23 FIX (BUG-002)
                 metrics["altitude_ft"],
                 metrics["hdop"],
                 metrics["coolant_temp_f"],

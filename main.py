@@ -1330,7 +1330,7 @@ async def get_fleet_summary():
             "avg_idle_consumption_gph": 0.0,
             "trucks": [],
             "data_source": "ERROR",
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -1914,19 +1914,19 @@ async def get_theft_analysis(
     🛡️ v5.0.0: ML-POWERED Fuel Theft Detection & Analysis
 
     Sophisticated multi-signal theft detection with three algorithms:
-    
+
     1. 'ml' (NEW - Default): Random Forest machine learning model
        - 8 features: fuel_drop, speed, location, time, sensor quality, etc.
        - Trained on historical patterns
        - Confidence scores with feature importance
        - Best accuracy for complex scenarios
-    
+
     2. 'advanced': v4.1 algorithm with Wialon trip correlation
        - Fuel level analysis (drops, recovery patterns)
        - Trip/movement correlation from Wialon
        - Time pattern analysis (night, weekends)
        - Sensor health scoring
-    
+
     3. 'legacy': Previous v3.x algorithm for comparison
 
     Returns events classified as:
@@ -1948,18 +1948,21 @@ async def get_theft_analysis(
         if algorithm == "ml":
             # 🆕 DEC 23: Use ML-based theft detection
             try:
-                from theft_detection_ml import TheftDetectionML
-                from database_mysql import get_db_connection
-                import pymysql
                 from datetime import timedelta
-                
+
+                import pymysql
+
+                from database_mysql import get_db_connection
+                from theft_detection_ml import TheftDetectionML
+
                 ml_detector = TheftDetectionML()
                 conn = get_db_connection()
                 cursor = conn.cursor(pymysql.cursors.DictCursor)
-                
+
                 # Get fuel drops in the period
                 start_date = datetime.now(timezone.utc) - timedelta(days=days)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT 
                         fm1.truck_id,
                         fm1.timestamp_utc,
@@ -1985,63 +1988,92 @@ async def get_theft_analysis(
                         AND (fm1.sensor_pct - fm2.sensor_pct) > 3.0
                     ORDER BY fm1.timestamp_utc DESC
                     LIMIT 1000
-                """, (start_date,))
-                
+                """,
+                    (start_date,),
+                )
+
                 fuel_drops = cursor.fetchall()
                 cursor.close()
                 conn.close()
-                
+
                 # Run ML prediction on each drop
                 theft_events = []
                 for drop in fuel_drops:
                     prediction = ml_detector.predict_theft(
-                        fuel_drop_pct=drop['fuel_drop_pct'],
-                        speed=drop['speed_mph'] or 0,
-                        is_moving=(drop['truck_status'] == 'MOVING'),
-                        latitude=drop['latitude'],
-                        longitude=drop['longitude'],
-                        hour_of_day=drop['hour_of_day'],
+                        fuel_drop_pct=drop["fuel_drop_pct"],
+                        speed=drop["speed_mph"] or 0,
+                        is_moving=(drop["truck_status"] == "MOVING"),
+                        latitude=drop["latitude"],
+                        longitude=drop["longitude"],
+                        hour_of_day=drop["hour_of_day"],
                         is_weekend=start_date.weekday() >= 5,
-                        sensor_drift=abs(drop['drift_pct']) if drop['drift_pct'] else 0
+                        sensor_drift=abs(drop["drift_pct"]) if drop["drift_pct"] else 0,
                     )
-                    
+
                     if prediction.is_theft:
-                        theft_events.append({
-                            "truck_id": drop['truck_id'],
-                            "timestamp": drop['timestamp_utc'].isoformat(),
-                            "fuel_drop_pct": round(drop['fuel_drop_pct'], 2),
-                            "fuel_drop_gal": round(drop['fuel_drop_pct'] * 1.5, 2),  # Approx 150gal tank
-                            "confidence": round(prediction.confidence * 100, 1),
-                            "classification": "ROBO CONFIRMADO" if prediction.confidence > 0.85 else "ROBO SOSPECHOSO",
-                            "algorithm": "Random Forest ML",
-                            "feature_importance": prediction.feature_importance,
-                            "location": f"{drop['latitude']:.6f},{drop['longitude']:.6f}" if drop['latitude'] else None,
-                            "speed_mph": drop['speed_mph'],
-                            "status": drop['truck_status']
-                        })
-                
+                        theft_events.append(
+                            {
+                                "truck_id": drop["truck_id"],
+                                "timestamp": drop["timestamp_utc"].isoformat(),
+                                "fuel_drop_pct": round(drop["fuel_drop_pct"], 2),
+                                "fuel_drop_gal": round(
+                                    drop["fuel_drop_pct"] * 1.5, 2
+                                ),  # Approx 150gal tank
+                                "confidence": round(prediction.confidence * 100, 1),
+                                "classification": (
+                                    "ROBO CONFIRMADO"
+                                    if prediction.confidence > 0.85
+                                    else "ROBO SOSPECHOSO"
+                                ),
+                                "algorithm": "Random Forest ML",
+                                "feature_importance": prediction.feature_importance,
+                                "location": (
+                                    f"{drop['latitude']:.6f},{drop['longitude']:.6f}"
+                                    if drop["latitude"]
+                                    else None
+                                ),
+                                "speed_mph": drop["speed_mph"],
+                                "status": drop["truck_status"],
+                            }
+                        )
+
                 analysis = {
                     "period_days": days,
                     "algorithm": "ml",
                     "total_events": len(theft_events),
-                    "confirmed_thefts": len([e for e in theft_events if e['classification'] == 'ROBO CONFIRMADO']),
-                    "suspected_thefts": len([e for e in theft_events if e['classification'] == 'ROBO SOSPECHOSO']),
-                    "total_fuel_lost_gal": sum(e['fuel_drop_gal'] for e in theft_events),
+                    "confirmed_thefts": len(
+                        [
+                            e
+                            for e in theft_events
+                            if e["classification"] == "ROBO CONFIRMADO"
+                        ]
+                    ),
+                    "suspected_thefts": len(
+                        [
+                            e
+                            for e in theft_events
+                            if e["classification"] == "ROBO SOSPECHOSO"
+                        ]
+                    ),
+                    "total_fuel_lost_gal": sum(
+                        e["fuel_drop_gal"] for e in theft_events
+                    ),
                     "events": theft_events,
                     "model_info": {
                         "type": "Random Forest",
                         "features": 8,
                         "training_samples": 200,
-                        "accuracy": "~95% (synthetic data)"
-                    }
+                        "accuracy": "~95% (synthetic data)",
+                    },
                 }
-                
+
             except Exception as e:
                 logger.warning(f"ML algorithm failed, falling back to advanced: {e}")
                 # Fallback to advanced
                 from theft_detection_engine import analyze_fuel_drops_advanced
+
                 analysis = analyze_fuel_drops_advanced(days_back=days)
-                
+
         elif algorithm == "advanced":
             # 🆕 v4.1.0: Use new advanced engine with Wialon trip correlation
             try:
@@ -2081,25 +2113,25 @@ async def get_theft_analysis(
 async def get_predictive_maintenance(
     truck_id: Optional[str] = Query(None, description="Filter by specific truck"),
     component: Optional[str] = Query(
-        None, 
-        description="Filter by component: turbocharger, oil_pump, coolant_pump, fuel_pump, def_pump"
+        None,
+        description="Filter by component: turbocharger, oil_pump, coolant_pump, fuel_pump, def_pump",
     ),
 ):
     """
     🔧 v5.0.0: PREDICTIVE MAINTENANCE - Ensemble Model (Weibull + ARIMA)
-    
+
     Predicts component failures using hybrid statistical approach:
     - Weibull distribution: Age-based failure probability (mechanical wear)
     - ARIMA time series: Sensor trend analysis (degradation patterns)
     - Weighted ensemble: Combines both models (60% Weibull, 40% ARIMA)
-    
+
     Monitored Components:
     - turbocharger: Intake pressure trends, boost monitoring
     - oil_pump: Oil pressure degradation, temperature patterns
     - coolant_pump: Coolant temp trends, circulation efficiency
     - fuel_pump: Fuel pressure stability (when sensor available)
     - def_pump: DEF level patterns, dosing efficiency
-    
+
     Returns:
     - Time-to-failure predictions (hours)
     - Confidence intervals (90%, 95%, 99%)
@@ -2109,45 +2141,50 @@ async def get_predictive_maintenance(
     """
     try:
         from cache_service import get_cache
+
         cache = await get_cache()
         cache_key = f"maintenance:predict:{truck_id or 'all'}:{component or 'all'}"
         cached = await cache.get(cache_key)
         if cached:
             return JSONResponse(content=cached)
-        
-        from predictive_maintenance_ensemble import PredictiveMaintenanceEnsemble
-        from predictive_maintenance_config import (
-            CRITICAL_COMPONENTS, 
-            get_all_component_names,
-            should_alert
-        )
-        from database_mysql import get_db_connection
-        import pymysql
+
         import numpy as np
-        
+        import pymysql
+
+        from database_mysql import get_db_connection
+        from predictive_maintenance_config import (
+            CRITICAL_COMPONENTS,
+            get_all_component_names,
+            should_alert,
+        )
+        from predictive_maintenance_ensemble import PredictiveMaintenanceEnsemble
+
         conn = get_db_connection()
         cursor = conn.cursor(pymysql.cursors.DictCursor)
-        
+
         # Get list of trucks to analyze
         if truck_id:
             trucks = [truck_id]
         else:
-            cursor.execute("SELECT DISTINCT truck_id FROM fuel_metrics WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)")
-            trucks = [row['truck_id'] for row in cursor.fetchall()]
-        
+            cursor.execute(
+                "SELECT DISTINCT truck_id FROM fuel_metrics WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+            )
+            trucks = [row["truck_id"] for row in cursor.fetchall()]
+
         # Get components to analyze
         components_to_check = [component] if component else get_all_component_names()
-        
+
         predictions = []
-        
+
         for truck in trucks:
             for comp_name in components_to_check:
                 try:
                     comp_config = CRITICAL_COMPONENTS[comp_name]
-                    sensor_name = comp_config['sensors']['primary']
-                    
+                    sensor_name = comp_config["sensors"]["primary"]
+
                     # Get sensor history (last 30 days)
-                    cursor.execute(f"""
+                    cursor.execute(
+                        f"""
                         SELECT 
                             timestamp_utc,
                             engine_hours,
@@ -2158,124 +2195,158 @@ async def get_predictive_maintenance(
                             AND {sensor_name} IS NOT NULL
                         ORDER BY timestamp_utc ASC
                         LIMIT 1000
-                    """, (truck,))
-                    
+                    """,
+                        (truck,),
+                    )
+
                     sensor_data = cursor.fetchall()
-                    
+
                     if len(sensor_data) < 10:
                         # Not enough data
                         continue
-                    
+
                     # Extract sensor values and engine hours
                     sensor_values = [row[sensor_name] for row in sensor_data]
-                    engine_hours_list = [row['engine_hours'] for row in sensor_data if row['engine_hours']]
-                    
-                    current_engine_hours = engine_hours_list[-1] if engine_hours_list else 5000
-                    
+                    engine_hours_list = [
+                        row["engine_hours"]
+                        for row in sensor_data
+                        if row["engine_hours"]
+                    ]
+
+                    current_engine_hours = (
+                        engine_hours_list[-1] if engine_hours_list else 5000
+                    )
+
                     # Create ensemble model
                     ensemble = PredictiveMaintenanceEnsemble(
                         component_name=comp_name,
-                        weibull_shape=comp_config['weibull_params']['shape'],
-                        weibull_scale=comp_config['weibull_params']['scale'],
-                        arima_order=comp_config['arima_order'],
-                        ensemble_weight_weibull=comp_config['ensemble_weight_weibull'],
-                        ensemble_weight_arima=comp_config['ensemble_weight_arima']
+                        weibull_shape=comp_config["weibull_params"]["shape"],
+                        weibull_scale=comp_config["weibull_params"]["scale"],
+                        arima_order=comp_config["arima_order"],
+                        ensemble_weight_weibull=comp_config["ensemble_weight_weibull"],
+                        ensemble_weight_arima=comp_config["ensemble_weight_arima"],
                     )
-                    
+
                     # Train models
                     ensemble.train_models(
                         sensor_history=sensor_values,
-                        current_age_hours=current_engine_hours
+                        current_age_hours=current_engine_hours,
                     )
-                    
+
                     # Predict
                     prediction = ensemble.predict(
                         current_age_hours=current_engine_hours,
-                        forecast_steps=30  # 30 time steps ahead
+                        forecast_steps=30,  # 30 time steps ahead
                     )
-                    
+
                     # Check if alert needed
-                    should_send_alert, severity = should_alert(comp_name, prediction.ttf_hours)
-                    
+                    should_send_alert, severity = should_alert(
+                        comp_name, prediction.ttf_hours
+                    )
+
                     # Calculate days until failure
                     avg_hours_per_day = 8  # Assume 8 hours driving per day
                     days_until_failure = prediction.ttf_hours / avg_hours_per_day
-                    
-                    predictions.append({
-                        "truck_id": truck,
-                        "component": comp_name,
-                        "component_description": comp_config['description'],
-                        "ttf_hours": round(prediction.ttf_hours, 1),
-                        "ttf_days": round(days_until_failure, 1),
-                        "confidence_90": [round(prediction.confidence_intervals['90%'][0], 1), 
-                                         round(prediction.confidence_intervals['90%'][1], 1)],
-                        "confidence_95": [round(prediction.confidence_intervals['95%'][0], 1), 
-                                         round(prediction.confidence_intervals['95%'][1], 1)],
-                        "weibull_contribution": round(prediction.weibull_prediction, 1),
-                        "arima_contribution": round(prediction.arima_prediction, 1),
-                        "sensor_monitored": sensor_name,
-                        "current_sensor_value": round(sensor_values[-1], 2),
-                        "sensor_trend": prediction.metadata.get('sensor_trend', 'stable'),
-                        "alert_severity": severity,
-                        "should_alert": should_send_alert,
-                        "maintenance_due_hours": comp_config['maintenance_interval_hours'],
-                        "current_engine_hours": round(current_engine_hours, 1),
-                        "recommended_action": (
-                            f"URGENT: Schedule maintenance within {int(days_until_failure)} days" 
-                            if severity == "CRITICAL" 
-                            else f"Plan maintenance in next {int(days_until_failure)} days" 
-                            if severity == "WARNING"
-                            else "Component healthy, monitor trends"
-                        )
-                    })
-                    
+
+                    predictions.append(
+                        {
+                            "truck_id": truck,
+                            "component": comp_name,
+                            "component_description": comp_config["description"],
+                            "ttf_hours": round(prediction.ttf_hours, 1),
+                            "ttf_days": round(days_until_failure, 1),
+                            "confidence_90": [
+                                round(prediction.confidence_intervals["90%"][0], 1),
+                                round(prediction.confidence_intervals["90%"][1], 1),
+                            ],
+                            "confidence_95": [
+                                round(prediction.confidence_intervals["95%"][0], 1),
+                                round(prediction.confidence_intervals["95%"][1], 1),
+                            ],
+                            "weibull_contribution": round(
+                                prediction.weibull_prediction, 1
+                            ),
+                            "arima_contribution": round(prediction.arima_prediction, 1),
+                            "sensor_monitored": sensor_name,
+                            "current_sensor_value": round(sensor_values[-1], 2),
+                            "sensor_trend": prediction.metadata.get(
+                                "sensor_trend", "stable"
+                            ),
+                            "alert_severity": severity,
+                            "should_alert": should_send_alert,
+                            "maintenance_due_hours": comp_config[
+                                "maintenance_interval_hours"
+                            ],
+                            "current_engine_hours": round(current_engine_hours, 1),
+                            "recommended_action": (
+                                f"URGENT: Schedule maintenance within {int(days_until_failure)} days"
+                                if severity == "CRITICAL"
+                                else (
+                                    f"Plan maintenance in next {int(days_until_failure)} days"
+                                    if severity == "WARNING"
+                                    else "Component healthy, monitor trends"
+                                )
+                            ),
+                        }
+                    )
+
                 except Exception as comp_error:
-                    logger.warning(f"Error analyzing {comp_name} for {truck}: {comp_error}")
+                    logger.warning(
+                        f"Error analyzing {comp_name} for {truck}: {comp_error}"
+                    )
                     continue
-        
+
         cursor.close()
         conn.close()
-        
+
         # Aggregate stats
-        critical_count = len([p for p in predictions if p['alert_severity'] == 'CRITICAL'])
-        warning_count = len([p for p in predictions if p['alert_severity'] == 'WARNING'])
-        
+        critical_count = len(
+            [p for p in predictions if p["alert_severity"] == "CRITICAL"]
+        )
+        warning_count = len(
+            [p for p in predictions if p["alert_severity"] == "WARNING"]
+        )
+
         result = {
             "total_predictions": len(predictions),
             "trucks_analyzed": len(trucks),
             "components_analyzed": len(components_to_check),
             "critical_alerts": critical_count,
             "warning_alerts": warning_count,
-            "predictions": sorted(predictions, key=lambda x: x['ttf_hours']),  # Sort by urgency
+            "predictions": sorted(
+                predictions, key=lambda x: x["ttf_hours"]
+            ),  # Sort by urgency
             "model_info": {
                 "type": "Weibull + ARIMA Ensemble",
                 "weibull_purpose": "Age-based mechanical failure probability",
                 "arima_purpose": "Sensor degradation trend analysis",
-                "ensemble_method": "Weighted average (configurable per component)"
-            }
+                "ensemble_method": "Weighted average (configurable per component)",
+            },
         }
-        
+
         # Cache for 5 minutes (predictions don't change frequently)
         await cache.set(cache_key, result, ttl=300)
-        
+
         return JSONResponse(content=result)
-        
+
     except Exception as e:
         logger.error(f"❌ Error in predictive maintenance: {e}", exc_info=True)
         # 🔧 v5.19.2: Return empty response instead of 500 error
         # This prevents frontend from breaking when predictive model has issues
         # (e.g., missing dependencies, insufficient data, etc.)
-        return JSONResponse(content={
-            "total_predictions": 0,
-            "trucks_analyzed": 0,
-            "components_analyzed": 0,
-            "critical_alerts": 0,
-            "warning_alerts": 0,
-            "predictions": [],
-            "error": str(e),
-            "status": "unavailable",
-            "message": "Predictive maintenance temporarily unavailable. Check logs for details."
-        })
+        return JSONResponse(
+            content={
+                "total_predictions": 0,
+                "trucks_analyzed": 0,
+                "components_analyzed": 0,
+                "critical_alerts": 0,
+                "warning_alerts": 0,
+                "predictions": [],
+                "error": str(e),
+                "status": "unavailable",
+                "message": "Predictive maintenance temporarily unavailable. Check logs for details.",
+            }
+        )
 
 
 # ============================================================================
