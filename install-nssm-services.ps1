@@ -30,13 +30,28 @@ Write-Host "====================================================================
 # ============================================================================
 $PROJECT_DIR = "C:\Users\devteam\Proyectos\fuel-analytics-backend"
 $PYTHON_EXE = "$PROJECT_DIR\venv\Scripts\python.exe"
-$NSSM_EXE = "C:\Program Files\nssm\nssm.exe"  # Ajustar si NSSM está en otra ruta
+
+# Buscar NSSM en ubicaciones comunes
+$NSSM_PATHS = @(
+    "C:\ProgramData\chocolatey\bin\nssm.exe",  # Chocolatey
+    "C:\Program Files\nssm\nssm.exe",           # Instalación manual
+    "C:\nssm\nssm.exe"                          # Instalación portable
+)
+
+$NSSM_EXE = $null
+foreach ($path in $NSSM_PATHS) {
+    if (Test-Path $path) {
+        $NSSM_EXE = $path
+        Write-Host "✅ NSSM encontrado en: $NSSM_EXE" -ForegroundColor Green
+        break
+    }
+}
 
 # Verificar que NSSM existe
-if (-not (Test-Path $NSSM_EXE)) {
-    Write-Host "❌ ERROR: NSSM no encontrado en: $NSSM_EXE" -ForegroundColor Red
-    Write-Host "   Descargar desde: https://nssm.cc/download" -ForegroundColor Yellow
-    Write-Host "   Instalar en: C:\Program Files\nssm\" -ForegroundColor Yellow
+if (-not $NSSM_EXE) {
+    Write-Host "❌ ERROR: NSSM no encontrado" -ForegroundColor Red
+    Write-Host "   Instalar con Chocolatey: choco install nssm" -ForegroundColor Yellow
+    Write-Host "   O descargar desde: https://nssm.cc/download" -ForegroundColor Yellow
     exit 1
 }
 
@@ -105,8 +120,9 @@ if (-not (Test-Path $logDir)) {
 & $NSSM_EXE set FuelAnalytics-API AppExit Default Restart | Out-Null
 & $NSSM_EXE set FuelAnalytics-API AppRestartDelay 5000 | Out-Null  # 5 segundos
 
-# Configurar variables de entorno (opcional)
-& $NSSM_EXE set FuelAnalytics-API AppEnvironmentExtra "ENVIRONMENT=production" | Out-Null
+# Configurar variables de entorno (REQUERIDAS para producción)
+$envVars = "ENVIRONMENT=production`0ADMIN_PASSWORD=FuelAdmin2025!`0SKYLORD_PASSWORD=Skylord2025!`0SKYLORD_VIEWER_PASSWORD=Viewer2025!"
+& $NSSM_EXE set FuelAnalytics-API AppEnvironmentExtra $envVars | Out-Null
 
 Write-Host "   ✅ FuelAnalytics-API instalado`n" -ForegroundColor Green
 
@@ -203,7 +219,8 @@ Write-Host "──────────────────────�
 Start-Sleep -Seconds 3
 if (Test-Path "$logDir\api-stdout.log") {
     Get-Content "$logDir\api-stdout.log" -Tail 20
-} else {
+}
+else {
     Write-Host "   (Logs aún no disponibles, esperar unos segundos...)" -ForegroundColor Yellow
 }
 Write-Host "─────────────────────────────────────────────────────────────`n" -ForegroundColor Gray
