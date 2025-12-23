@@ -60,6 +60,9 @@ from driver_behavior_engine import BehaviorEvent, get_behavior_engine
 # 🆕 v3.12.28: Import DTC analyzer for diagnostic code alerts
 from dtc_analyzer import DTCSeverity, process_dtc_from_sensor_data
 
+# 🆕 DEC 23: Enhanced MPG calculation with environmental adjustments
+from enhanced_mpg_calculator import EnhancedMPGCalculator, EnvironmentalFactors
+
 # Import the existing sophisticated modules
 from estimator import AnchorDetector, AnchorType, FuelEstimator
 
@@ -120,6 +123,9 @@ if not LOCAL_DB_CONFIG["password"]:
 
 # 🆕 v6.5.1: Global MPG config for state initialization
 mpg_config = MPGConfig()
+
+# 🆕 DEC 23: Enhanced MPG calculator singleton
+enhanced_mpg_calculator = EnhancedMPGCalculator()
 
 # State persistence paths
 DATA_DIR = Path(__file__).parent / "data"
@@ -1926,7 +1932,27 @@ def process_truck(
     sensor_data["idle_gph"] = idle_gph
     state_manager.last_sensor_data[truck_id] = sensor_data
 
-    # 🆕 v5.7.10: Calculate weather-adjusted MPG
+    # 🆕 DEC 23: Apply Enhanced MPG environmental adjustments
+    # Normalize MPG for altitude, temperature, and load factors
+    enhanced_mpg = None
+    if mpg_current is not None:
+        env_factors = EnvironmentalFactors(
+            altitude_ft=altitude if altitude else 0,
+            temperature_f=ambient_temp if ambient_temp else 70.0,
+            load_weight_lbs=0,  # TODO: Get from weight sensor when available
+            is_loaded=(engine_load > 50) if engine_load else False,
+        )
+
+        # Get normalized MPG (what it would be at sea level, 70°F, no load)
+        enhanced_mpg = enhanced_mpg_calculator.normalize_mpg(mpg_current, env_factors)
+
+        if enhanced_mpg != mpg_current:
+            logger.debug(
+                f"[ENHANCED_MPG] {truck_id}: raw={mpg_current:.2f} -> normalized={enhanced_mpg:.2f} "
+                f"(alt={altitude or 0:.0f}ft, temp={ambient_temp or 70:.1f}°F, load={engine_load or 0:.0f}%)"
+            )
+
+    # 🆕 v5.7.10: Calculate weather-adjusted MPG (LEGACY - keep for compatibility)
     # If ambient_temp is available, adjust expected MPG for display
     weather_adjusted_mpg = None
     weather_mpg_factor = None
@@ -1965,13 +1991,15 @@ def process_truck(
         "consumption_gph": round(consumption_gph, 3) if consumption_gph else None,
         # ✅ DEC 22: Cap MPG at realistic maximum (8.2 for Class 8)
         "mpg_current": round(min(mpg_current, 8.2), 2) if mpg_current else None,
+        # 🆕 DEC 23: Enhanced MPG (normalized for environmental factors)
+        "mpg_enhanced": round(min(enhanced_mpg, 8.2), 2) if enhanced_mpg else None,
         # 🆕 v2.0.1: Cost per mile calculation (fuel_price / mpg)
         "cost_per_mile": (
             round(3.50 / min(mpg_current, 8.2), 3)
             if mpg_current and mpg_current > 0
             else None
         ),
-        # 🆕 v5.7.10: Weather-adjusted MPG for display
+        # 🆕 v5.7.10: Weather-adjusted MPG for display (LEGACY)
         "mpg_weather_adjusted": (
             round(weather_adjusted_mpg, 2) if weather_adjusted_mpg else None
         ),
