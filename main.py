@@ -1319,9 +1319,19 @@ async def get_fleet_summary():
 
         return summary
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching fleet summary: {str(e)}"
-        )
+        logger.error(f"❌ Error fetching fleet summary: {e}", exc_info=True)
+        # 🔧 v5.19.2: Return minimal valid response instead of 500
+        return {
+            "total_trucks": 0,
+            "active_trucks": 0,
+            "offline_trucks": 0,
+            "total_fuel_consumed_gal": 0.0,
+            "avg_mpg": 0.0,
+            "avg_idle_consumption_gph": 0.0,
+            "trucks": [],
+            "data_source": "ERROR",
+            "error": str(e)
+        }
 
 
 @app.get("/fuelAnalytics/api/trucks", response_model=List[str], tags=["Trucks"])
@@ -2251,10 +2261,21 @@ async def get_predictive_maintenance(
         return JSONResponse(content=result)
         
     except Exception as e:
-        logger.error(f"Error in predictive maintenance: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Error running predictive maintenance: {str(e)}"
-        )
+        logger.error(f"❌ Error in predictive maintenance: {e}", exc_info=True)
+        # 🔧 v5.19.2: Return empty response instead of 500 error
+        # This prevents frontend from breaking when predictive model has issues
+        # (e.g., missing dependencies, insufficient data, etc.)
+        return JSONResponse(content={
+            "total_predictions": 0,
+            "trucks_analyzed": 0,
+            "components_analyzed": 0,
+            "critical_alerts": 0,
+            "warning_alerts": 0,
+            "predictions": [],
+            "error": str(e),
+            "status": "unavailable",
+            "message": "Predictive maintenance temporarily unavailable. Check logs for details."
+        })
 
 
 # ============================================================================
