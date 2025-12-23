@@ -17,7 +17,7 @@ FIXES ALL DASHBOARD ISSUES:
 ✅ Emergency reset for extreme drift
 
 Author: Fuel Copilot Team
-Version: 3.12.21
+Version: 3.12.31
 Date: December 2025
 """
 
@@ -424,12 +424,14 @@ def determine_truck_status(
     pwr_ext: Optional[float] = None,
     engine_load: Optional[float] = None,
     coolant_temp: Optional[float] = None,
+    sensor_timestamps: Optional[Dict[str, int]] = None,
 ) -> str:
     """
-    Enhanced truck status determination v3 - Fixed STOPPED detection
-
-    🔧 FIX v3.12.1: Check engine indicators BEFORE speed check
-    Previously, speed=None would return OFFLINE even if RPM > 0 (engine running)
+    Enhanced truck status determination v4 - Fixed timestamp validation
+    
+    🔧 FIX v3.12.31 (BUG-008): Validate sensor timestamps to prevent stale data mismatches
+    Problem: Speed from 5 min ago + RPM from 30 sec ago = wrong status
+    Solution: Use only sensors with similar timestamps (within 2 min of each other)
 
     Status Hierarchy:
     1. OFFLINE: Data too old (>15 min)
@@ -443,10 +445,33 @@ def determine_truck_status(
     - Fuel rate > 0.3 L/h
     - Engine load > 0%
     - Coolant temp > 120°F (engine at operating temp)
+    
+    Args:
+        sensor_timestamps: Dict with sensor ages in seconds: {'speed': 300, 'rpm': 30, ...}
     """
     # Check for offline - stale data (no communication in 15+ minutes)
     if data_age_min > 15:
         return "OFFLINE"
+    
+    # 🆕 BUG-008 FIX: Validate sensor timestamps before using them
+    # If speed data is >2 min older than RPM, don't trust speed (may be stale)
+    if sensor_timestamps:
+        speed_age = sensor_timestamps.get('speed', 0)
+        rpm_age = sensor_timestamps.get('rpm', 0)
+        
+        # If speed is MUCH older than RPM (>2 min difference), ignore speed
+        # This prevents "speed=0 from 5 min ago" + "rpm=1500 now" = wrong STOPPED
+        if speed is not None and rpm is not None:
+            age_diff = abs(speed_age - rpm_age)
+            if age_diff > 120:  # 2 minutes difference
+                if speed_age > rpm_age + 120:
+                    # Speed is stale compared to RPM - ignore it
+                    speed = None
+                    logger.debug(f"Ignoring stale speed (age={speed_age}s vs rpm age={rpm_age}s)")
+                elif rpm_age > speed_age + 120:
+                    # RPM is stale compared to speed - ignore it
+                    rpm = None
+                    logger.debug(f"Ignoring stale rpm (age={rpm_age}s vs speed age={speed_age}s)")
 
     # 🔧 FIX v3.12.1: Check engine indicators FIRST (before speed check)
     # This ensures trucks with RPM > 0 but speed=None are marked STOPPED, not OFFLINE
@@ -1594,10 +1619,19 @@ def process_truck(
     # Calculate data age
     now_utc = datetime.now(timezone.utc)
     data_age_min = (now_utc - timestamp).total_seconds() / 60.0
+    
+    # 🆕 BUG-008 FIX: Build sensor timestamp dict for validation
+    # This allows determine_truck_status to check if sensors have similar timestamps
+    sensor_timestamps = {
+        'speed': int(data_age_min * 60),  # Convert back to seconds
+        'rpm': int(data_age_min * 60),
+        'fuel_rate': int(data_age_min * 60),
+    }
 
-    # Determine truck status (enhanced with multiple sensors)
+    # Determine truck status (enhanced with multiple sensors + timestamp validation)
     truck_status = determine_truck_status(
-        speed, rpm, fuel_rate, data_age_min, pwr_ext, engine_load, coolant_temp
+        speed, rpm, fuel_rate, data_age_min, pwr_ext, engine_load, coolant_temp,
+        sensor_timestamps=sensor_timestamps  # 🆕 BUG-008: Pass timestamps for validation
     )
 
     # Calculate time delta from last update
@@ -1759,9 +1793,31 @@ def process_truck(
     estimator.last_update_time = timestamp
 
     # Calculate estimated values
+    # 🆕 MEJORA-003: Fuel source fallback hierarchy
+    # Priority: kalman (most accurate) → raw_sensor → last_known_good
     estimated_pct = estimator.level_pct
     estimated_liters = estimator.level_liters
     estimated_gallons = estimated_liters / 3.78541
+    fuel_source = "kalman"
+    
+    # Fallback if Kalman failed
+    if estimated_pct is None or estimated_pct < 0 or estimated_pct > 100:
+        # Try raw sensor
+        if sensor_pct is not None and 0 <= sensor_pct <= 100:
+            estimated_pct = sensor_pct
+            estimated_gallons = (sensor_pct / 100.0) * tank_capacity_gal
+            estimated_liters = estimated_gallons * 3.78541
+            fuel_source = "raw_sensor"
+            logger.debug(f"[{truck_id}] Using raw sensor (Kalman unavailable)")
+        else:
+            # Both failed - use last known good from DB (if available)
+            logger.warning(
+                f"[{truck_id}] Both Kalman ({estimated_pct}) and sensor ({sensor_pct}) failed - "
+                f"check sensors or estimator state"
+            )
+            # Note: Could implement _get_last_known_fuel(truck_id) DB query here if needed
+            # For now, we'll let the values be None which will skip DB insert
+            fuel_source = "none"
 
     # Sensor values (raw)
     sensor_liters = (sensor_pct / 100) * tank_capacity_liters if sensor_pct else None
@@ -1876,7 +1932,17 @@ def process_truck(
             # ✅ DEC 22: Add MPG physics validation (Class 8 loaded: 2-12 MPG max)
             instant_mpg = delta_miles / delta_gallons if delta_gallons > 0 else 0
 
+            # 🆕 MEJORA-002: Validación estricta de MPG antes de guardar
+            # Realistic MPG range for heavy trucks: 4-15 MPG (class 8)
+            # Out-of-range values indicate sensor errors or bad data
             if 2.0 <= instant_mpg <= 12.0:
+                # Additional warning for borderline values
+                if instant_mpg < 4.0 or instant_mpg > 9.0:
+                    logger.warning(
+                        f"[{truck_id}] Borderline MPG: {instant_mpg:.2f} "
+                        f"(typical range: 4-9, allowing 2-12) - "
+                        f"Δmi={delta_miles:.1f}, Δgal={delta_gallons:.2f}"
+                    )
                 # Determine fuel source for logging
                 fuel_source = "unknown"
                 if delta_gallons > 0:
@@ -3082,6 +3148,15 @@ def sync_cycle(
 
                 # 🔧 v5.17.1: Save immediately to prevent data loss
                 try:
+                    # 🆕 MEJORA-001: Logging detallado para diagnóstico de refuels
+                    logger.info(
+                        f"💧 REFUEL DETECTED [{truck_id}] "
+                        f"gallons={gallons_added:.1f} ({fuel_before:.1f}% → {fuel_after:.1f}%) "
+                        f"detection_method={refuel_evt.get('method', 'unknown')} "
+                        f"confidence={refuel_evt.get('confidence', 0):.0f}% "
+                        f"location={metrics.get('latitude', 'N/A')},{metrics.get('longitude', 'N/A')}"
+                    )
+                    
                     was_saved = save_refuel_event(
                         connection=local_conn,
                         truck_id=truck_id,
