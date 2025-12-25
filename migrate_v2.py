@@ -6,6 +6,7 @@ Usage:
     python migrate_v2.py
 """
 
+import os
 import pymysql
 
 # Database configuration
@@ -13,7 +14,7 @@ DB_CONFIG = {
     "host": "localhost",
     "port": 3306,
     "user": "fuel_admin",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "fuel_copilot",
     "autocommit": True,
 }

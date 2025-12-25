@@ -13,10 +13,10 @@ Version: v3.4.0
 Date: November 26, 2025
 """
 
-from dataclasses import dataclass
-from typing import Optional, Tuple
-from enum import Enum
 import logging
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -200,13 +200,13 @@ def calculate_idle_consumption(
 
             # Sanity check: idle should be 0.3-3.0 GPH typically
             if 0.1 <= idle_gph <= 5.0:
-                logger.debug(
-                    f"[{truck_id}] Idle via ECU_COUNTER: {idle_gph:.3f} gph "
+                logger.info(
+                    f"[{truck_id}] ✅ Idle via ECU_COUNTER: {idle_gph:.3f} gph "
                     f"(delta: {idle_fuel_delta:.4f} gal in {time_delta_hours*60:.1f}min)"
                 )
                 return idle_gph, IdleMethod.ECU_IDLE_COUNTER
             else:
-                logger.debug(
+                logger.warning(
                     f"[{truck_id}] ECU_COUNTER {idle_gph:.2f} gph out of sane range"
                 )
         elif idle_fuel_delta < 0:
@@ -214,6 +214,12 @@ def calculate_idle_consumption(
                 f"[{truck_id}] ECU idle counter went backwards: "
                 f"{previous_total_idle_fuel:.2f} → {total_idle_fuel:.2f}"
             )
+    elif total_idle_fuel is not None or previous_total_idle_fuel is not None:
+        # Log when we have partial data
+        logger.info(
+            f"[{truck_id}] ⚠️ ECU idle data incomplete: current={total_idle_fuel}, "
+            f"prev={previous_total_idle_fuel}, dt={time_delta_hours:.3f}h"
+        )
 
     # Check valid fuel rate first
     has_valid_fuel_rate = False
@@ -221,10 +227,18 @@ def calculate_idle_consumption(
         if config.fuel_rate_min_lph <= fuel_rate <= config.fuel_rate_max_lph:
             has_valid_fuel_rate = True
 
-    # Engine off check (rpm=0 explicitly) - ONLY if no valid fuel rate
-    # Fix for trucks like RT9127 that have RPM=0 but valid fuel_rate
-    if rpm is not None and rpm == 0 and not has_valid_fuel_rate:
-        return 0.0, IdleMethod.ENGINE_OFF
+    # 🔧 FIX: Engine off check - rpm=0 OR rpm=None (offline) without valid fuel rate
+    # When truck is STOPPED with no RPM data and no fuel rate, engine is OFF
+    if not has_valid_fuel_rate:
+        if rpm is not None and rpm == 0:
+            # Explicit RPM=0 means engine is off
+            return 0.0, IdleMethod.ENGINE_OFF
+        if rpm is None:
+            # No RPM data (offline) and no fuel rate - assume engine off
+            logger.debug(
+                f"[{truck_id}] STOPPED with no RPM/fuel data - assuming ENGINE_OFF"
+            )
+            return 0.0, IdleMethod.ENGINE_OFF
 
     # Engine is ON (rpm>0 or rpm=None means transmitting data)
 
@@ -243,15 +257,15 @@ def calculate_idle_consumption(
             # This filters minor sensor fluctuations while responding to real changes
             if previous_idle_gph is not None and 0.1 <= previous_idle_gph <= 5.0:
                 idle_gph = 0.3 * idle_gph_raw + 0.7 * previous_idle_gph
-                logger.debug(
-                    f"[{truck_id}] Idle via SENSOR (EMA): {idle_gph:.2f} gph "
+                logger.info(
+                    f"[{truck_id}] ✅ Idle via SENSOR (EMA): {idle_gph:.2f} gph "
                     f"(raw: {idle_gph_raw:.2f}, prev: {previous_idle_gph:.2f}, fuel_rate: {fuel_rate:.2f} LPH)"
                 )
             else:
                 # First reading or previous was invalid - use raw value
                 idle_gph = idle_gph_raw
-                logger.debug(
-                    f"[{truck_id}] Idle via SENSOR: {idle_gph:.2f} gph "
+                logger.info(
+                    f"[{truck_id}] ✅ Idle via SENSOR: {idle_gph:.2f} gph "
                     f"(fuel_rate: {fuel_rate:.2f} LPH, no EMA - first reading)"
                 )
 

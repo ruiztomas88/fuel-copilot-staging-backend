@@ -12,6 +12,7 @@ Author: Fuel Copilot Team
 Date: December 22, 2025
 """
 
+import os
 import logging
 
 import mysql.connector
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 DB_CONFIG = {
     "host": "localhost",
     "user": "fuel_admin",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "fuel_copilot",
 }
 

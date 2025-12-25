@@ -2,13 +2,14 @@
 Check the ORIGINAL MPG values from the first day of data collection
 to see what values the logic was calculating BEFORE the cleanup
 """
+import os
 import pymysql
 from datetime import datetime, timedelta
 
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'fuel_admin',
-    'password': 'FuelCopilot2025!',
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     'database': 'fuel_copilot',
     'charset': 'utf8mb4'
 }

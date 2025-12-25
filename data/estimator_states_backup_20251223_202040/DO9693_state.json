@@ -1,0 +1,15 @@
+{
+  "truck_id": "DO9693",
+  "initialized": true,
+  "level_liters": 406.9751623123347,
+  "level_pct": 48.86887025235584,
+  "consumption_lph": 0.0,
+  "drift_pct": 8.86887025235584,
+  "P": 0.037408702328042436,
+  "L": 406.9751623123347,
+  "P_L": 5.0,
+  "last_fuel_lvl_pct": 40.0,
+  "last_timestamp": "2025-12-24T01:17:21+00:00",
+  "saved_at": "2025-12-24T01:20:33.900358+00:00",
+  "mpg_current": 8.2
+}

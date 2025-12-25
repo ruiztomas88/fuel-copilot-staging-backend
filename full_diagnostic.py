@@ -7,6 +7,7 @@ from datetime import datetime
 import pymysql
 
 from config import get_local_db_config
+from sql_safe import whitelist_table  # 🔒 SQL Injection protection
 
 print("=" * 80)
 print("🔍 DIAGNÓSTICO COMPLETO DEL SISTEMA")
@@ -128,9 +129,14 @@ existing = [row[0] for row in cursor.fetchall()]
 for table in critical_tables:
     exists = table in existing
     if exists:
-        cursor.execute(f"SELECT COUNT(*) FROM {table}")
-        count = cursor.fetchone()[0]
-        print(f"   ✅ {table}: {count:,} rows")
+        try:
+            # 🔒 Validate table name before using in query
+            safe_table = whitelist_table(table)
+            cursor.execute(f"SELECT COUNT(*) FROM {safe_table}")
+            count = cursor.fetchone()[0]
+            print(f"   ✅ {table}: {count:,} rows")
+        except ValueError as e:
+            print(f"   ⚠️ {table}: Not in whitelist - {e}")
     else:
         print(f"   ❌ {table}: MISSING")
 

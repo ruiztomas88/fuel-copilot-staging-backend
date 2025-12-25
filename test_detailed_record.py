@@ -2,7 +2,7 @@
 Test con logging detallado del flujo de get_truck_detail
 """
 import os
-os.environ['MYSQL_PASSWORD'] = 'FuelCopilot2025!'
+# Password should be set via .env file
 os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 import sys

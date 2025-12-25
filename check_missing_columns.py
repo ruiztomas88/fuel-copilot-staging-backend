@@ -3,7 +3,7 @@ Script para verificar qué columnas existen en fuel_metrics
 y cuáles faltan en la query
 """
 import os
-os.environ['MYSQL_PASSWORD'] = 'FuelCopilot2025!'
+# Password should be set via .env file
 
 from database_mysql import get_sqlalchemy_engine
 from sqlalchemy import text

@@ -1,0 +1,15 @@
+{
+  "truck_id": "FF7702",
+  "initialized": true,
+  "level_liters": 551.0741488353467,
+  "level_pct": 72.78922875399847,
+  "consumption_lph": 0.0,
+  "drift_pct": -0.010771246001525014,
+  "P": 1.7119311035882838,
+  "L": 551.0741488353467,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 72.8,
+  "last_timestamp": "2025-12-24T01:13:46+00:00",
+  "saved_at": "2025-12-24T01:20:33.900459+00:00",
+  "mpg_current": null
+}

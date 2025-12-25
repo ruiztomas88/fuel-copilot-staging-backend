@@ -3,7 +3,7 @@ Diagnóstico del flujo de datos: Wialon -> MySQL -> API -> Dashboard
 Objetivo: Entender por qué el fleet summary funciona pero truck detail muestra N/A
 """
 import os
-os.environ['MYSQL_PASSWORD'] = 'FuelCopilot2025!'
+# Password should be set via .env file
 
 from database_mysql import get_sqlalchemy_engine
 from sqlalchemy import text

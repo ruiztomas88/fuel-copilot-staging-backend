@@ -1,6 +1,7 @@
 """
 Buscar tabla units_map en las bases de datos disponibles
 """
+import os
 import pymysql
 
 # Try fuel_copilot first
@@ -11,7 +12,7 @@ dbs_to_check = [
         'name': 'fuel_copilot',
         'host': 'localhost',
         'user': 'fuel_admin',
-        'password': 'FuelCopilot2025!',
+        "password": os.getenv("MYSQL_PASSWORD", ""),
         'database': 'fuel_copilot'
     },
     {

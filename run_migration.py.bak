@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""
+Run database migration for predictive maintenance sensors
+Version: 5.12.2
+"""
+
+import pymysql
+import sys
+from contextlib import contextmanager
+
+# Database config
+DB_CONFIG = {
+    'host': 'localhost',
+    'user': 'fuel_admin',
+    'password': 'FuelCopilot2025!',
+    'database': 'fuel_copilot',
+    'charset': 'utf8mb4'
+}
+
+# Read SQL from migration file
+with open('migrations/add_predictive_sensors_v5_12_2.sql', 'r') as f:
+    sql = f.read()
+
+# Connect to database
+try:
+    print("Connecting to database...")
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    
+    # Split SQL into individual ALTER statements
+    # Extract only ALTER TABLE statements
+    import re
+    alter_statements = re.findall(r'ALTER TABLE[^;]+;', sql, re.IGNORECASE | re.DOTALL)
+    
+    print(f"\nFound {len(alter_statements)} ALTER TABLE statements...\n")
+    
+    for i, statement in enumerate(alter_statements, 1):
+        try:
+            print(f"[{i}/{len(alter_statements)}] {statement[:100]}...")
+            cursor.execute(statement)
+            conn.commit()
+            print(f"✅ Success\n")
+        except Exception as e:
+            # Column may already exist - that's okay
+            if "Duplicate column name" in str(e):
+                print(f"⚠️ Column already exists (skipping)\n")
+            else:
+                print(f"❌ Error: {e}")
+                raise
+    
+    print("\n" + "="*80)
+    print("Migration completed successfully!")
+    print("="*80)
+    
+    # Run verification query
+    print("\nVerifying new columns...")
+    cursor.execute("""
+        SELECT COLUMN_NAME, COLUMN_TYPE, COLUMN_COMMENT 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = 'fuel_copilot' 
+        AND TABLE_NAME = 'fuel_metrics'
+        AND COLUMN_NAME IN ('trans_temp_f', 'fuel_temp_f', 'intercooler_temp_f', 
+                            'intake_press_kpa', 'retarder_level')
+        ORDER BY COLUMN_NAME
+    """)
+    
+    columns = cursor.fetchall()
+    
+    print(f"\n✅ Found {len(columns)}/5 new columns:\n")
+    for col_name, col_type, col_comment in columns:
+        print(f"   - {col_name} ({col_type})")
+        print(f"     {col_comment}\n")
+    
+    cursor.close()
+    conn.close()
+    
+    sys.exit(0)
+    
+except Exception as e:
+    print(f"\n❌ Migration failed: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)

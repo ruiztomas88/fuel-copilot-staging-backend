@@ -13,6 +13,7 @@ Endpoints:
 
 import logging
 from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -113,36 +114,88 @@ async def get_truck_baseline(
     - Confidence scoring based on data quality
     """
     try:
-        from mpg_baseline_service import MPGBaselineService
-        from database_pool import get_pool
+        import statistics
+        from datetime import datetime
 
-        pool = await get_pool()
-        service = MPGBaselineService(db_pool=pool)
+        from sqlalchemy import text
 
-        baseline = await service.calculate_baseline(truck_id, days=days)
-        return MPGBaselineResponse(**baseline.to_dict())
-
-    except ImportError:
-        # Fallback for testing without database
-        logger.warning(
-            f"Database not available, returning mock baseline for {truck_id}"
+        from database_pool import get_local_db_session
+        from mpg_baseline_service import (
+            calculate_percentile,
+            filter_outliers_iqr,
+            get_confidence_level,
         )
-        return MPGBaselineResponse(
-            truck_id=truck_id,
-            baseline_mpg=5.7,
-            std_dev=0.8,
-            min_mpg=4.5,
-            max_mpg=7.0,
-            sample_count=0,
-            days_analyzed=days,
-            confidence="MOCK",
-            confidence_score=0.0,
-            percentile_25=5.2,
-            percentile_75=6.2,
-            last_calculated=None,
-        )
+
+        with get_local_db_session() as session:
+            # Query MPG data
+            result = session.execute(
+                text(
+                    """
+                SELECT mpg_current
+                FROM fuel_metrics
+                WHERE truck_id = :truck_id
+                  AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                  AND mpg_current BETWEEN 3.0 AND 12.0
+                  AND speed_mph >= 10.0
+                ORDER BY timestamp_utc DESC
+                LIMIT 5000
+            """
+                ),
+                {"truck_id": truck_id, "days": days},
+            )
+
+            rows = result.fetchall()
+            mpg_values = [float(row[0]) for row in rows if row[0] is not None]
+
+            if len(mpg_values) < 10:
+                return MPGBaselineResponse(
+                    truck_id=truck_id,
+                    baseline_mpg=6.0,
+                    std_dev=0.0,
+                    min_mpg=0.0,
+                    max_mpg=0.0,
+                    sample_count=len(mpg_values),
+                    days_analyzed=days,
+                    confidence="INSUFFICIENT",
+                    confidence_score=0.0,
+                    percentile_25=0.0,
+                    percentile_75=0.0,
+                    last_calculated=datetime.utcnow().isoformat(),
+                )
+
+            # Filter outliers
+            filtered = filter_outliers_iqr(mpg_values, multiplier=1.5)
+
+            if len(filtered) < 5:
+                filtered = mpg_values
+
+            # Calculate statistics
+            baseline_mpg = statistics.mean(filtered)
+            std_dev = statistics.stdev(filtered) if len(filtered) > 1 else 0.0
+            min_mpg = min(filtered)
+            max_mpg = max(filtered)
+            p25 = calculate_percentile(filtered, 25)
+            p75 = calculate_percentile(filtered, 75)
+            confidence = get_confidence_level(len(filtered), days)
+            confidence_score = min(len(filtered) / 200.0, 1.0)
+
+            return MPGBaselineResponse(
+                truck_id=truck_id,
+                baseline_mpg=round(baseline_mpg, 2),
+                std_dev=round(std_dev, 2),
+                min_mpg=round(min_mpg, 2),
+                max_mpg=round(max_mpg, 2),
+                sample_count=len(filtered),
+                days_analyzed=days,
+                confidence=confidence,
+                confidence_score=round(confidence_score, 2),
+                percentile_25=round(p25, 2),
+                percentile_75=round(p75, 2),
+                last_calculated=datetime.utcnow().isoformat(),
+            )
+
     except Exception as e:
-        logger.error(f"Error getting baseline for {truck_id}: {e}")
+        logger.error(f"Error getting baseline for {truck_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -162,8 +215,8 @@ async def analyze_deviation(
     - CRITICAL_HIGH: Extremely high, likely sensor error
     """
     try:
-        from mpg_baseline_service import MPGBaselineService
         from database_pool import get_pool
+        from mpg_baseline_service import MPGBaselineService
 
         pool = await get_pool()
         service = MPGBaselineService(db_pool=pool)
@@ -176,7 +229,7 @@ async def analyze_deviation(
         return DeviationResponse(**analysis.to_dict())
 
     except ImportError:
-        from mpg_baseline_service import MPGBaselineService, MPGBaseline
+        from mpg_baseline_service import MPGBaseline, MPGBaselineService
 
         service = MPGBaselineService()
         baseline = MPGBaseline(truck_id=truck_id)
@@ -200,47 +253,113 @@ async def get_fleet_baselines(
     with sufficient data.
     """
     try:
-        from mpg_baseline_service import MPGBaselineService
-        from database_pool import get_pool
+        import statistics
+        from datetime import datetime
 
-        pool = await get_pool()
-        service = MPGBaselineService(db_pool=pool)
+        from sqlalchemy import text
 
-        baselines = await service.calculate_fleet_baselines(days=days)
-
-        # Build response
-        high_conf = sum(
-            1 for b in baselines.values() if b.confidence in ("HIGH", "VERY_HIGH")
-        )
-        low_conf = sum(
-            1 for b in baselines.values() if b.confidence in ("LOW", "INSUFFICIENT")
+        from database_pool import get_local_db_session
+        from mpg_baseline_service import (
+            calculate_percentile,
+            filter_outliers_iqr,
+            get_confidence_level,
         )
 
-        avg_mpg = (
-            sum(b.baseline_mpg for b in baselines.values()) / len(baselines)
-            if baselines
-            else 5.7
-        )
+        with get_local_db_session() as session:
+            # Get all trucks with MPG data
+            result = session.execute(
+                text(
+                    """
+                SELECT DISTINCT truck_id
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                  AND mpg_current BETWEEN 3.0 AND 12.0
+            """
+                ),
+                {"days": days},
+            )
 
-        return FleetBaselineResponse(
-            total_trucks=len(baselines),
-            avg_baseline_mpg=round(avg_mpg, 2),
-            trucks_high_confidence=high_conf,
-            trucks_low_confidence=low_conf,
-            baselines=[b.to_dict() for b in baselines.values()],
-        )
+            truck_ids = [row[0] for row in result.fetchall()]
 
-    except ImportError:
-        logger.warning("Database not available, returning empty fleet summary")
-        return FleetBaselineResponse(
-            total_trucks=0,
-            avg_baseline_mpg=5.7,
-            trucks_high_confidence=0,
-            trucks_low_confidence=0,
-            baselines=[],
-        )
+            baselines_list = []
+            high_conf = 0
+            low_conf = 0
+            total_mpg = 0.0
+
+            for truck_id in truck_ids:
+                # Get MPG data for this truck
+                mpg_result = session.execute(
+                    text(
+                        """
+                    SELECT mpg_current
+                    FROM fuel_metrics
+                    WHERE truck_id = :truck_id
+                      AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL :days DAY)
+                      AND mpg_current BETWEEN 3.0 AND 12.0
+                      AND speed_mph >= 10.0
+                    ORDER BY timestamp_utc DESC
+                    LIMIT 5000
+                """
+                    ),
+                    {"truck_id": truck_id, "days": days},
+                )
+
+                mpg_values = [
+                    float(row[0]) for row in mpg_result.fetchall() if row[0] is not None
+                ]
+
+                if len(mpg_values) < 10:
+                    low_conf += 1
+                    continue
+
+                # Filter outliers
+                filtered = filter_outliers_iqr(mpg_values, multiplier=1.5)
+                if len(filtered) < 5:
+                    filtered = mpg_values
+
+                # Calculate statistics
+                baseline_mpg = statistics.mean(filtered)
+                std_dev = statistics.stdev(filtered) if len(filtered) > 1 else 0.0
+                confidence = get_confidence_level(len(filtered), days)
+
+                if confidence in ("HIGH", "VERY_HIGH"):
+                    high_conf += 1
+                else:
+                    low_conf += 1
+
+                total_mpg += baseline_mpg
+
+                baselines_list.append(
+                    {
+                        "truck_id": truck_id,
+                        "baseline_mpg": round(baseline_mpg, 2),
+                        "std_dev": round(std_dev, 2),
+                        "min_mpg": round(min(filtered), 2),
+                        "max_mpg": round(max(filtered), 2),
+                        "sample_count": len(filtered),
+                        "days_analyzed": days,
+                        "confidence": confidence,
+                        "confidence_score": round(min(len(filtered) / 200.0, 1.0), 2),
+                        "percentile_25": round(calculate_percentile(filtered, 25), 2),
+                        "percentile_75": round(calculate_percentile(filtered, 75), 2),
+                        "last_calculated": datetime.utcnow().isoformat(),
+                    }
+                )
+
+            avg_mpg = (
+                round(total_mpg / len(baselines_list), 2) if baselines_list else 6.0
+            )
+
+            return FleetBaselineResponse(
+                total_trucks=len(baselines_list),
+                avg_baseline_mpg=avg_mpg,
+                trucks_high_confidence=high_conf,
+                trucks_low_confidence=low_conf,
+                baselines=baselines_list,
+            )
+
     except Exception as e:
-        logger.error(f"Error getting fleet baselines: {e}")
+        logger.error(f"Error getting fleet baselines: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -252,8 +371,8 @@ async def compare_to_fleet(truck_id: str, days: int = Query(30, ge=7, le=365)):
     Shows whether the truck performs above, at, or below fleet average.
     """
     try:
-        from mpg_baseline_service import MPGBaselineService, compare_to_fleet_average
         from database_pool import get_pool
+        from mpg_baseline_service import MPGBaselineService, compare_to_fleet_average
 
         pool = await get_pool()
         service = MPGBaselineService(db_pool=pool)
@@ -297,8 +416,8 @@ async def trigger_calculation(request: CalculationRequest):
     Use this to force recalculation after significant data changes.
     """
     try:
-        from mpg_baseline_service import MPGBaselineService
         from database_pool import get_pool
+        from mpg_baseline_service import MPGBaselineService
 
         pool = await get_pool()
         service = MPGBaselineService(db_pool=pool)

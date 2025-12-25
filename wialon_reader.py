@@ -251,12 +251,16 @@ class WialonReader:
         """
         Args:
             config: Wialon database configuration
-            truck_unit_mapping: Dict mapping truck_id -> wialon_unit_id
+            truck_unit_mapping: Dict mapping truck_id (beyondId) -> wialon_unit_id (IGNORED - loaded from units_map)
                 Example: {"NQ6975": 401961901, "RT9127": 401961902, ...}
+                ⚠️  IMPORTANT: We fetch REAL unit IDs from units_map table on init
         """
         self.config = config
         self.truck_unit_mapping = truck_unit_mapping
         self.connection = None
+        # 🔧 DEC23 2025: Load actual unit IDs from units_map (beyondId -> real unit)
+        self._beyondid_to_unit: Dict[str, int] = {}  # Populated on first connection
+        self._unit_to_beyondid: Dict[int, str] = {}  # Reverse mapping
         # 🔧 v3.10.6: Track connection age for preventive reconnection
         self._connection_created_at: Optional[float] = None
         self._max_connection_age_seconds: int = 3600  # Reconnect every hour
@@ -286,7 +290,10 @@ class WialonReader:
         )
 
     def connect(self) -> bool:
-        """Establish connection to Wialon database with automatic retry"""
+        """Establish connection to Wialon database with automatic retry
+
+        🔧 DEC23 2025: Also loads beyondId -> unit mapping from units_map table
+        """
         try:
             self.connection = self._connect_with_retry()
             self._connection_created_at = (
@@ -295,10 +302,58 @@ class WialonReader:
             logger.info(
                 f"✅ Connected to Wialon DB: {self.config.host}:{self.config.port}"
             )
+
+            # 🔧 DEC23 2025: Load beyondId -> unit mapping from units_map
+            self._load_unit_mapping()
+
             return True
         except Exception as e:
             logger.error(f"❌ Failed to connect to Wialon DB after 5 attempts: {e}")
             return False
+
+    def _load_unit_mapping(self):
+        """Load beyondId -> unit mapping from units_map table
+
+        🔧 DEC23 2025: Fixes issue where tanks.yaml unit_id doesn't match actual unit in sensors table
+        """
+        try:
+            with self.connection.cursor() as cursor:
+                # Get beyondId list from truck_unit_mapping keys
+                beyond_ids = list(self.truck_unit_mapping.keys())
+                placeholders = ", ".join(["%s"] * len(beyond_ids))
+
+                query = f"""
+                    SELECT beyondId, unit
+                    FROM units_map
+                    WHERE beyondId IN ({placeholders})
+                """
+                cursor.execute(query, beyond_ids)
+                results = cursor.fetchall()
+
+                # Build mappings
+                self._beyondid_to_unit = {
+                    row["beyondId"]: row["unit"] for row in results
+                }
+                self._unit_to_beyondid = {
+                    row["unit"]: row["beyondId"] for row in results
+                }
+
+                logger.info(
+                    f"✅ Loaded unit mapping for {len(self._beyondid_to_unit)} trucks from units_map"
+                )
+
+                # Log any trucks NOT found in units_map
+                missing = set(beyond_ids) - set(self._beyondid_to_unit.keys())
+                if missing:
+                    logger.warning(
+                        f"⚠️  Trucks not found in units_map: {', '.join(sorted(missing))}"
+                    )
+
+        except Exception as e:
+            logger.error(f"❌ Failed to load unit mapping: {e}")
+            # Fallback to tanks.yaml mapping
+            self._beyondid_to_unit = self.truck_unit_mapping
+            self._unit_to_beyondid = {v: k for k, v in self.truck_unit_mapping.items()}
 
     def ensure_connection(self) -> bool:
         """Ensure connection is alive, reconnect if needed
@@ -380,9 +435,14 @@ class WialonReader:
                 relevant_params = list(self.config.SENSOR_PARAMS.values())
                 params_placeholder = ", ".join(["%s"] * len(relevant_params))
 
-                # Query sensors table - get latest reading for this unit
-                # CHANGED: Filter by 'm' (epoch) instead of measure_datetime to avoid timezone issues
-                # CHANGED: Added IN clause for parameters and increased LIMIT to 2000
+                # Query sensors table - get latest reading for this truck
+                # 🔧 DEC23 2025: Use real unit ID from units_map (loaded on init)
+                # This fixes issue where tanks.yaml unit_id doesn't match actual unit in sensors
+                real_unit_id = self._beyondid_to_unit.get(truck_id)
+                if not real_unit_id:
+                    logger.warning(f"⚠️  {truck_id}: No unit mapping found")
+                    return None
+
                 query = f"""
                     SELECT 
                         p as param_name,
@@ -399,8 +459,8 @@ class WialonReader:
                     LIMIT 2000
                 """
 
-                # Prepare args: unit_id, cutoff_epoch, *relevant_params
-                query_args = [unit_id, cutoff_epoch] + relevant_params
+                # Prepare args: real_unit_id (from units_map), cutoff_epoch, *relevant_params
+                query_args = [real_unit_id, cutoff_epoch] + relevant_params
 
                 cursor.execute(query, query_args)
                 results = cursor.fetchall()
@@ -506,24 +566,27 @@ class WialonReader:
                 if "fuel_lvl" not in sensor_data:
                     try:
                         # Look back 12 hours for fuel level specifically
+                        # 🔧 DEC23 2025: Use real unit ID from mapping
                         deep_cutoff = int(time.time()) - (12 * 3600)
-                        fuel_query = """
-                            SELECT value
-                            FROM sensors
-                            WHERE unit = %s
-                                AND m >= %s
-                                AND p = 'fuel_lvl'
-                            ORDER BY m DESC
-                            LIMIT 1
-                        """
-                        cursor.execute(fuel_query, (unit_id, deep_cutoff))
-                        fuel_result = cursor.fetchone()
+                        real_unit_id = self._beyondid_to_unit.get(truck_id)
+                        if real_unit_id:
+                            fuel_query = """
+                                SELECT value
+                                FROM sensors
+                                WHERE unit = %s
+                                    AND m >= %s
+                                    AND p = 'fuel_lvl'
+                                ORDER BY m DESC
+                                LIMIT 1
+                            """
+                            cursor.execute(fuel_query, (real_unit_id, deep_cutoff))
+                            fuel_result = cursor.fetchone()
 
-                        if fuel_result and fuel_result["value"] is not None:
-                            sensor_data["fuel_lvl"] = fuel_result["value"]
-                            # logger.debug(f"[{unit_id}] ⛽ Found deep history fuel level: {fuel_result['value']}%")
+                            if fuel_result and fuel_result["value"] is not None:
+                                sensor_data["fuel_lvl"] = fuel_result["value"]
+                                # logger.debug(f"[{truck_id}] ⛽ Found deep history fuel level: {fuel_result['value']}%")
                     except Exception as e:
-                        logger.warning(f"[{unit_id}] Failed deep fuel search: {e}")
+                        logger.warning(f"[{truck_id}] Failed deep fuel search: {e}")
 
                 return sensor_data
 
@@ -547,8 +610,13 @@ class WialonReader:
             return []
 
         all_data = []
-        unit_ids = list(self.truck_unit_mapping.values())
-        unit_to_truck = {v: k for k, v in self.truck_unit_mapping.items()}
+        # 🔧 DEC23 2025: Use real unit IDs from units_map (loaded on init)
+        unit_ids = [
+            self._beyondid_to_unit.get(tid) for tid in self.truck_unit_mapping.keys()
+        ]
+        unit_ids = [
+            uid for uid in unit_ids if uid is not None
+        ]  # Filter out None values
 
         if not unit_ids:
             logger.warning("No trucks configured")
@@ -570,8 +638,8 @@ class WialonReader:
                 param_placeholders = ", ".join(["%s"] * len(relevant_params))
 
                 # 🚀 v3.9.5: OPTIMIZED BATCH QUERY with ROW_NUMBER for top-N per truck
-                # This limits data transfer by getting only latest 20 readings per truck per param
-                # Falls back to simple query for MySQL < 8.0
+                # 🔧 DEC23 2025: Back to using unit IDs (much faster than JOIN)
+                # unit IDs now loaded from units_map on init for accuracy
                 try:
                     query = f"""
                         SELECT unit, param_name, value, epoch_time, from_latitude, from_longitude, measure_datetime
@@ -598,6 +666,7 @@ class WialonReader:
                     results = cursor.fetchall()
                 except Exception as e:
                     # Fallback for MySQL < 8.0 (no ROW_NUMBER)
+                    # 🔧 DEC23 2025: Back to using unit IDs (loaded from units_map)
                     if "ROW_NUMBER" in str(e) or "syntax" in str(e).lower():
                         logger.warning("ROW_NUMBER not supported, using fallback query")
                         query = f"""
@@ -636,6 +705,7 @@ class WialonReader:
                 # 🔧 v5.8.3: DEEP SEARCH for fuel_lvl - some trucks send fuel level very infrequently
                 # The main query uses 1-hour cutoff which may miss fuel_lvl data
                 # This secondary query extends to 4 hours specifically for fuel_lvl
+                # 🔧 DEC23 2025: Use unit IDs (loaded from units_map)
                 fuel_cutoff_epoch = int(time.time()) - 14400  # 4 hours
                 try:
                     fuel_query = f"""
@@ -662,8 +732,9 @@ class WialonReader:
                         )
                         if not has_fuel_lvl:
                             unit_data[unit_id].append(row)
+                            truck_id = self._unit_to_beyondid.get(unit_id, unit_id)
                             logger.debug(
-                                f"[{unit_id}] ⛽ Deep fuel_lvl found: {row['value']}% (age={(int(time.time()) - row['epoch_time'])/60:.0f}min)"
+                                f"[{truck_id}] ⛽ Deep fuel_lvl found: {row['value']}% (age={(int(time.time()) - row['epoch_time'])/60:.0f}min)"
                             )
                 except Exception as fuel_e:
                     logger.warning(f"Deep fuel_lvl search failed: {fuel_e}")
@@ -671,6 +742,7 @@ class WialonReader:
                 # 🔧 v5.12.1: DEEP SEARCH for j1939_spn and j1939_fmi (DTC codes)
                 # These sensors update VERY infrequently (only when DTCs change)
                 # Extend search to 48 hours to capture active DTCs
+                # 🔧 DEC23 2025: Use unit IDs (loaded from units_map)
                 dtc_cutoff_epoch = int(time.time()) - 172800  # 48 hours
                 try:
                     dtc_query = f"""
@@ -696,9 +768,10 @@ class WialonReader:
                         )
                         if not has_sensor:
                             unit_data[unit_id].append(row)
+                            truck_id = self._unit_to_beyondid.get(unit_id, unit_id)
                             hours_ago = (int(time.time()) - row["epoch_time"]) / 3600
                             logger.debug(
-                                f"[{unit_id}] 🔍 Deep {param} found: {row['value']} (age={hours_ago:.1f}h)"
+                                f"[{truck_id}] 🔍 Deep {param} found: {row['value']} (age={hours_ago:.1f}h)"
                             )
                 except Exception as dtc_e:
                     logger.warning(f"Deep DTC search failed: {dtc_e}")
@@ -706,8 +779,10 @@ class WialonReader:
                 # Process each truck's data
                 trucks_with_data = set()
                 for unit_id, rows in unit_data.items():
-                    truck_id = unit_to_truck.get(unit_id)
+                    # Convert unit_id to truck_id (beyondId)
+                    truck_id = self._unit_to_beyondid.get(unit_id)
                     if not truck_id:
+                        logger.warning(f"⚠️  Unknown unit {unit_id} - skipping")
                         continue
 
                     if not rows:
@@ -1023,17 +1098,19 @@ if __name__ == "__main__":
             Sorted chronologically (oldest first)
 
         🆕 v5.12.0: Added for multi-refuel detection - processes all gaps
+        🔧 DEC23 2025: Use real unit ID from units_map
         """
         if not self.ensure_connection():
             logger.error("❌ Cannot establish database connection")
             return []
 
-        unit_id = self.truck_unit_mapping.get(truck_id)
-        if not unit_id:
-            logger.error(f"❌ Truck {truck_id} not found in mapping")
-            return []
-
         try:
+            # Get real unit ID from mapping
+            real_unit_id = self._beyondid_to_unit.get(truck_id)
+            if not real_unit_id:
+                logger.error(f"❌ Truck {truck_id} not found in mapping")
+                return []
+
             with self.connection.cursor() as cursor:
                 cutoff_epoch = int(time.time()) - (hours_back * 3600)
                 fuel_param = self.config.SENSOR_PARAMS.get("fuel_lvl", "fuel_lvl")
@@ -1047,7 +1124,7 @@ if __name__ == "__main__":
                     ORDER BY m ASC
                     LIMIT %s
                 """
-                cursor.execute(query, (unit_id, fuel_param, cutoff_epoch, limit))
+                cursor.execute(query, (real_unit_id, fuel_param, cutoff_epoch, limit))
                 results = cursor.fetchall()
 
                 history = []

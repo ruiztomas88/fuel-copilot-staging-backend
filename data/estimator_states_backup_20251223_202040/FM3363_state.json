@@ -1,0 +1,15 @@
+{
+  "truck_id": "FM3363",
+  "initialized": true,
+  "level_liters": 540.8358193271918,
+  "level_pct": 71.43688785721913,
+  "consumption_lph": 0.0,
+  "drift_pct": 3.4368878572191335,
+  "P": 0.06442114185666813,
+  "L": 540.8358193271918,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 68.0,
+  "last_timestamp": "2025-12-24T01:11:14+00:00",
+  "saved_at": "2025-12-24T01:20:33.899780+00:00",
+  "mpg_current": null
+}

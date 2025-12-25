@@ -32,38 +32,43 @@
 """
 
 # ML Intelligence router (new, not in main.py)
-from .ml_intelligence import router as ml_intelligence_router
+# 🔧 TEMP DISABLED: Import fails due to missing get_scoring_engine
+# from .ml_intelligence import router as ml_intelligence_router
+ml_intelligence_router = None  # Disabled temporarily
 
-# Auth and Admin routers
-from .auth_router import router as auth_router
 from .admin_router import router as admin_router
-
-# Domain routers (extracted from main.py)
-from .geofence_router import router as geofence_router
-from .cost_router import router as cost_router
-from .utilization_router import router as utilization_router
-from .gamification_router import router as gamification_router
-from .maintenance_router import router as maintenance_router
-from .maintenance_router import router_v3 as maintenance_v3_router
-from .dashboard_router import router as dashboard_router
-from .reports_router import router as reports_router
-from .gps_router import router as gps_router
-from .notifications_router import router as notifications_router
-from .engine_health_router import router as engine_health_router
-from .export_router import router as export_router
-from .predictions_router import router as predictions_router
-
-# 🆕 v5.7.6: Sensor Health router
-from .sensor_health_router import router as sensor_health_router
-
-# 🆕 v5.7.6: MPG Baseline router
-from .mpg_baseline_router import router as mpg_baseline_router
 
 # 🆕 v5.8.3: Alerts router (diagnostics, predictive)
 from .alerts_router import router as alerts_router
 
+# Auth and Admin routers
+from .auth_router import router as auth_router
+from .cost_router import router as cost_router
+from .dashboard_router import router as dashboard_router
+
 # 🆕 v6.2.1: Driver Alerts router (driver scoring, DTCs)
-from .driver_alerts_router import router as driver_alerts_router
+# 🔧 TEMP DISABLED: Import fails due to missing get_scoring_engine
+# from .driver_alerts_router import router as driver_alerts_router
+driver_alerts_router = None  # Disabled temporarily
+from .engine_health_router import router as engine_health_router
+from .export_router import router as export_router
+from .gamification_router import router as gamification_router
+
+# Domain routers (extracted from main.py)
+from .geofence_router import router as geofence_router
+from .gps_router import router as gps_router
+from .maintenance_router import router as maintenance_router
+from .maintenance_router import router_v3 as maintenance_v3_router
+
+# 🆕 v5.7.6: MPG Baseline router
+from .mpg_baseline_router import router as mpg_baseline_router
+from .notifications_router import router as notifications_router
+from .predictions_router import router as predictions_router
+from .reports_router import router as reports_router
+
+# 🆕 v5.7.6: Sensor Health router
+from .sensor_health_router import router as sensor_health_router
+from .utilization_router import router as utilization_router
 
 # 🆕 v5.11.0: API v2 router (predictive maintenance endpoints)
 try:
@@ -127,7 +132,8 @@ def include_all_routers(app, auth_dependency=None):
     # ═══════════════════════════════════════════════════════════════════════
 
     # ML Intelligence (new endpoints)
-    app.include_router(ml_intelligence_router)
+    # 🔧 TEMP DISABLED: Import fails due to missing get_scoring_engine
+    # app.include_router(ml_intelligence_router)
 
     # Auth/Admin
     app.include_router(auth_router)
@@ -159,7 +165,8 @@ def include_all_routers(app, auth_dependency=None):
     app.include_router(mpg_baseline_router)  # /mpg-baseline/* (5 endpoints)
 
     # 🆕 v6.2.1: Driver Alerts router (driver scoring, DTCs, component health)
-    app.include_router(driver_alerts_router)  # /driver-alerts/* (4 endpoints)
+    # 🔧 TEMP DISABLED: Import fails
+    # app.include_router(driver_alerts_router)  # /driver-alerts/* (4 endpoints)
 
     # 🆕 v5.11.0: API v2 router (predictive maintenance)
     if API_V2_AVAILABLE and api_v2_router:

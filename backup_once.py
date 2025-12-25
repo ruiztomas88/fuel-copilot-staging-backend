@@ -31,7 +31,7 @@ def backup_database():
             "mysqldump",
             "-u",
             "fuel_admin",
-            "-pFuelCopilot2025!",
+            "-p"${MYSQL_PASSWORD}"",
             "fuel_copilot",
             "--single-transaction",
             "--quick",

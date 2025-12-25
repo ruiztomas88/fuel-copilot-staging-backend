@@ -10,6 +10,7 @@ This script diagnoses why trucks show N/A for most sensors by:
 
 Run this to fix sensor mapping issues.
 """
+import os
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -20,7 +21,7 @@ WIALON_DB = {
     "host": "remotemysql.com",
     "port": 3306,
     "user": "hKmaDjYB0j",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "hKmaDjYB0j",
 }
 

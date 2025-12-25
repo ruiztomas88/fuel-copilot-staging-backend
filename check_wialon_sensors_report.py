@@ -10,6 +10,7 @@ Conecta a:
 2. Base de datos Fuel Copilot LOCAL - datos procesados
 """
 
+import os
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -30,7 +31,7 @@ WIALON_DB_CONFIG = {
 LOCAL_DB_CONFIG = {
     "host": "localhost",
     "user": "fuel_admin",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "fuel_copilot",
 }
 

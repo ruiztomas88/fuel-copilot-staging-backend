@@ -4,6 +4,7 @@ Run database migration for predictive maintenance sensors
 Version: 5.12.2
 """
 
+import os
 import pymysql
 import sys
 from contextlib import contextmanager
@@ -12,7 +13,7 @@ from contextlib import contextmanager
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'fuel_admin',
-    'password': 'FuelCopilot2025!',
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     'database': 'fuel_copilot',
     'charset': 'utf8mb4'
 }

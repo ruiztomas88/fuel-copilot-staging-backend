@@ -282,17 +282,18 @@ def get_local_db_config() -> dict:
 
         conn = pymysql.connect(**get_local_db_config())
     """
-    password = os.getenv("MYSQL_PASSWORD")
-    if not password:
-        raise ValueError(
-            "MYSQL_PASSWORD environment variable not set. "
-            "Please set it in .env file or environment."
-        )
+    password = os.getenv("MYSQL_PASSWORD", "")  # Allow empty password for local dev
+    user = os.getenv("MYSQL_USER", "fuel_admin")
+
+    # If no password and user is fuel_admin, use root with no password (local dev)
+    if not password and user == "fuel_admin":
+        logger.info("⚠️ No MYSQL_PASSWORD set, using root user for local development")
+        user = "root"
 
     return {
         "host": os.getenv("MYSQL_HOST", "localhost"),
         "port": int(os.getenv("MYSQL_PORT", "3306")),
-        "user": os.getenv("MYSQL_USER", "fuel_admin"),
+        "user": user,
         "password": password,
         "database": os.getenv("MYSQL_DATABASE", "fuel_copilot"),
         "charset": "utf8mb4",

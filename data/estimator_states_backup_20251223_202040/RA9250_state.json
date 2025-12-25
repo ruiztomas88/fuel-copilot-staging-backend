@@ -1,0 +1,15 @@
+{
+  "truck_id": "RA9250",
+  "initialized": true,
+  "level_liters": 360.371032,
+  "level_pct": 47.6,
+  "consumption_lph": 0.0,
+  "drift_pct": 0.0,
+  "P": 0.11997385511276273,
+  "L": 360.371032,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 47.6,
+  "last_timestamp": "2025-12-24T01:15:32+00:00",
+  "saved_at": "2025-12-24T01:20:33.899492+00:00",
+  "mpg_current": 7.167842967337473
+}

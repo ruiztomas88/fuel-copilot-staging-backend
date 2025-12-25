@@ -15,6 +15,7 @@ Author: Fuel Copilot Team
 Date: December 22, 2025
 """
 
+import os
 import mysql.connector
 from datetime import datetime
 
@@ -22,7 +23,7 @@ from datetime import datetime
 DB_CONFIG = {
     "host": "localhost",
     "user": "fuel_admin",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "fuel_copilot"
 }
 

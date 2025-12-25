@@ -1,6 +1,6 @@
 """Test del método get_truck_latest_record que usa el endpoint"""
 import os
-os.environ['MYSQL_PASSWORD'] = 'FuelCopilot2025!'
+# Password should be set via .env file
 
 from database import db
 

@@ -1,13 +1,14 @@
 """
 Check MPG window completion for moving trucks
 """
+import os
 import pymysql
 from datetime import datetime, timedelta
 
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'fuel_admin',
-    'password': 'FuelCopilot2025!',
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     'database': 'fuel_copilot',
     'charset': 'utf8mb4'
 }

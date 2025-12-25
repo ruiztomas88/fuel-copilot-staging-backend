@@ -3,6 +3,7 @@
 Se ejecuta cada 10 minutos en background, NO requiere cron/task scheduler
 """
 
+import os
 import pymysql
 import time
 import logging
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'fuel_admin',
-    'password': 'FuelCopilot2025!',
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     'database': 'fuel_copilot',
     'charset': 'utf8mb4',
 }

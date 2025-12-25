@@ -3,14 +3,16 @@ Database connection and query utilities for FastAPI backend
 Hybrid MySQL + CSV with automatic fallback
 """
 
-import os
-from pathlib import Path
-from datetime import datetime, timedelta, timezone
-import pandas as pd
-from typing import List, Dict, Optional
 import json
 import logging
-from timezone_utils import utc_now, ensure_utc, calculate_age_minutes, is_stale
+import os
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import pandas as pd
+
+from timezone_utils import calculate_age_minutes, ensure_utc, is_stale, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +36,25 @@ class DatabaseManager:
             try:
                 try:
                     from .database_mysql import (
-                        get_latest_truck_data,
-                        get_truck_history as mysql_get_truck_history,
-                        get_refuel_history as mysql_get_refuel_history,
                         get_fleet_summary as mysql_get_fleet_summary,
+                    )
+                    from .database_mysql import get_latest_truck_data
+                    from .database_mysql import (
+                        get_refuel_history as mysql_get_refuel_history,
+                    )
+                    from .database_mysql import (
+                        get_truck_history as mysql_get_truck_history,
                     )
                 except ImportError:
                     from database_mysql import (
-                        get_latest_truck_data,
-                        get_truck_history as mysql_get_truck_history,
-                        get_refuel_history as mysql_get_refuel_history,
                         get_fleet_summary as mysql_get_fleet_summary,
+                    )
+                    from database_mysql import get_latest_truck_data
+                    from database_mysql import (
+                        get_refuel_history as mysql_get_refuel_history,
+                    )
+                    from database_mysql import (
+                        get_truck_history as mysql_get_truck_history,
                     )
 
                 self.mysql_get_latest = get_latest_truck_data
@@ -342,8 +352,9 @@ class DatabaseManager:
         # Try MySQL batch query first
         if self.mysql_available:
             try:
-                from database_mysql import get_sqlalchemy_engine
                 from sqlalchemy import text
+
+                from database_mysql import get_sqlalchemy_engine
 
                 engine = get_sqlalchemy_engine()
                 placeholders = ",".join([f"'{tid}'" for tid in truck_ids])
@@ -737,6 +748,14 @@ class DatabaseManager:
                             "health_score": 75,  # Default
                             "health_category": "healthy",
                         }
+                    )
+                # 🔍 DEBUG Dec 23: Check sensor_pct presence
+                if trucks:
+                    logger.error(
+                        f"🔍 DEBUG database.py: First truck keys: {list(trucks[0].keys())}"
+                    )
+                    logger.error(
+                        f"🔍 DEBUG database.py: sensor_pct value: {trucks[0].get('sensor_pct')}"
                     )
                 logger.info(f"✅ Retrieved {len(trucks)} truck details from MySQL")
                 return trucks

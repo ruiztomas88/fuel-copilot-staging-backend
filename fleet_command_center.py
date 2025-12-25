@@ -108,20 +108,21 @@ CHANGELOG v1.1.0:
 - Improved pattern detection thresholds (% of fleet vs fixed count)
 """
 
-import logging
-import uuid
-import math
-import threading
 import functools
-import os
-import yaml
-from collections import deque, Counter
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone, timedelta
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Callable, TypeVar
-from pathlib import Path
 import json
+import logging
+import math
+import os
+import threading
+import uuid
+from collections import Counter, deque
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+
+import yaml
 
 # Optional Redis import for trend persistence
 try:
@@ -1173,8 +1174,9 @@ class FleetCommandCenter:
         Falls back gracefully if table doesn't exist or DB is unavailable.
         """
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
 
@@ -1296,8 +1298,9 @@ class FleetCommandCenter:
             True if successful, False otherwise
         """
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
 
@@ -1375,8 +1378,9 @@ class FleetCommandCenter:
             True if successful, False otherwise
         """
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
 
@@ -1455,8 +1459,9 @@ class FleetCommandCenter:
             True if successful, False otherwise
         """
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
 
@@ -1549,8 +1554,9 @@ class FleetCommandCenter:
             True if successful, False otherwise
         """
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
 
@@ -1621,8 +1627,9 @@ class FleetCommandCenter:
             True if successful, False otherwise
         """
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
 
@@ -1674,8 +1681,9 @@ class FleetCommandCenter:
             Dict with algorithm state or None if not found
         """
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
 
@@ -1731,8 +1739,9 @@ class FleetCommandCenter:
             return 0
 
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
 
@@ -3444,7 +3453,7 @@ class FleetCommandCenter:
         - Added trend detection (multiple trucks same issue)
         - Improved pattern detection with percentage thresholds
         - Added severity escalation warnings
-        
+
         v1.8.1 Changes:
         - Return structured dict instead of strings for frontend compatibility
         - Format: {type, title, message, icon}
@@ -3466,19 +3475,23 @@ class FleetCommandCenter:
                 if item.priority == Priority.CRITICAL
             )
             if len(trucks) == 1:
-                insights.append({
-                    "type": "warning",
-                    "title": "Atención Inmediata Requerida",
-                    "message": f"{list(trucks)[0]} requiere atención inmediata - revisar antes de operar",
-                    "icon": "🚨"
-                })
+                insights.append(
+                    {
+                        "type": "warning",
+                        "title": "Atención Inmediata Requerida",
+                        "message": f"{list(trucks)[0]} requiere atención inmediata - revisar antes de operar",
+                        "icon": "🚨",
+                    }
+                )
             else:
-                insights.append({
-                    "type": "warning",
-                    "title": "Múltiples Camiones Críticos",
-                    "message": f"{len(trucks)} camiones requieren atención inmediata",
-                    "icon": "🚨"
-                })
+                insights.append(
+                    {
+                        "type": "warning",
+                        "title": "Múltiples Camiones Críticos",
+                        "message": f"{len(trucks)} camiones requieren atención inmediata",
+                        "icon": "🚨",
+                    }
+                )
 
         # v1.3.0: Cost impact analysis
         # NOTE: cost_if_ignored is a string like "$8,000 - $15,000", not a number
@@ -3510,12 +3523,14 @@ class FleetCommandCenter:
 
             if common[0][1] >= pattern_threshold:
                 pct = (common[0][1] / fleet_size) * 100 if fleet_size > 0 else 0
-                insights.append({
-                    "type": "trend",
-                    "title": "Patrón Detectado en la Flota",
-                    "message": f"{common[0][1]} camiones ({pct:.0f}% de flota) tienen problemas con {common[0][0]}",
-                    "icon": "📊"
-                })
+                insights.append(
+                    {
+                        "type": "trend",
+                        "title": "Patrón Detectado en la Flota",
+                        "message": f"{common[0][1]} camiones ({pct:.0f}% de flota) tienen problemas con {common[0][0]}",
+                        "icon": "📊",
+                    }
+                )
 
         # v1.3.0: Trend detection - issues about to escalate
         near_critical = [
@@ -3527,12 +3542,14 @@ class FleetCommandCenter:
         ]
         if near_critical:
             trucks_escalating = set(item.truck_id for item in near_critical)
-            insights.append({
-                "type": "warning",
-                "title": "Problemas Escalando",
-                "message": f"{len(trucks_escalating)} camión(es) con problemas que escalarán a crítico en ≤3 días",
-                "icon": "⏰"
-            })
+            insights.append(
+                {
+                    "type": "warning",
+                    "title": "Problemas Escalando",
+                    "message": f"{len(trucks_escalating)} camión(es) con problemas que escalarán a crítico en ≤3 días",
+                    "icon": "⏰",
+                }
+            )
 
         # Transmission warnings (expensive!)
         trans_issues = [
@@ -3542,12 +3559,14 @@ class FleetCommandCenter:
             and i.priority in [Priority.CRITICAL, Priority.HIGH]
         ]
         if trans_issues:
-            insights.append({
-                "type": "warning",
-                "title": "Problemas de Transmisión",
-                "message": f"{len(trans_issues)} problema(s) de transmisión detectado(s) - reparación costosa si no se atiende",
-                "icon": "⚠️"
-            })
+            insights.append(
+                {
+                    "type": "warning",
+                    "title": "Problemas de Transmisión",
+                    "message": f"{len(trans_issues)} problema(s) de transmisión detectado(s) - reparación costosa si no se atiende",
+                    "icon": "⚠️",
+                }
+            )
 
         # DEF warnings
         def_issues = [
@@ -3557,21 +3576,25 @@ class FleetCommandCenter:
             and i.priority in [Priority.CRITICAL, Priority.HIGH]
         ]
         if def_issues:
-            insights.append({
-                "type": "warning",
-                "title": "DEF Bajo",
-                "message": f"{len(def_issues)} camión(es) con DEF bajo - derate inminente si no se llena",
-                "icon": "💎"
-            })
+            insights.append(
+                {
+                    "type": "warning",
+                    "title": "DEF Bajo",
+                    "message": f"{len(def_issues)} camión(es) con DEF bajo - derate inminente si no se llena",
+                    "icon": "💎",
+                }
+            )
 
         # Positive insight if fleet is healthy
         if urgency.critical == 0 and urgency.high == 0:
-            insights.append({
-                "type": "success",
-                "title": "Flota Saludable",
-                "message": "No hay problemas críticos o de alta prioridad - la flota está operando bien",
-                "icon": "✅"
-            })
+            insights.append(
+                {
+                    "type": "success",
+                    "title": "Flota Saludable",
+                    "message": "No hay problemas críticos o de alta prioridad - la flota está operando bien",
+                    "icon": "✅",
+                }
+            )
 
         return insights
 
@@ -4037,10 +4060,12 @@ class FleetCommandCenter:
                                 icon = severity_icons.get(severity.lower(), "🔧")
                                 spn = first_code.get("spn", "")
                                 fmi = first_code.get("fmi", "")
-                                
+
                                 # Track highest severity
                                 severity_level = severity_map.get(severity.lower(), 1)
-                                max_severity_level = max(max_severity_level, severity_level)
+                                max_severity_level = max(
+                                    max_severity_level, severity_level
+                                )
 
                                 # Formato: "⛔ CO0681: SPN 5444.1 - Calidad del Fluido DEF"
                                 dtc_details.append(
@@ -4061,7 +4086,9 @@ class FleetCommandCenter:
                 if max_severity_level >= 2:  # critical
                     dtc_priority = Priority.CRITICAL
                     dtc_score = 90
-                elif max_severity_level >= 1 or len(dtc_trucks) >= 3:  # warning or many trucks
+                elif (
+                    max_severity_level >= 1 or len(dtc_trucks) >= 3
+                ):  # warning or many trucks
                     dtc_priority = Priority.HIGH
                     dtc_score = 70
                 else:
@@ -4102,7 +4129,7 @@ class FleetCommandCenter:
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
-                        truck_id=oil_truck['truck_id'],
+                        truck_id=oil_truck["truck_id"],
                         priority=Priority.CRITICAL,
                         priority_score=90,
                         category=IssueCategory.ENGINE,
@@ -4134,7 +4161,7 @@ class FleetCommandCenter:
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
-                        truck_id=def_truck['truck_id'],
+                        truck_id=def_truck["truck_id"],
                         priority=Priority.MEDIUM,
                         priority_score=50,
                         category=IssueCategory.DEF,
@@ -4165,7 +4192,7 @@ class FleetCommandCenter:
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
-                        truck_id=overload_truck['truck_id'],
+                        truck_id=overload_truck["truck_id"],
                         priority=Priority.HIGH,
                         priority_score=70,
                         category=IssueCategory.ENGINE,
@@ -4194,7 +4221,7 @@ class FleetCommandCenter:
                 action_items.append(
                     ActionItem(
                         id=self._generate_action_id(),
-                        truck_id=coolant_truck['truck_id'],
+                        truck_id=coolant_truck["truck_id"],
                         priority=Priority.CRITICAL,
                         priority_score=85,
                         category=IssueCategory.ENGINE,
@@ -4225,8 +4252,9 @@ class FleetCommandCenter:
 
         # 4. Engine Health Alerts (database-stored alerts from real-time monitoring)
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
@@ -4328,8 +4356,9 @@ class FleetCommandCenter:
 
         # 5. DTC Events (real-time DTC codes from wialon_sync)
         try:
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             engine = get_sqlalchemy_engine()
             with engine.connect() as conn:
@@ -4441,8 +4470,9 @@ class FleetCommandCenter:
                 logger.info(f"Real-Time Predictive Engine not available: {ie}")
                 raise  # Re-raise to skip this source
 
-            from database_mysql import get_sqlalchemy_engine
             from sqlalchemy import text
+
+            from database_mysql import get_sqlalchemy_engine
 
             rt_engine = get_realtime_predictive_engine()
             engine = get_sqlalchemy_engine()
@@ -4639,7 +4669,8 @@ class FleetCommandCenter:
                 from config import get_allowed_trucks
 
                 total_trucks = len(get_allowed_trucks())
-            except:
+            except (ImportError, AttributeError, Exception) as e:
+                logger.warning(f"Could not get allowed trucks: {e}")
                 total_trucks = 45  # Fallback to known fleet size
 
         # Update sensor_status.total_trucks if it was 0
@@ -5440,9 +5471,9 @@ async def get_comprehensive_truck_health(
         component_data = {"turbo": {}, "oil": {}, "coolant": {}, "avg_score": 100}
         try:
             from component_health_predictors import (
-                get_turbo_predictor,
-                get_oil_tracker,
                 get_coolant_detector,
+                get_oil_tracker,
+                get_turbo_predictor,
             )
 
             turbo = get_turbo_predictor().predict(truck_id)

@@ -10,6 +10,7 @@ intake_pressure, actual_retarder) are:
 3. Used in FAILURE_CORRELATIONS for predictive maintenance
 """
 
+import os
 import sys
 import pymysql
 from typing import Dict, List
@@ -19,7 +20,7 @@ from datetime import datetime, timedelta
 DB_CONFIG = {
     'host': 'localhost',
     'user': 'fuel_admin',
-    'password': 'FuelCopilot2025!',
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     'database': 'fuel_copilot',
     'charset': 'utf8mb4'
 }

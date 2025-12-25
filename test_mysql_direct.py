@@ -4,7 +4,7 @@ import sys
 
 # Configurar variables
 os.environ['MYSQL_USER'] = 'fuel_admin'
-os.environ['MYSQL_PASSWORD'] = 'FuelCopilot2025!'
+# Password should be set via .env file
 
 print("=" * 60)
 print("TEST DE CONEXIÓN MYSQL DIRECTO")

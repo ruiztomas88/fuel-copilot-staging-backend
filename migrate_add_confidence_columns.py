@@ -7,6 +7,7 @@ Version: 1.0.0
 Date: December 23, 2025
 """
 
+import os
 import logging
 from datetime import datetime
 
@@ -31,7 +32,7 @@ def migrate_database():
         conn = MySQLdb.connect(
             host="localhost",
             user="fuel_admin",
-            passwd="FuelCopilot2025!",
+            passwd=os.getenv("MYSQL_PASSWORD", ""),
             db="fuel_copilot",
         )
         cursor = conn.cursor()

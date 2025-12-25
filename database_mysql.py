@@ -609,19 +609,27 @@ def get_fleet_summary() -> Dict[str, Any]:
                 # 🆕 Calculate health score from active DTCs
                 # Query for active DTCs count
                 # 🔧 FIX Dec 20 2025: Tabla dtc_events tiene columna 'status', usar status = 'ACTIVE'
-                dtc_query = text(
-                    """
-                    SELECT COUNT(DISTINCT CONCAT(truck_id, '-', dtc_code))
-                    FROM dtc_events
-                    WHERE status = 'ACTIVE'
-                      AND truck_id IN ({})
-                """.format(
-                        ",".join(f"'{t}'" for t in allowed_trucks)
+                # 🔧 FIX Dec 23 2025: Catch table missing error gracefully
+                active_dtc_count = 0
+                try:
+                    dtc_query = text(
+                        """
+                        SELECT COUNT(DISTINCT CONCAT(truck_id, '-', dtc_code))
+                        FROM dtc_events
+                        WHERE status = 'ACTIVE'
+                          AND truck_id IN ({})
+                    """.format(
+                            ",".join(f"'{t}'" for t in allowed_trucks)
+                        )
                     )
-                )
 
-                dtc_result = conn.execute(dtc_query).fetchone()
-                active_dtc_count = dtc_result[0] if dtc_result else 0
+                    dtc_result = conn.execute(dtc_query).fetchone()
+                    active_dtc_count = dtc_result[0] if dtc_result else 0
+                except Exception as dtc_error:
+                    logger.warning(
+                        f"DTC query failed (table may not exist): {dtc_error}"
+                    )
+                    active_dtc_count = 0
 
                 # Apply health score algorithm (from 190h refactoring)
                 health_score = calculate_fleet_health_score(
@@ -629,68 +637,66 @@ def get_fleet_summary() -> Dict[str, Any]:
                 )
 
                 # 🆕 v6.5.0: Get truck_details with all sensor data (fixes N/A display)
-                # 🐛 FIX: Use truck_sensors_cache (not truck_sensors)
-                # 🔧 FIX Dec 22 2025: JOIN with latest fuel_metrics record per truck
+                # � STAGING FIX Dec 23 2025: Read directly from fuel_metrics (truck_sensors_cache doesn't match prod structure)
                 truck_details = []
                 sensor_query = text(
                     """
                     SELECT 
-                        s.truck_id,
-                        s.timestamp,
-                        s.data_age_seconds,
-                        s.oil_pressure_psi,
-                        s.oil_temp_f,
-                        s.oil_level_pct,
-                        s.def_level_pct,
-                        s.engine_load_pct,
-                        s.rpm,
-                        s.coolant_temp_f,
-                        s.coolant_level_pct,
-                        s.gear,
-                        s.brake_active,
-                        s.intake_pressure_bar,
-                        s.intake_temp_f,
-                        s.intercooler_temp_f,
-                        s.fuel_temp_f,
-                        s.fuel_level_pct,
-                        s.fuel_rate_gph,
-                        s.ambient_temp_f,
-                        s.barometric_pressure_inhg,
-                        s.voltage,
-                        s.backup_voltage,
-                        s.engine_hours,
-                        s.idle_hours,
-                        s.pto_hours,
-                        s.total_idle_fuel_gal,
-                        s.total_fuel_used_gal,
-                        s.dtc_count,
-                        s.dtc_code,
-                        s.latitude,
-                        s.longitude,
-                        s.speed_mph,
-                        s.altitude_ft,
-                        s.odometer_mi,
-                        fm.estimated_pct,
-                        fm.sensor_pct,
-                        fm.drift_pct,
-                        fm.mpg_current,
-                        fm.idle_gph,
-                        fm.truck_status
-                    FROM truck_sensors_cache s
-                    LEFT JOIN (
+                        truck_id,
+                        timestamp_utc,
+                        TIMESTAMPDIFF(SECOND, timestamp_utc, NOW()) as data_age_seconds,
+                        oil_pressure_psi,
+                        oil_temp_f,
+                        NULL as oil_level_pct,
+                        def_level_pct,
+                        engine_load_pct,
+                        rpm,
+                        coolant_temp_f,
+                        NULL as coolant_level_pct,
+                        NULL as gear,
+                        NULL as brake_active,
+                        intake_press_kpa,
+                        intake_air_temp_f,
+                        intercooler_temp_f,
+                        fuel_temp_f,
+                        sensor_pct,
+                        consumption_gph,
+                        ambient_temp_f,
+                        NULL as barometric_pressure_inhg,
+                        battery_voltage,
+                        NULL as backup_voltage,
+                        engine_hours,
+                        idle_hours_ecu,
+                        NULL as pto_hours,
+                        NULL as total_idle_fuel_gal,
+                        NULL as total_fuel_used_gal,
+                        dtc,
+                        dtc_code,
+                        latitude,
+                        longitude,
+                        speed_mph,
+                        altitude_ft,
+                        odometer_mi,
+                        estimated_pct,
+                        sensor_pct as sensor_fuel_pct,
+                        drift_pct,
+                        mpg_current,
+                        idle_gph,
+                        truck_status
+                    FROM (
                         SELECT fm1.* 
                         FROM fuel_metrics fm1
                         INNER JOIN (
                             SELECT truck_id, MAX(timestamp_utc) as max_time
                             FROM fuel_metrics
                             WHERE timestamp_utc > NOW() - INTERVAL 2 HOUR
+                              AND truck_id IN ({})
                             GROUP BY truck_id
-                        ) fm2 ON fm1.truck_id COLLATE utf8mb4_unicode_ci = fm2.truck_id COLLATE utf8mb4_unicode_ci
+                        ) fm2 ON fm1.truck_id = fm2.truck_id 
                             AND fm1.timestamp_utc = fm2.max_time
-                    ) fm ON s.truck_id COLLATE utf8mb4_unicode_ci = fm.truck_id COLLATE utf8mb4_unicode_ci
-                    WHERE s.truck_id IN ({})
-                      AND s.data_age_seconds < 300
-                    ORDER BY s.truck_id
+                    ) latest
+                    WHERE TIMESTAMPDIFF(SECOND, timestamp_utc, NOW()) < 300
+                    ORDER BY truck_id
                 """.format(
                         ",".join(f"'{t}'" for t in allowed_trucks)
                     )
@@ -1107,6 +1113,12 @@ def get_kpi_summary(days_back: int = 1) -> Dict[str, Any]:
                 moving_fuel_gal * fleet_avg_mpg if fleet_avg_mpg > 0 else 0
             )
 
+            # Calculate hours for utilization metrics
+            # Each record = ~1 minute, so hours = records / 60
+            total_moving_hours = round(moving_count * record_interval_hours, 1)
+            total_idle_hours = round(idle_count * record_interval_hours, 1)
+            total_active_hours = total_moving_hours  # Active = Moving for now
+
             kpi_data = {
                 "total_fuel_consumed_gal": round(total_fuel_gal, 2),
                 "total_fuel_cost_usd": round(total_fuel_gal * fuel_price_per_gal, 2),
@@ -1115,6 +1127,10 @@ def get_kpi_summary(days_back: int = 1) -> Dict[str, Any]:
                 "avg_fuel_price_per_gal": fuel_price_per_gal,
                 "total_distance_mi": round(total_distance_mi, 2),
                 "fleet_avg_mpg": round(fleet_avg_mpg, 2),
+                # Hours for utilization dashboard
+                "total_moving_hours": total_moving_hours,
+                "total_idle_hours": total_idle_hours,
+                "total_active_hours": total_active_hours,
                 # Additional context
                 "period_days": days_back,
                 "truck_count": truck_count,
@@ -1142,6 +1158,9 @@ def _empty_kpi_response(fuel_price: float) -> Dict[str, Any]:
         "avg_fuel_price_per_gal": fuel_price,
         "total_distance_mi": 0,
         "fleet_avg_mpg": 0,
+        "total_moving_hours": 0,
+        "total_idle_hours": 0,
+        "total_active_hours": 0,
         "period_days": 0,
         "truck_count": 0,
         "total_records": 0,
@@ -2161,11 +2180,11 @@ def get_enhanced_kpis(days_back: int = 1) -> Dict[str, Any]:
             # odom_delta_mi is often NULL/0 due to sensor issues
             odom_miles = float(result[7] or 0)
 
-            # If no odometer data, estimate miles from: miles = gallons × MPG
+            # If no odometer data, estimate miles from: miles = gallons ÷ MPG (NOT ×!)
             if odom_miles < 1 and avg_mpg > 0 and moving_gallons > 0:
-                total_miles = moving_gallons * avg_mpg
+                total_miles = moving_gallons / avg_mpg
                 logger.info(
-                    f"📏 Estimated miles from fuel: {moving_gallons:.1f} gal × {avg_mpg:.1f} MPG = {total_miles:.1f} mi"
+                    f"📏 Estimated miles from fuel: {moving_gallons:.1f} gal ÷ {avg_mpg:.1f} MPG = {total_miles:.1f} mi"
                 )
             else:
                 total_miles = odom_miles
@@ -2699,11 +2718,24 @@ def get_enhanced_loss_analysis(days_back: int = 1) -> Dict[str, Any]:
 
                 # 🔧 v3.15.3: Calculate total_miles from odometer OR from fuel/MPG
                 # odom_delta_mi is often NULL/0 due to sensor issues
+                # FIX: miles = gallons / MPG (not gallons × MPG which gives absurd numbers)
                 moving_gallons = moving_consumption_sum * record_interval
-                if odom_miles < 1 and avg_mpg > 0 and moving_gallons > 0:
-                    total_miles = moving_gallons * avg_mpg
+
+                # 🚨 SANITY CHECK: Odometer values > 5000 miles in 2 days are sensor corruption
+                # Reject unreasonable odometer values and fall back to fuel-based estimation
+                max_reasonable_miles = days_back * 1000  # ~500 mi/day max is realistic
+                if odom_miles > max_reasonable_miles:
                     logger.debug(
-                        f"📏 [{truck_id}] Estimated miles: {moving_gallons:.1f} gal × {avg_mpg:.1f} MPG = {total_miles:.1f} mi"
+                        f"🔨 [{truck_id}] Odometer delta={odom_miles:.0f} mi exceeds {max_reasonable_miles}, treating as sensor error"
+                    )
+                    odom_miles = 0  # Force estimation from fuel
+
+                if odom_miles < 1 and avg_mpg > 0 and moving_gallons > 0:
+                    total_miles = (
+                        moving_gallons / avg_mpg
+                    )  # ← FIX: Division not multiplication!
+                    logger.debug(
+                        f"📏 [{truck_id}] Estimated miles: {moving_gallons:.1f} gal ÷ {avg_mpg:.1f} MPG = {total_miles:.1f} mi"
                     )
                 else:
                     total_miles = odom_miles

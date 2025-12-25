@@ -2,13 +2,14 @@
 """
 Validar columnas de la tabla trips en la base de datos LOCAL (fuel_copilot)
 """
+import os
 import pymysql
 
 LOCAL_CONFIG = {
     "host": "localhost",
     "port": 3306,
     "user": "fuel_admin",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "fuel_copilot",
 }
 

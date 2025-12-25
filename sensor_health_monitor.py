@@ -10,7 +10,7 @@ Date: December 23, 2025
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -264,11 +264,12 @@ class SensorHealthMonitor:
             )
 
         # Limpiar issues antiguos (>7 días)
-        cutoff = datetime.now() - timedelta(days=7)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         self.sensor_issues[sensor_key] = [
             issue
             for issue in self.sensor_issues[sensor_key]
-            if datetime.fromisoformat(issue.timestamp) >= cutoff
+            if datetime.fromisoformat(issue.timestamp).replace(tzinfo=timezone.utc)
+            >= cutoff
         ]
 
         # Persistir
@@ -310,9 +311,12 @@ class SensorHealthMonitor:
             )
 
         # Calcular uptime (últimas 24 horas)
-        cutoff_24h = datetime.now() - timedelta(hours=24)
+        cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
         recent_readings = [
-            r for r in history if datetime.fromisoformat(r["timestamp"]) >= cutoff_24h
+            r
+            for r in history
+            if datetime.fromisoformat(r["timestamp"]).replace(tzinfo=timezone.utc)
+            >= cutoff_24h
         ]
 
         if recent_readings:
@@ -324,9 +328,12 @@ class SensorHealthMonitor:
             uptime_pct = 0.0
 
         # Contar issues
-        cutoff_7d = datetime.now() - timedelta(days=7)
+        cutoff_7d = datetime.now(timezone.utc) - timedelta(days=7)
         issues_24h = sum(
-            1 for i in issues if datetime.fromisoformat(i.timestamp) >= cutoff_24h
+            1
+            for i in issues
+            if datetime.fromisoformat(i.timestamp).replace(tzinfo=timezone.utc)
+            >= cutoff_24h
         )
         issues_7d = len(issues)
 

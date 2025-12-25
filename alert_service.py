@@ -78,6 +78,9 @@ class AlertType(Enum):
     MAINTENANCE_PREDICTION = (
         "maintenance_prediction"  # 🆕 v5.7.9: Days-to-failure alert
     )
+    MPG_UNDERPERFORMANCE = (
+        "mpg_underperformance"  # 🆕 DEC 24 2025: MPG below truck baseline
+    )
 
 
 @dataclass
@@ -1636,6 +1639,43 @@ def send_maintenance_prediction_alert(
     return get_alert_manager().alert_maintenance_prediction(
         truck_id, sensor, current_value, threshold, days_to_failure, urgency, unit
     )
+
+
+def send_mpg_underperformance_alert(
+    truck_id: str,
+    current_mpg: float,
+    expected_mpg: float,
+    deviation_pct: float,
+    truck_info: str = None,
+) -> bool:
+    """🆕 DEC 24 2025: Alert when truck MPG is significantly below its baseline"""
+    manager = get_alert_manager()
+
+    priority = AlertPriority.CRITICAL if deviation_pct < -25 else AlertPriority.HIGH
+
+    message = (
+        f"⚠️ {truck_id} MPG underperformance: {current_mpg:.1f} MPG "
+        f"(expected {expected_mpg:.1f}, {deviation_pct:+.1f}%)"
+    )
+
+    if truck_info:
+        message += f" - {truck_info}"
+
+    alert = Alert(
+        alert_type=AlertType.MPG_UNDERPERFORMANCE,
+        priority=priority,
+        truck_id=truck_id,
+        message=message,
+        details={
+            "current_mpg": current_mpg,
+            "expected_mpg": expected_mpg,
+            "deviation_pct": deviation_pct,
+            "truck_info": truck_info,
+        },
+    )
+
+    # Send to configured channels
+    return manager.send_alert(alert, channels=["email"])  # SMS can be too many alerts
 
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+{
+  "truck_id": "GS5030",
+  "initialized": true,
+  "level_liters": 441.8005743476434,
+  "level_pct": 58.35570973126338,
+  "consumption_lph": 0.0,
+  "drift_pct": -2.8442902687366214,
+  "P": 0.0556457484520137,
+  "L": 441.8005743476434,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 61.2,
+  "last_timestamp": "2025-12-24T01:09:58+00:00",
+  "saved_at": "2025-12-24T01:20:33.900102+00:00",
+  "mpg_current": null
+}

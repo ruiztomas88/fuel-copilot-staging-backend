@@ -24,18 +24,19 @@ Date: December 2025
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 
 # 🆕 v5.4.0: Import GPS and Voltage quality modules
 try:
     from gps_quality import (
         AdaptiveQLManager,
-        calculate_adjusted_Q_L,
         analyze_gps_quality,
+        calculate_adjusted_Q_L,
     )
 
     GPS_QUALITY_AVAILABLE = True
@@ -43,7 +44,7 @@ except ImportError:
     GPS_QUALITY_AVAILABLE = False
 
 try:
-    from voltage_monitor import get_voltage_quality_factor, analyze_voltage
+    from voltage_monitor import analyze_voltage, get_voltage_quality_factor
 
     VOLTAGE_MONITOR_AVAILABLE = True
 except ImportError:
@@ -96,6 +97,7 @@ def calculate_adaptive_Q_r(truck_status: str, consumption_lph: float = 0.0) -> f
         Recommended Q_r (process noise) value
     """
     # 🔧 v5.8.5: More conservative values per audit
+    # 🔧 DEC 23: Further reduced MOVING Q_r to reduce over-estimation
     # PARKED: 0.005 (was 0.01) - fuel should NOT change
     # IDLE: 0.02 (was 0.05) - very predictable ~1-2 GPH
     if truck_status == "PARKED":
@@ -107,8 +109,8 @@ def calculate_adaptive_Q_r(truck_status: str, consumption_lph: float = 0.0) -> f
         return 0.02 + (consumption_lph / 100) * 0.01
     else:  # MOVING
         # Base + proportional to consumption rate
-        # Higher consumption = more uncertainty
-        return 0.05 + (consumption_lph / 50) * 0.1
+        # 🔧 DEC 23: Reduced base from 0.05 to 0.03, reduced multiplier
+        return 0.03 + (consumption_lph / 50) * 0.05
 
 
 def get_kalman_confidence(P: float) -> Dict:
@@ -162,12 +164,13 @@ class EstimatorConfig:
     """Configuration for FuelEstimator"""
 
     # Kalman parameters
-    Q_r: float = 0.1  # Process noise (model)
-    Q_L_moving: float = 4.0  # Measurement noise when moving
+    # 🔧 DEC 23: Reduced defaults to match KALMAN_CONFIG adjustments
+    Q_r: float = 0.05  # Process noise (model) - reduced from 0.1
+    Q_L_moving: float = 2.5  # Measurement noise when moving - reduced from 4.0
     Q_L_static: float = 1.0  # Measurement noise when static
 
     # Drift thresholds
-    max_drift_pct: float = 7.5
+    max_drift_pct: float = 5.0  # Reduced from 7.5 for earlier warnings
     emergency_drift_threshold: float = 30.0
     emergency_gap_hours: float = 2.0
     auto_resync_threshold: float = 15.0
@@ -659,7 +662,26 @@ class FuelEstimator:
             self.ecu_consumption_available = False
             return None
 
-        fuel_delta_gal = total_fuel_used - self.last_total_fuel_used
+        # 🔧 CRITICAL FIX DEC 25 2025: ECU sensors report in LITERS, not GALLONS
+        # If total_fuel_used > 300,000, it's definitely in liters (lifetime counter)
+        # Normal truck: ~50,000-200,000 gal lifetime vs 180,000-750,000 L
+        LITERS_PER_GALLON = 3.78541
+
+        # Detect units and convert to gallons if needed
+        if total_fuel_used > 300000 or self.last_total_fuel_used > 300000:
+            # Sensor is in LITERS - convert to GALLONS
+            total_fuel_gal = total_fuel_used / LITERS_PER_GALLON
+            last_fuel_gal = self.last_total_fuel_used / LITERS_PER_GALLON
+            logger.debug(
+                f"[{self.truck_id}] ECU sensor in LITERS detected "
+                f"(total={total_fuel_used:.0f}L → {total_fuel_gal:.0f}gal)"
+            )
+        else:
+            # Sensor already in GALLONS
+            total_fuel_gal = total_fuel_used
+            last_fuel_gal = self.last_total_fuel_used
+
+        fuel_delta_gal = total_fuel_gal - last_fuel_gal
 
         if fuel_delta_gal < 0:
             logger.warning(f"[{self.truck_id}] ECU counter reset detected")

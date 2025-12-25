@@ -11,6 +11,7 @@ Populates fuel_metrics table for backend analytics
 - Uses tanks.yaml for accurate tank capacities
 """
 
+import os
 import time
 import pymysql
 import yaml
@@ -32,7 +33,7 @@ LOCAL_DB_CONFIG = {
     "host": "localhost",
     "port": 3306,
     "user": "fuel_admin",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "fuel_copilot",
     "autocommit": True,
 }

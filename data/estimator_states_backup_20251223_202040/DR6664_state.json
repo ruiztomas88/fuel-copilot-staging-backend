@@ -1,0 +1,15 @@
+{
+  "truck_id": "DR6664",
+  "initialized": true,
+  "level_liters": 207.68118536912007,
+  "level_pct": 27.43179541570399,
+  "consumption_lph": 0.0,
+  "drift_pct": -0.5682045842960086,
+  "P": 0.11637936149242092,
+  "L": 207.68118536912007,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 28.0,
+  "last_timestamp": "2025-12-24T01:11:55+00:00",
+  "saved_at": "2025-12-24T01:20:33.899682+00:00",
+  "mpg_current": null
+}

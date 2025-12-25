@@ -89,7 +89,7 @@ def analyze_ra9250():
         host="localhost",
         port=3306,
         user="fuel_admin",
-        password="FuelCopilot2025!",
+        password=os.getenv("MYSQL_PASSWORD", ""),
         database="fuel_copilot",
         charset="utf8mb4",
     )

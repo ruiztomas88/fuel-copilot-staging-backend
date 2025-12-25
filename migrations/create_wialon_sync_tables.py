@@ -19,7 +19,7 @@ MYSQL_CONFIG = {
     "host": "localhost",
     "port": 3306,
     "user": os.getenv("MYSQL_USER", "fuel_admin"),
-    "password": os.getenv("MYSQL_PASSWORD", "FuelCopilot2025!"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "fuel_copilot",
 }
 

@@ -1,0 +1,15 @@
+{
+  "truck_id": "JB6858",
+  "initialized": true,
+  "level_liters": 115.33006966432615,
+  "level_pct": 15.233497780204278,
+  "consumption_lph": 0.0,
+  "drift_pct": 0.03349778020427863,
+  "P": 1.7624371038918438,
+  "L": 115.33006966432615,
+  "P_L": 20.0,
+  "last_fuel_lvl_pct": 15.2,
+  "last_timestamp": "2025-12-22T16:14:46+00:00",
+  "saved_at": "2025-12-24T01:20:33.899140+00:00",
+  "mpg_current": null
+}

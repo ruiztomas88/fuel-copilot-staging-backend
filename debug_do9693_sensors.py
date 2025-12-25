@@ -8,6 +8,7 @@ This will check:
 2. Data in Wialon sensors table (raw data)
 3. What wialon_sync is writing
 """
+import os
 from datetime import datetime, timedelta
 
 import pymysql
@@ -17,7 +18,7 @@ LOCAL_DB = {
     "host": "localhost",
     "port": 3306,
     "user": "fuel_admin",
-    "password": "FuelCopilot2025!",
+    "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": "fuel_copilot",
 }
 

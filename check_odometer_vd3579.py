@@ -75,7 +75,8 @@ for param in params_list:
             # Highlight likely odometer (> 10000)
             if value > 10000:
                 print(f"  ⭐ {param:30s} = {value:15.1f} (age: {age_min:4.0f}min)")
-        except:
+        except (TypeError, ValueError, KeyError) as e:
+            # Skip parameters with invalid data
             pass
 
 print("\n📋 ALL PARAMETERS WITH CURRENT VALUES:")
