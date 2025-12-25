@@ -4728,6 +4728,140 @@ async def get_fleet_specs_summary():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# 🆕 API v2: Command Center (Repository-Service-Orchestrator Architecture)
+# Implements clean architecture from commits 190h + 245h
+# ============================================================================
+
+@app.get("/api/v2/command-center", tags=["Fleet Command Center"])
+async def get_command_center():
+    """
+    🆕 v2 Command Center - Repository-Service-Orchestrator Architecture
+    
+    Returns comprehensive fleet data using clean architecture pattern:
+    - Repositories: Data access layer
+    - Services: Business logic layer  
+    - Orchestrator: Coordination layer
+    
+    This endpoint provides:
+    - Fleet summary (active/offline/moving/idling trucks)
+    - Truck details with latest metrics
+    - Active alerts (sensors, DEF, DTCs)
+    - Health metrics
+    """
+    try:
+        from src.config_helper import get_db_config
+        from src.repositories.truck_repository import TruckRepository
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.def_repository import DEFRepository
+        from src.repositories.dtc_repository import DTCRepository
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
+        
+        # Create repositories
+        db_config = get_db_config()
+        truck_repo = TruckRepository(db_config)
+        sensor_repo = SensorRepository(db_config)
+        def_repo = DEFRepository(db_config)
+        dtc_repo = DTCRepository(db_config)
+        
+        # Create orchestrator
+        orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
+        
+        # Get command center data
+        data = orchestrator.get_command_center_data()
+        
+        return JSONResponse(content=data)
+        
+    except Exception as e:
+        logger.error(f"❌ Error in /api/v2/command-center: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v2/truck/{truck_id}/detail", tags=["Fleet Command Center"])
+async def get_truck_detail(truck_id: str):
+    """
+    🆕 v2 Truck Detail - Get comprehensive truck information
+    
+    Returns detailed information for a specific truck including:
+    - Basic truck info (status, fuel, speed, MPG)
+    - Sensor readings (coolant, oil, battery, etc.)
+    - Active alerts
+    - DEF level
+    - Active DTCs
+    """
+    try:
+        from src.config_helper import get_db_config
+        from src.repositories.truck_repository import TruckRepository
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.def_repository import DEFRepository
+        from src.repositories.dtc_repository import DTCRepository
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
+        
+        # Create repositories
+        db_config = get_db_config()
+        truck_repo = TruckRepository(db_config)
+        sensor_repo = SensorRepository(db_config)
+        def_repo = DEFRepository(db_config)
+        dtc_repo = DTCRepository(db_config)
+        
+        # Create orchestrator
+        orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
+        
+        # Get truck detail
+        detail = orchestrator.get_truck_detail(truck_id)
+        
+        if 'error' in detail:
+            raise HTTPException(status_code=404, detail=detail['error'])
+        
+        return JSONResponse(content=detail)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error getting truck detail for {truck_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v2/fleet/health", tags=["Fleet Command Center"])
+async def get_fleet_health():
+    """
+    🆕 v2 Fleet Health Overview
+    
+    Returns fleet-wide health metrics:
+    - Total trucks
+    - Trucks with sensor issues
+    - Trucks with low DEF
+    - Trucks with active DTCs
+    - Overall health score (0-100)
+    """
+    try:
+        from src.config_helper import get_db_config
+        from src.repositories.truck_repository import TruckRepository
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.def_repository import DEFRepository
+        from src.repositories.dtc_repository import DTCRepository
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
+        
+        # Create repositories
+        db_config = get_db_config()
+        truck_repo = TruckRepository(db_config)
+        sensor_repo = SensorRepository(db_config)
+        def_repo = DEFRepository(db_config)
+        dtc_repo = DTCRepository(db_config)
+        
+        # Create orchestrator
+        orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
+        
+        # Get fleet health
+        health = orchestrator.get_fleet_health_overview()
+        
+        return JSONResponse(content=health)
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting fleet health: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # CATCH-ALL ROUTE - Must be at the END of file after all API routes
 # ============================================================================
 @app.api_route("/{full_path:path}", methods=["GET"], include_in_schema=False)
