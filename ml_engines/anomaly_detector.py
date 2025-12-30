@@ -1,679 +1,489 @@
 """
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║                    ENGINE ANOMALY DETECTOR                                     ║
-║               Isolation Forest for Predictive Maintenance                      ║
-╠═══════════════════════════════════════════════════════════════════════════════╣
-║  Uses machine learning to detect engine anomalies BEFORE failures occur.       ║
-║  No labels required - learns "normal" patterns and flags deviations.           ║
-║                                                                                ║
-║  Features extracted from existing sensors:                                     ║
-║  - oil_pressure_psi (normalized by RPM)                                        ║
-║  - coolant_temp_f / oil_temp_f ratio                                          ║
-║  - consumption patterns                                                        ║
-║  - idle behavior                                                               ║
-║  - pressure stability                                                          ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-
-Author: Fuel Copilot ML Team
-Version: 1.0.0
-Date: December 2025
+Anomaly Detection Engine using Isolation Forest
+Detects fuel theft, sensor malfunctions, and unusual consumption patterns
+Part of ML/AI Roadmap - Feature #3
 """
 
 import logging
+import os
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
-import pandas as pd
+import pymysql
+from pymysql.cursors import DictCursor
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any
-import pickle
-import hashlib
-import os
-import time
-from pathlib import Path
-import threading
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Directory for cached models
-MODEL_CACHE_DIR = Path("/tmp/fuel_copilot_models")
-MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-# 🆕 v5.5.5: Model cache TTL (7 days)
-MODEL_CACHE_TTL_SECONDS = 7 * 24 * 3600
+@dataclass
+class AnomalyDetection:
+    """Represents a detected anomaly"""
 
-# 🆕 v5.5.5: Lock for thread-safe model operations
-_model_locks: Dict[str, threading.Lock] = {}
-_model_locks_lock = threading.Lock()
+    truck_id: str
+    timestamp: datetime
+    anomaly_type: str  # 'fuel_theft', 'sensor_malfunction', 'unusual_consumption'
+    severity: str  # 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+    anomaly_score: float  # -1 to 1, lower is more anomalous
+    features: Dict[str, float]  # Feature values that triggered detection
+    description: str
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary"""
+        return {
+            "truck_id": self.truck_id,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "anomaly_type": self.anomaly_type,
+            "severity": self.severity,
+            "anomaly_score": round(self.anomaly_score, 3),
+            "features": {k: round(v, 2) for k, v in self.features.items()},
+            "description": self.description,
+        }
 
 
-def _get_model_lock(truck_id: str) -> threading.Lock:
-    """Get or create a lock for a specific truck's model."""
-    with _model_locks_lock:
-        if truck_id not in _model_locks:
-            _model_locks[truck_id] = threading.Lock()
-        return _model_locks[truck_id]
-
-
-def _cleanup_old_models():
+class AnomalyDetector:
     """
-    🆕 v5.5.5: Cleanup models older than MODEL_CACHE_TTL_SECONDS.
-    Called periodically during model save operations.
-    """
-    try:
-        now = time.time()
-        cleaned = 0
-        for model_file in MODEL_CACHE_DIR.glob("anomaly_*.pkl"):
-            try:
-                if model_file.stat().st_mtime < now - MODEL_CACHE_TTL_SECONDS:
-                    model_file.unlink()
-                    cleaned += 1
-            except Exception:
-                pass
-        if cleaned > 0:
-            logger.info(f"🧹 Cleaned up {cleaned} old ML models from cache")
-    except Exception as e:
-        logger.warning(f"Model cleanup error: {e}")
+    Detects anomalies in fuel consumption using Isolation Forest.
 
-
-class EngineAnomalyDetector:
-    """
-    Isolation Forest-based anomaly detector for engine health.
-
-    How it works:
-    1. Extracts features from sensor data (oil pressure, temps, consumption)
-    2. Trains on "normal" historical data (no failures)
-    3. Scores new data points: -1 = anomaly, 1 = normal
-    4. Converts to 0-100 score (100 = most anomalous)
-
-    Key insight: Isolation Forest doesn't need labeled failure data.
-    It learns what "normal" looks like and flags anything different.
+    Anomaly Types:
+    - Fuel Theft: Large drop in fuel level while parked
+    - Sensor Malfunction: Erratic readings, impossible values
+    - Unusual Consumption: MPG far outside normal range for conditions
     """
 
-    def __init__(self, contamination: float = 0.05):
+    def __init__(self, db_connection=None):
         """
-        Initialize detector.
+        Initialize anomaly detector
 
         Args:
-            contamination: Expected proportion of anomalies (0.01-0.1)
-                          Lower = more strict, fewer anomalies flagged
-                          0.05 = expect ~5% of data to be anomalous
+            db_connection: Optional database connection. If None, creates new connection.
         """
-        self.contamination = contamination
-        self.model = IsolationForest(
-            n_estimators=100,
-            contamination=contamination,
-            max_samples="auto",
-            random_state=42,
-            n_jobs=-1,  # Use all CPU cores
-        )
-        self.scaler = StandardScaler()
-        self.is_trained = False
-        self.feature_names = [
-            "oil_press_normalized",
-            "coolant_oil_ratio",
-            "temp_delta",
-            "consumption_rate",
-            "idle_ratio",
-            "pressure_stability",
-            "rpm_efficiency",
-            "temp_rise_rate",
-        ]
-        self.feature_stats = {}  # For z-score calculation
+        if db_connection:
+            self.db = db_connection
+        else:
+            self.db = pymysql.connect(
+                host=os.getenv("MYSQL_HOST", "localhost"),
+                user=os.getenv("MYSQL_USER", "root"),
+                password=os.getenv("MYSQL_PASSWORD", ""),
+                database=os.getenv("MYSQL_DATABASE", "fuel_copilot_local"),
+                port=int(os.getenv("MYSQL_PORT", "3306")),
+                charset="utf8mb4",
+                autocommit=True,
+                cursorclass=DictCursor,
+            )
 
-    def extract_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        # Isolation Forest parameters
+        self.contamination = 0.05  # Expected proportion of anomalies (5%)
+        self.n_estimators = 100
+        self.random_state = 42
+
+        # Models (trained on-demand)
+        self.models: Dict[str, IsolationForest] = {}
+        self.scalers: Dict[str, StandardScaler] = {}
+
+    def extract_features(
+        self, truck_id: str, period_days: int = 7, min_samples: int = 50
+    ) -> Optional[np.ndarray]:
         """
-        Extract ML features from raw sensor data.
+        Extract features for anomaly detection
 
-        This is where domain knowledge meets ML:
-        - Oil pressure should correlate with RPM
-        - Temperature ratios matter more than absolutes
-        - Patterns over time reveal issues
+        Features:
+        - mpg_current
+        - fuel_level_pct
+        - idle_hours_pct
+        - speed_avg
+        - fuel_flow_rate (gallons/hour)
+        - fuel_level_change_rate (% per hour)
 
         Args:
-            df: Raw sensor DataFrame with columns:
-                oil_pressure_psi, coolant_temp_f, oil_temp_f,
-                rpm, speed_mph, consumption_gph, engine_hours, idle_hours
+            truck_id: Truck identifier
+            period_days: Days of historical data to extract
+            min_samples: Minimum samples required
 
         Returns:
-            Feature DataFrame ready for ML
+            NumPy array of features (n_samples, n_features) or None
         """
-        features = pd.DataFrame()
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=period_days)
 
-        # Basic validation
-        if df.empty or len(df) < 5:
-            return features
-
-        # Feature 1: Oil pressure normalized by RPM
-        # Low pressure at high RPM = bad
-        rpm_factor = np.maximum(df["rpm"].fillna(1000) / 1000, 0.5)
-        features["oil_press_normalized"] = (
-            df["oil_pressure_psi"].fillna(35) / rpm_factor
-        )
-
-        # Feature 2: Coolant to Oil temp ratio
-        # Should stay relatively constant
-        oil_temp = df["oil_temp_f"].fillna(200).replace(0, 200)
-        features["coolant_oil_ratio"] = df["coolant_temp_f"].fillna(180) / oil_temp
-
-        # Feature 3: Temperature delta
-        # Large delta between oil and coolant = potential issue
-        features["temp_delta"] = df["oil_temp_f"].fillna(200) - df[
-            "coolant_temp_f"
-        ].fillna(180)
-
-        # Feature 4: Consumption rate
-        features["consumption_rate"] = df["consumption_gph"].fillna(3).clip(0, 20)
-
-        # Feature 5: Idle ratio
-        # High idle ratio combined with high consumption = inefficiency
-        engine_hrs = df["engine_hours"].fillna(1).replace(0, 1)
-        idle_hrs = df["idle_hours"].fillna(0)
-        features["idle_ratio"] = (idle_hrs / engine_hrs).clip(0, 1)
-
-        # Feature 6: Pressure stability (rolling std)
-        if len(df) >= 5:
-            features["pressure_stability"] = (
-                df["oil_pressure_psi"]
-                .fillna(35)
-                .rolling(window=min(5, len(df)), min_periods=1)
-                .std()
-                .fillna(2)
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT 
+                    mpg_current,
+                    estimated_pct as fuel_level_pct,
+                    idle_hours_ecu / NULLIF(engine_hours, 0) * 100 as idle_pct,
+                    speed_mph as speed_avg,
+                    estimated_gallons / NULLIF(TIMESTAMPDIFF(HOUR, LAG(timestamp_utc) OVER (ORDER BY timestamp_utc), timestamp_utc), 0) as fuel_flow_rate,
+                    (estimated_pct - LAG(estimated_pct) OVER (ORDER BY timestamp_utc)) / 
+                        NULLIF(TIMESTAMPDIFF(HOUR, LAG(timestamp_utc) OVER (ORDER BY timestamp_utc), timestamp_utc), 0) as fuel_change_rate
+                FROM fuel_metrics
+                WHERE truck_id = %s
+                  AND timestamp_utc >= %s
+                  AND timestamp_utc <= %s
+                  AND mpg_current IS NOT NULL
+                  AND mpg_current > 0
+                  AND estimated_pct IS NOT NULL
+                ORDER BY timestamp_utc
+            """,
+                (truck_id, start_date, end_date),
             )
-        else:
-            features["pressure_stability"] = 2.0
 
-        # Feature 7: RPM efficiency (speed per RPM)
-        rpm_safe = df["rpm"].fillna(1500).replace(0, 1500)
-        features["rpm_efficiency"] = df["speed_mph"].fillna(0) / (rpm_safe / 1000)
+            rows = cursor.fetchall()
 
-        # Feature 8: Temperature rise rate
-        if len(df) >= 2:
-            features["temp_rise_rate"] = (
-                df["oil_temp_f"].fillna(200).diff().fillna(0).clip(-10, 10)
+        if len(rows) < min_samples:
+            logger.info(
+                f"Insufficient samples for {truck_id}: {len(rows)} < {min_samples}"
             )
-        else:
-            features["temp_rise_rate"] = 0.0
-
-        # Handle infinities and NaN
-        features = features.replace([np.inf, -np.inf], np.nan)
-        features = features.fillna(features.median())
-
-        # Final fallback for any remaining NaN
-        features = features.fillna(0)
-
-        return features
-
-    def train(self, historical_data: pd.DataFrame, min_samples: int = 50) -> bool:
-        """
-        Train the model on historical data.
-
-        Args:
-            historical_data: Raw sensor data (should be "normal" operation)
-            min_samples: Minimum data points required
-
-        Returns:
-            True if training successful
-        """
-        if len(historical_data) < min_samples:
-            logger.warning(
-                f"Insufficient data for training: {len(historical_data)} < {min_samples}"
-            )
-            return False
+            return None
 
         # Extract features
-        features = self.extract_features(historical_data)
+        features = []
+        for row in rows:
+            if row["mpg_current"] is None:
+                continue
 
-        if features.empty or len(features) < min_samples:
-            logger.warning("Feature extraction failed or insufficient features")
+            feature_vector = [
+                float(row["mpg_current"] or 0),
+                float(row["fuel_level_pct"] or 0),
+                float(row["idle_pct"] or 0),
+                float(row["speed_avg"] or 0),
+                float(row["fuel_flow_rate"] or 0),
+                float(row["fuel_change_rate"] or 0),
+            ]
+
+            # Skip if any feature is NaN or inf
+            if any(np.isnan(feature_vector)) or any(np.isinf(feature_vector)):
+                continue
+
+            features.append(feature_vector)
+
+        if len(features) < min_samples:
+            return None
+
+        return np.array(features)
+
+    def train_model(self, truck_id: str, period_days: int = 30) -> bool:
+        """
+        Train Isolation Forest model for a truck
+
+        Args:
+            truck_id: Truck identifier
+            period_days: Days of training data
+
+        Returns:
+            True if training successful, False otherwise
+        """
+        features = self.extract_features(
+            truck_id, period_days=period_days, min_samples=100
+        )
+
+        if features is None:
+            logger.warning(f"Cannot train model for {truck_id}: insufficient data")
             return False
 
-        # Store feature statistics for z-score calculation
-        for col in features.columns:
-            self.feature_stats[col] = {
-                "mean": features[col].mean(),
-                "std": features[col].std() or 1.0,
-            }
-
         # Scale features
-        scaled = self.scaler.fit_transform(features)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
 
-        # Train model
-        self.model.fit(scaled)
-        self.is_trained = True
+        # Train Isolation Forest
+        model = IsolationForest(
+            contamination=self.contamination,
+            n_estimators=self.n_estimators,
+            random_state=self.random_state,
+            n_jobs=-1,
+        )
+        model.fit(features_scaled)
 
-        logger.info(f"✅ Anomaly detector trained on {len(features)} samples")
+        # Store model and scaler
+        self.models[truck_id] = model
+        self.scalers[truck_id] = scaler
+
+        logger.info(
+            f"Trained anomaly model for {truck_id} with {len(features)} samples"
+        )
         return True
 
-    def predict(self, current_data: pd.DataFrame) -> Dict[str, Any]:
+    def detect_anomalies(
+        self, truck_id: str, check_period_days: int = 1, retrain: bool = False
+    ) -> List[AnomalyDetection]:
         """
-        Predict anomaly score for current data.
+        Detect anomalies for a truck
 
         Args:
-            current_data: Recent sensor readings
+            truck_id: Truck identifier
+            check_period_days: Days to check for anomalies
+            retrain: Force model retraining
 
         Returns:
-            Dict with:
-                - anomaly_score: 0-100 (100 = most anomalous)
-                - is_anomaly: Boolean
-                - status: NORMAL/WATCH/WARNING/CRITICAL
-                - anomalous_features: List of concerning features
-                - explanation: Human-readable description
+            List of detected anomalies
         """
-        if not self.is_trained:
-            return {
-                "anomaly_score": 0,
-                "is_anomaly": False,
-                "status": "ERROR",
-                "anomalous_features": [],
-                "explanation": "Model not trained yet",
-            }
+        # Train model if not exists or retrain requested
+        if truck_id not in self.models or retrain:
+            success = self.train_model(truck_id)
+            if not success:
+                return []
 
-        if len(current_data) < 5:
-            return {
-                "anomaly_score": 0,
-                "is_anomaly": False,
-                "status": "INSUFFICIENT_DATA",
-                "anomalous_features": [],
-                "explanation": f"Need at least 5 data points, got {len(current_data)}",
-            }
+        # Get recent data
+        features = self.extract_features(
+            truck_id, period_days=check_period_days, min_samples=1
+        )
 
-        # Extract features
-        features = self.extract_features(current_data)
-
-        if features.empty:
-            return {
-                "anomaly_score": 0,
-                "is_anomaly": False,
-                "status": "ERROR",
-                "anomalous_features": [],
-                "explanation": "Could not extract features from data",
-            }
+        if features is None:
+            return []
 
         # Scale features
-        scaled = self.scaler.transform(features)
+        scaler = self.scalers[truck_id]
+        features_scaled = scaler.transform(features)
 
-        # Get predictions (-1 = anomaly, 1 = normal)
-        predictions = self.model.predict(scaled)
+        # Predict anomalies
+        predictions = self.models[truck_id].predict(features_scaled)
+        scores = self.models[truck_id].decision_function(features_scaled)
 
-        # Get anomaly scores (decision_function: lower = more anomalous)
-        scores = self.model.decision_function(scaled)
+        # Get timestamps
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=check_period_days)
 
-        # Convert to 0-100 scale (higher = more anomalous)
-        # decision_function returns negative for anomalies
-        avg_score = np.mean(scores)
-
-        # Map to 0-100 where:
-        # scores > 0.1 → 0-30 (normal)
-        # scores 0 to 0.1 → 30-50 (watch)
-        # scores -0.1 to 0 → 50-70 (warning)
-        # scores < -0.1 → 70-100 (critical)
-        if avg_score > 0.1:
-            anomaly_score = max(0, 30 - (avg_score - 0.1) * 100)
-        elif avg_score > 0:
-            anomaly_score = 30 + (0.1 - avg_score) * 200
-        elif avg_score > -0.1:
-            anomaly_score = 50 + (-avg_score) * 200
-        else:
-            anomaly_score = min(100, 70 + (-avg_score - 0.1) * 150)
-
-        anomaly_score = round(max(0, min(100, anomaly_score)), 1)
-
-        # Determine status
-        status = self._get_status(anomaly_score)
-
-        # Identify which features are anomalous
-        anomalous_features = self._identify_anomalous_features(features)
-
-        # Generate human-readable explanation
-        explanation = self._generate_explanation(
-            anomaly_score, anomalous_features, status
-        )
-
-        return {
-            "anomaly_score": anomaly_score,
-            "is_anomaly": anomaly_score >= 50,
-            "status": status,
-            "anomalous_features": anomalous_features,
-            "explanation": explanation,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-    def _identify_anomalous_features(self, features: pd.DataFrame) -> List[Dict]:
-        """Identify which specific features are anomalous using z-scores."""
-        anomalous = []
-
-        # Get the latest values (mean of recent data)
-        latest = features.iloc[-min(10, len(features)) :].mean()
-
-        for col in features.columns:
-            if col not in self.feature_stats:
-                continue
-
-            value = latest[col]
-            mean = self.feature_stats[col]["mean"]
-            std = self.feature_stats[col]["std"]
-
-            if std == 0:
-                continue
-
-            z_score = abs((value - mean) / std)
-
-            if z_score > 2:  # More than 2 standard deviations
-                severity = (
-                    "high" if z_score > 3 else "medium" if z_score > 2.5 else "low"
-                )
-                anomalous.append(
-                    {
-                        "feature": col,
-                        "value": round(value, 2),
-                        "expected_range": f"{round(mean - 2*std, 1)} - {round(mean + 2*std, 1)}",
-                        "z_score": round(z_score, 2),
-                        "severity": severity,
-                    }
-                )
-
-        # Sort by z-score
-        anomalous.sort(key=lambda x: x["z_score"], reverse=True)
-        return anomalous[:5]  # Top 5 most anomalous
-
-    def _get_status(self, score: float) -> str:
-        """Convert anomaly score to status."""
-        if score < 30:
-            return "NORMAL"
-        elif score < 50:
-            return "WATCH"
-        elif score < 70:
-            return "WARNING"
-        else:
-            return "CRITICAL"
-
-    def _generate_explanation(
-        self, score: float, features: List[Dict], status: str
-    ) -> str:
-        """Generate human-readable explanation."""
-        feature_names_readable = {
-            "oil_press_normalized": "oil pressure (RPM-adjusted)",
-            "coolant_oil_ratio": "coolant/oil temperature ratio",
-            "temp_delta": "temperature differential",
-            "consumption_rate": "fuel consumption",
-            "idle_ratio": "idle time ratio",
-            "pressure_stability": "pressure stability",
-            "rpm_efficiency": "RPM efficiency",
-            "temp_rise_rate": "temperature rise rate",
-        }
-
-        if status == "NORMAL":
-            return f"✅ All parameters within normal range (score: {score})"
-
-        if not features:
-            return (
-                f"⚠️ Elevated anomaly score ({score}) but no specific feature identified"
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT timestamp_utc
+                FROM fuel_metrics
+                WHERE truck_id = %s
+                  AND timestamp_utc >= %s
+                  AND timestamp_utc <= %s
+                  AND mpg_current IS NOT NULL
+                ORDER BY timestamp_utc
+            """,
+                (truck_id, start_date, end_date),
             )
 
-        # Build explanation
-        feature_list = ", ".join(
-            [
-                feature_names_readable.get(f["feature"], f["feature"])
-                for f in features[:3]
-            ]
-        )
+            timestamps = [row["timestamp_utc"] for row in cursor.fetchall()]
 
-        if status == "WATCH":
-            return f"👀 WATCH: Slight deviations in {feature_list}. Worth monitoring."
-        elif status == "WARNING":
-            return (
-                f"⚠️ WARNING: Notable anomalies in {feature_list}. Consider inspection."
-            )
-        else:
-            return f"🔴 CRITICAL: Significant anomalies in {feature_list}. Immediate attention recommended."
+        # Build anomaly list
+        anomalies = []
+        feature_names = [
+            "mpg",
+            "fuel_level_pct",
+            "idle_pct",
+            "speed_avg",
+            "fuel_flow_rate",
+            "fuel_change_rate",
+        ]
 
-    def save_model(self, truck_id: str) -> str:
-        """Save trained model to cache with thread safety and cleanup."""
-        if not self.is_trained:
-            return ""
+        for i, (prediction, score) in enumerate(zip(predictions, scores)):
+            if prediction == -1:  # Anomaly detected
+                if i >= len(timestamps):
+                    continue
 
-        # 🆕 v5.5.5: Thread-safe model save
-        lock = _get_model_lock(truck_id)
-        with lock:
-            # Cleanup old models periodically (1 in 10 saves)
-            if hash(truck_id) % 10 == 0:
-                _cleanup_old_models()
-
-            model_path = MODEL_CACHE_DIR / f"anomaly_{truck_id}.pkl"
-            with open(model_path, "wb") as f:
-                pickle.dump(
-                    {
-                        "model": self.model,
-                        "scaler": self.scaler,
-                        "feature_stats": self.feature_stats,
-                        "saved_at": datetime.now(timezone.utc).isoformat(),
-                    },
-                    f,
-                )
-            return str(model_path)
-
-    def load_model(self, truck_id: str) -> bool:
-        """Load model from cache."""
-        model_path = MODEL_CACHE_DIR / f"anomaly_{truck_id}.pkl"
-        if not model_path.exists():
-            return False
-
-        try:
-            with open(model_path, "rb") as f:
-                data = pickle.load(f)
-                self.model = data["model"]
-                self.scaler = data["scaler"]
-                self.feature_stats = data["feature_stats"]
-                self.is_trained = True
-            return True
-        except Exception as e:
-            logger.warning(f"Could not load model for {truck_id}: {e}")
-            return False
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# HIGH-LEVEL API FUNCTIONS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-def get_truck_sensor_data(truck_id: str, days: int = 30) -> pd.DataFrame:
-    """
-    Fetch sensor data for a truck from the database.
-
-    Args:
-        truck_id: Truck identifier (e.g., 'VD3579')
-        days: Number of days of history to fetch
-
-    Returns:
-        DataFrame with sensor readings
-    """
-    from database_pool import get_engine
-    from sqlalchemy import text
-
-    # 🔧 v5.5.2: Made query more flexible - don't require oil_pressure_psi to be NOT NULL
-    # The extract_features function handles NULL values with defaults
-    query = """
-        SELECT 
-            timestamp_utc,
-            oil_pressure_psi,
-            coolant_temp_f,
-            oil_temp_f,
-            rpm,
-            speed_mph,
-            consumption_gph,
-            engine_hours,
-            idle_hours_ecu as idle_hours,
-            truck_status
-        FROM fuel_metrics
-        WHERE truck_id = :truck_id
-        AND timestamp_utc >= NOW() - INTERVAL :days DAY
-        ORDER BY timestamp_utc
-    """
-
-    try:
-        engine = get_engine()
-        with engine.connect() as conn:
-            df = pd.read_sql(
-                text(query), conn, params={"truck_id": truck_id, "days": days}
-            )
-        logger.info(f"ML: Fetched {len(df)} rows for {truck_id} (last {days} days)")
-        return df
-    except Exception as e:
-        logger.error(f"Error fetching data for {truck_id}: {e}")
-        return pd.DataFrame()
-
-
-def analyze_truck_anomaly(truck_id: str) -> Dict[str, Any]:
-    """
-    Analyze a single truck for anomalies.
-    Main entry point for single-truck analysis.
-
-    Args:
-        truck_id: Truck identifier
-
-    Returns:
-        Anomaly analysis result
-    """
-    # 🔧 v5.5.2: Reduced minimum samples from 50 to 20 for better data availability
-    MIN_SAMPLES = 20
-
-    detector = EngineAnomalyDetector(contamination=0.05)
-
-    # Try to load cached model
-    model_loaded = detector.load_model(truck_id)
-
-    # Fetch data
-    training_data = get_truck_sensor_data(truck_id, days=30)
-
-    if len(training_data) < MIN_SAMPLES:
-        return {
-            "truck_id": truck_id,
-            "anomaly_score": 0,
-            "is_anomaly": False,
-            "status": "INSUFFICIENT_DATA",
-            "anomalous_features": [],
-            "explanation": f"Need at least {MIN_SAMPLES} data points, got {len(training_data)}",
-            "data_points_analyzed": len(training_data),
-        }
-
-    # Train if model not loaded or if we have significantly more data
-    if not model_loaded:
-        success = detector.train(training_data, min_samples=MIN_SAMPLES)
-        if success:
-            detector.save_model(truck_id)
-        else:
-            return {
-                "truck_id": truck_id,
-                "anomaly_score": 0,
-                "is_anomaly": False,
-                "status": "ERROR",
-                "anomalous_features": [],
-                "explanation": "Could not train model on historical data",
-            }
-
-    # Get recent data for prediction (last 2 hours)
-    recent_data = get_truck_sensor_data(truck_id, days=1)
-    if len(recent_data) < 5:
-        # Use training data tail if recent is insufficient
-        recent_data = training_data.tail(MIN_SAMPLES)
-
-    # Predict
-    result = detector.predict(recent_data)
-    result["truck_id"] = truck_id
-    result["data_points_analyzed"] = len(recent_data)
-    result["model_trained_on"] = len(training_data)
-
-    return result
-
-
-def analyze_fleet_anomalies() -> List[Dict[str, Any]]:
-    """
-    Analyze entire fleet for anomalies.
-    Returns results sorted by anomaly score (highest first).
-
-    Returns:
-        List of anomaly results for all trucks
-    """
-    from config import get_allowed_trucks
-
-    results = []
-    trucks = get_allowed_trucks()
-
-    logger.info(f"Analyzing anomalies for {len(trucks)} trucks...")
-
-    for truck_id in trucks:
-        try:
-            result = analyze_truck_anomaly(truck_id)
-            results.append(result)
-        except Exception as e:
-            logger.error(f"Error analyzing {truck_id}: {e}")
-            results.append(
-                {
-                    "truck_id": truck_id,
-                    "anomaly_score": 0,
-                    "is_anomaly": False,
-                    "status": "ERROR",
-                    "anomalous_features": [],
-                    "explanation": f"Analysis error: {str(e)}",
+                # Classify anomaly type
+                feature_dict = {
+                    name: features[i][j] for j, name in enumerate(feature_names)
                 }
+                anomaly_type, description = self._classify_anomaly(feature_dict)
+
+                # Determine severity based on score
+                severity = self._determine_severity(score)
+
+                anomaly = AnomalyDetection(
+                    truck_id=truck_id,
+                    timestamp=timestamps[i],
+                    anomaly_type=anomaly_type,
+                    severity=severity,
+                    anomaly_score=float(score),
+                    features=feature_dict,
+                    description=description,
+                )
+                anomalies.append(anomaly)
+
+        return anomalies
+
+    def _classify_anomaly(self, features: Dict[str, float]) -> Tuple[str, str]:
+        """
+        Classify anomaly type based on feature values
+
+        Args:
+            features: Feature dictionary
+
+        Returns:
+            Tuple of (anomaly_type, description)
+        """
+        mpg = features["mpg"]
+        fuel_change_rate = features["fuel_change_rate"]
+        idle_pct = features["idle_pct"]
+        speed = features["speed_avg"]
+
+        # Fuel theft: Large negative fuel change while parked
+        if fuel_change_rate < -10 and speed < 5:
+            return (
+                "fuel_theft",
+                f"Large fuel drop ({fuel_change_rate:.1f}%/hr) while parked",
             )
 
-    # Sort by anomaly score (highest first)
-    results.sort(key=lambda x: x.get("anomaly_score", 0), reverse=True)
+        # Sensor malfunction: Impossible values
+        if mpg > 15 or mpg < 1:
+            return "sensor_malfunction", f"Impossible MPG value: {mpg:.2f}"
 
-    logger.info(f"✅ Fleet anomaly analysis complete. {len(results)} trucks analyzed.")
+        if features["fuel_level_pct"] > 100 or features["fuel_level_pct"] < 0:
+            return (
+                "sensor_malfunction",
+                f'Invalid fuel level: {features["fuel_level_pct"]:.1f}%',
+            )
 
-    return results
+        # Unusual consumption: Very low MPG
+        if mpg < 3 and idle_pct < 30:
+            return (
+                "unusual_consumption",
+                f"Unusually low MPG: {mpg:.2f} (not idle-related)",
+            )
 
+        # Very high idle
+        if idle_pct > 80:
+            return "unusual_consumption", f"Excessive idle time: {idle_pct:.1f}%"
 
-def get_fleet_anomaly_summary() -> Dict[str, Any]:
-    """
-    Get high-level summary of fleet anomaly status.
+        # Default
+        return "unusual_consumption", "Anomalous fuel consumption pattern detected"
 
-    Returns:
-        Summary with counts by status and top issues
-    """
-    results = analyze_fleet_anomalies()
+    def _determine_severity(self, score: float) -> str:
+        """
+        Determine severity based on anomaly score
 
-    # Count by status
-    status_counts = {"NORMAL": 0, "WATCH": 0, "WARNING": 0, "CRITICAL": 0, "OTHER": 0}
+        Args:
+            score: Anomaly score from Isolation Forest (-1 to 1)
 
-    for r in results:
-        status = r.get("status", "OTHER")
-        if status in status_counts:
-            status_counts[status] += 1
+        Returns:
+            Severity level: CRITICAL, HIGH, MEDIUM, LOW
+        """
+        # Lower score = more anomalous
+        if score < -0.3:
+            return "CRITICAL"
+        elif score < -0.2:
+            return "HIGH"
+        elif score < -0.1:
+            return "MEDIUM"
         else:
-            status_counts["OTHER"] += 1
+            return "LOW"
 
-    # Calculate fleet health score (inverse of average anomaly)
-    scores = [
-        r.get("anomaly_score", 0)
-        for r in results
-        if r.get("status") not in ["ERROR", "INSUFFICIENT_DATA"]
-    ]
-    if scores:
-        avg_anomaly = np.mean(scores)
-        fleet_health_score = round(100 - avg_anomaly, 1)
-    else:
-        fleet_health_score = 100.0
+    def get_fleet_anomalies(
+        self, check_period_days: int = 1, min_severity: str = "LOW"
+    ) -> Dict[str, List[AnomalyDetection]]:
+        """
+        Get anomalies for entire fleet
 
-    # Top issues (trucks with highest anomaly scores)
-    top_issues = [
-        {
-            "truck_id": r["truck_id"],
-            "score": r.get("anomaly_score", 0),
-            "status": r.get("status", "UNKNOWN"),
-            "explanation": r.get("explanation", ""),
-        }
-        for r in results[:5]
-        if r.get("anomaly_score", 0) > 30
-    ]
+        Args:
+            check_period_days: Days to check
+            min_severity: Minimum severity to report
 
-    return {
-        "fleet_health_score": fleet_health_score,
-        "total_trucks": len(results),
-        "status_breakdown": status_counts,
-        "top_issues": top_issues,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+        Returns:
+            Dictionary mapping truck_id to list of anomalies
+        """
+        # Get all trucks
+        with self.db.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT DISTINCT truck_id
+                FROM fuel_metrics
+                WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL %s DAY)
+                ORDER BY truck_id
+            """,
+                (check_period_days,),
+            )
+
+            truck_ids = [row["truck_id"] for row in cursor.fetchall()]
+
+        severity_levels = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+        min_severity_level = severity_levels.get(min_severity, 0)
+
+        fleet_anomalies = {}
+        for truck_id in truck_ids:
+            anomalies = self.detect_anomalies(
+                truck_id, check_period_days=check_period_days
+            )
+
+            # Filter by severity
+            filtered_anomalies = [
+                a
+                for a in anomalies
+                if severity_levels.get(a.severity, 0) >= min_severity_level
+            ]
+
+            if filtered_anomalies:
+                fleet_anomalies[truck_id] = filtered_anomalies
+
+        return fleet_anomalies
+
+    def store_anomaly(self, anomaly: AnomalyDetection) -> bool:
+        """
+        Store anomaly in database
+
+        Args:
+            anomaly: AnomalyDetection object
+
+        Returns:
+            True if stored successfully
+        """
+        try:
+            # Create table if not exists
+            with self.db.cursor() as cursor:
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS anomaly_detections (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        truck_id VARCHAR(50) NOT NULL,
+                        timestamp_utc DATETIME NOT NULL,
+                        anomaly_type VARCHAR(50) NOT NULL,
+                        severity VARCHAR(20) NOT NULL,
+                        anomaly_score FLOAT NOT NULL,
+                        features JSON,
+                        description TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_truck_timestamp (truck_id, timestamp_utc),
+                        INDEX idx_severity (severity),
+                        INDEX idx_type (anomaly_type),
+                        INDEX idx_created (created_at)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+                )
+
+            # Insert anomaly
+            import json
+
+            with self.db.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO anomaly_detections 
+                    (truck_id, timestamp_utc, anomaly_type, severity, anomaly_score, features, description)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                    (
+                        anomaly.truck_id,
+                        anomaly.timestamp,
+                        anomaly.anomaly_type,
+                        anomaly.severity,
+                        anomaly.anomaly_score,
+                        json.dumps(anomaly.features),
+                        anomaly.description,
+                    ),
+                )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error storing anomaly: {e}")
+            return False
+
+
+# Singleton instance
+_anomaly_detector_instance = None
+
+
+def get_anomaly_detector(db_connection=None) -> AnomalyDetector:
+    """Get singleton instance of AnomalyDetector"""
+    global _anomaly_detector_instance
+    if _anomaly_detector_instance is None:
+        _anomaly_detector_instance = AnomalyDetector(db_connection=db_connection)
+    return _anomaly_detector_instance

@@ -20,9 +20,25 @@ data/truck_cache/
 
 # Backup files
 *.backup
+*.bak
+*.old
 backups/*.sql
 backups/*.sql.gz
 temp_backup_before_pull/
+
+# Archive directory (local only)
+archive/
+
+# Logs and temporary files
+*.log
+*.txt
+*.zip
+nohup.out
+
+# Coverage reports
+htmlcov*/
+cov_annotate/
+coverage*.json
 
 # Cache files
 cache/fleet_sensors.json
