@@ -42,7 +42,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 🆕 v3.12.32: Import Quick Wins modules
-from adaptive_refuel_thresholds import get_adaptive_thresholds
+from ml_engines.adaptive_refuel_thresholds import get_adaptive_thresholds
 
 # 🆕 v3.12.27: Import fuel event classifier for theft/sensor differentiation
 from alert_service import (
@@ -1924,7 +1924,7 @@ def process_truck(
         sensor_vs_kalman = sensor_pct - kalman_pct_before_reset
 
         # 🔧 DEC 28 ENHANCEMENT: Use adaptive threshold per truck (learned from history)
-        from adaptive_refuel_thresholds import get_adaptive_thresholds
+        from ml_engines.adaptive_refuel_thresholds import get_adaptive_thresholds
 
         adaptive = get_adaptive_thresholds()
         min_increase_pct, _ = adaptive.get_thresholds(truck_id)

@@ -511,7 +511,7 @@ except Exception as e:
 
 # 🆕 FASE 2B: ML Pipeline (LSTM Predictor, Anomaly Detection, Driver Scoring)
 try:
-    from anomaly_detection_v2 import get_anomaly_detector
+    from ml_engines.anomaly_detection_v2 import get_anomaly_detector
     from driver_behavior_scoring_v2 import get_behavior_scorer
     from lstm_fuel_predictor import get_lstm_predictor
 

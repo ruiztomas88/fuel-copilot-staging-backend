@@ -57,7 +57,7 @@ class Wialon2ABCIntegration:
             logger.warning(f"⚠️ LSTM Predictor no disponible: {e}")
 
         try:
-            from anomaly_detection_v2 import get_anomaly_detector
+            from ml_engines.anomaly_detection_v2 import get_anomaly_detector
 
             self.anomaly_detector = get_anomaly_detector()
             logger.info("✅ Anomaly Detector inicializado")

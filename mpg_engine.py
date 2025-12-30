@@ -214,16 +214,12 @@ class MPGConfig:
     """
 
     min_miles: float = 15.0  # 馃敡 v3.15.1: Reduced from 20.0 for Kalman compatibility
-    min_fuel_gal: float = (
-        1.5  # 馃敡 v3.15.1: Reduced from 2.5 (Kalman provides clean data)
-    )
+    min_fuel_gal: float = 2.5  # ✅ DEC 30: Match production (stricter threshold)
 
     # Physical limits for Class 8 trucks (realistic ranges)
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
     max_mpg: float = 8.5  # 馃敡 v3.15.0: Reduced from 9.0 (more realistic)
-    ema_alpha: float = (
-        0.25  # 馃敡 v3.15.1: Increased from 0.20 (Kalman already smooths)
-    )
+    ema_alpha: float = 0.20  # ✅ DEC 30: Match production (more conservative smoothing)
     fallback_mpg: float = 5.7  # Fleet average
 
     # Dynamic alpha settings - DISABLED for stability
