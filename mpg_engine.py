@@ -1,22 +1,25 @@
-"""
+﻿"""
 MPG Engine - Isolated MPG calculation logic
 
 This module provides pure functions for MPG tracking with proper validation,
 windowing, and EMA smoothing. Designed for easy testing and reusability.
 
 Author: Fuel Copilot Team
-Version: v2.0.0
-Date: December 22, 2025
+Version: v3.15.2
+Date: December 29, 2025
 
 Changelog:
-- v2.0.0: MAJOR REDESIGN - max_mpg 12.0→8.5 realista para 44k lbs, min_fuel 1.2→2.0 gal
-- v3.15.3: FIXED MPG inflados - restaurar thresholds 8.0mi/1.2gal (era 5.0mi/0.75gal que amplificaba errores)
-- v3.15.2: RESTORED Wednesday Dec 18 config (5.0mi/0.75gal/9.0max) - was showing correct 4-7.5 range
-- v3.15.1: Fix MPG config - min_miles 4.0/max_mpg 7.8 for accurate tracking (44k lbs trucks)
-- v3.15.0: Increased max_mpg from 9.0 to 12.0 - trucks were getting rejected with valid 9-11 MPG
+- v3.15.2: Added SNR validation to prevent low signal-to-noise ratio windows
+- v3.15.1: Reduced thresholds for Kalman compatibility (min_miles: 20→15, min_fuel: 2.5→1.5)
+- v3.15.1: Increased ema_alpha to 0.25 (Kalman already provides smoothing)
+- v3.15.0: CRITICAL FIX for inflated MPG (increased thresholds, reduced max_mpg to 8.5)
 - v3.14.0: Improved filter_outliers_iqr (empty list on total corruption)
 - v3.14.0: Added auto-save/load for TruckBaselineManager
 - v3.14.0: Added shutdown_baseline_manager() for clean service shutdown
+
+Note: If using with Kalman-filtered fuel levels, the lower thresholds in v3.15.1
+      are appropriate since Kalman provides cleaner data than raw sensors.
+      SNR validation in v3.15.2 protects against edge cases where Kalman fails.
 """
 
 import logging
@@ -26,10 +29,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-# 🔧 FIX v3.9.6: Moved before MPGState class so it can be used in get_variance()
+# 馃敡 FIX v3.9.6: Moved before MPGState class so it can be used in get_variance()
 def filter_outliers_mad(readings: list, threshold: float = 3.0) -> list:
     """
-    🆕 v3.13.0: MAD-based outlier rejection for small samples (n < 4).
+    馃啎 v3.13.0: MAD-based outlier rejection for small samples (n < 4).
 
     Uses Median Absolute Deviation which is more robust than IQR
     for small sample sizes.
@@ -72,7 +75,7 @@ def filter_outliers_iqr(readings: list, multiplier: float = 1.5) -> list:
 
     Removes extreme values that are likely sensor errors or edge cases.
     Uses Interquartile Range (IQR) method which is robust to outliers.
-    🆕 v3.13.0: Falls back to MAD for n < 4.
+    馃啎 v3.13.0: Falls back to MAD for n < 4.
 
     Args:
         readings: List of MPG readings
@@ -86,7 +89,7 @@ def filter_outliers_iqr(readings: list, multiplier: float = 1.5) -> list:
         [5.0, 5.5, 6.0, 5.2]
     """
     if len(readings) < 4:
-        # 🆕 v3.13.0: Use MAD for small samples instead of no filtering
+        # 馃啎 v3.13.0: Use MAD for small samples instead of no filtering
         return filter_outliers_mad(readings)
 
     sorted_data = sorted(readings)
@@ -110,7 +113,7 @@ def filter_outliers_iqr(readings: list, multiplier: float = 1.5) -> list:
             f"IQR filter removed {removed} outliers. Bounds: [{lower_bound:.2f}, {upper_bound:.2f}]"
         )
 
-    # 🔧 v3.14.0 FIX: Handle total corruption case
+    # 馃敡 v3.14.0 FIX: Handle total corruption case
     # If less than 2 readings remain after filtering, the sample is unreliable.
     # Return empty list to signal caller should use fallback, not corrupted data.
     if len(filtered) < 2:
@@ -144,13 +147,10 @@ class MPGState:
     window_count: int = 0
     last_raw_mpg: Optional[float] = None
 
-    # 🆕 Track previous sensor readings for delta calculation
+    # 馃啎 Track previous sensor readings for delta calculation
     last_fuel_lvl_pct: Optional[float] = None  # Previous fuel level %
     last_odometer_mi: Optional[float] = None  # Previous odometer in miles
     last_timestamp: Optional[float] = None  # Epoch of last reading
-    last_total_fuel_gal: Optional[float] = (
-        None  # 🆕 v2.0.1: Previous ECU cumulative fuel
-    )
 
     # History for variance-based adaptive alpha
     mpg_history: list = field(default_factory=list)
@@ -173,10 +173,10 @@ class MPGState:
         """
         Calculate variance of recent MPG values.
 
-        🔧 FIX v3.9.6: Apply IQR outlier rejection before variance calculation
+        馃敡 FIX v3.9.6: Apply IQR outlier rejection before variance calculation
         to prevent extreme values from skewing the dynamic alpha.
 
-        🔧 FIX v3.14.1: Return high variance (1.0) when filtered is empty
+        馃敡 FIX v3.14.1: Return high variance (1.0) when filtered is empty
         to force conservative alpha (more smoothing) instead of using corrupted data.
         """
         if len(self.mpg_history) < 3:
@@ -185,7 +185,7 @@ class MPGState:
         # Apply IQR filter to remove outliers before variance calculation
         filtered = filter_outliers_iqr(self.mpg_history)
         if len(filtered) < 2:
-            # 🔧 v3.14.1: Return high variance to force conservative smoothing
+            # 馃敡 v3.14.1: Return high variance to force conservative smoothing
             # instead of using potentially corrupted mpg_history
             return 1.0
 
@@ -205,45 +205,32 @@ class MPGConfig:
     - Dry van empty, highway: 6.5 - 7.5 MPG
     - Optimal (descent, empty): 7.0 - 8.5 MPG
 
-    🔧 v3.15.3 FIX CRÍTICO: MPG inflados por thresholds muy bajos
-    Problema: min_fuel_gal = 0.75 gal → cálculos con muy poco combustible
-    - Errores pequeños del sensor (10-20%) se amplifican enormemente en MPG
-    - Ejemplo: 5mi / 0.5gal (error 33%) = 10 MPG falso vs 5mi / 0.75gal = 6.67 MPG correcto
-
-    Solución: Volver a thresholds más conservadores (8.0mi/1.2gal)
-    - Requiere más distancia y combustible antes de calcular → más preciso
-    - Trade-off: MPG se actualiza menos frecuentemente, pero es más confiable
-
-    🔧 v3.12.18: Reduced min_miles from 10.0 to 5.0 for faster MPG updates
-    This allows MPG to update more frequently while still having enough data
-    for a reasonable calculation. Trade-off: slightly more variance in readings.
-
-    🔧 v5.18.0 FIX: Reverted to stable balanced thresholds
-    From experimentation: 8.0mi/1.2gal provides best balance of coverage vs accuracy.
-    Avoids excessive noise while maintaining reasonable update frequency.
+    馃敡 v3.15.0 DEC 29: CRITICAL FIX for inflated MPG readings
+    - Increased min_miles from 5.0 to 20.0 (reduce sensor error impact)
+    - Increased min_fuel_gal from 0.75 to 2.5 (reduce percentage error)
+    - Reduced max_mpg from 9.0 to 8.5 (more realistic for Clase 8)
+    - Reduced ema_alpha from 0.4 to 0.20 (more conservative smoothing)
+    - DISABLED dynamic_alpha (was causing instability)
     """
 
-    # 🔧 v3.12.18 DEC 4: Reduced for faster updates (5mi vs 10mi)
-    # 🔧 v2.0.1 DEC 22: Restored with tighter max_mpg cap (8.2 vs 9.0)
-    # 🔧 v3.13.0 DEC 23: Increased min_fuel_gal to reduce variance (FIX P0 - Auditoría)
-    # Basado en datos reales de flota: Flatbed/Reefer/Dry Van cargados
-    min_miles: float = 5.0  # ✅ Fast updates - MPG muestra después de 5mi
-    min_fuel_gal: float = 1.5  # 🔧 FIX: Increased from 0.75 to reduce sensor noise variance
-
-    # Physical limits for Class 8 trucks (44,000 lbs realistic ranges)
-    # Loaded (44k): 4.0-6.5 MPG | Empty (10k): 6.5-8.0 MPG
-    min_mpg: float = 3.8  # Absolute minimum (reefer on, loaded, mountain, city)
-    max_mpg: float = (
-        8.2  # ✅ DEC 22: Realistic max (was 9.0, capped to prevent inflation)
+    min_miles: float = 15.0  # 馃敡 v3.15.1: Reduced from 20.0 for Kalman compatibility
+    min_fuel_gal: float = (
+        1.5  # 馃敡 v3.15.1: Reduced from 2.5 (Kalman provides clean data)
     )
-    ema_alpha: float = 0.4  # 🔧 v3.10.7: Reduced from 0.6 for smoother readings
-    fallback_mpg: float = 5.7  # 🔧 v3.12.31: Updated to fleet average (was 5.8)
 
-    # Dynamic alpha settings
-    use_dynamic_alpha: bool = True  # Enable variance-based alpha adjustment
-    alpha_high_variance: float = 0.3  # Alpha when variance is high (smoother)
-    alpha_low_variance: float = 0.6  # Alpha when variance is low (more responsive)
-    variance_threshold: float = 0.25  # Variance threshold to switch alpha
+    # Physical limits for Class 8 trucks (realistic ranges)
+    min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
+    max_mpg: float = 8.5  # 馃敡 v3.15.0: Reduced from 9.0 (more realistic)
+    ema_alpha: float = (
+        0.25  # 馃敡 v3.15.1: Increased from 0.20 (Kalman already smooths)
+    )
+    fallback_mpg: float = 5.7  # Fleet average
+
+    # Dynamic alpha settings - DISABLED for stability
+    use_dynamic_alpha: bool = False  # 馃敡 v3.15.0: Disabled (was causing instability)
+    alpha_high_variance: float = 0.20  # Not used when dynamic disabled
+    alpha_low_variance: float = 0.25  # Not used when dynamic disabled
+    variance_threshold: float = 0.30  # Not used when dynamic disabled
 
     def __post_init__(self):
         """Validate config"""
@@ -290,6 +277,7 @@ def update_mpg_state(
     delta_gallons: float,
     config: MPGConfig = MPGConfig(),
     truck_id: str = "UNKNOWN",
+    tank_capacity_gal: float = 120.0,
 ) -> MPGState:
     """
     Update MPG state with new delta values
@@ -300,6 +288,7 @@ def update_mpg_state(
         delta_gallons: Fuel consumed since last update (gallons)
         config: MPG configuration parameters
         truck_id: Truck identifier for logging
+        tank_capacity_gal: Tank capacity in gallons for SNR calculation
 
     Returns:
         Updated state (same object, modified in place)
@@ -327,6 +316,25 @@ def update_mpg_state(
         state.distance_accum >= config.min_miles
         and state.fuel_accum_gal >= config.min_fuel_gal
     ):
+        # 🆕 v3.15.2: SNR (Signal-to-Noise Ratio) validation
+        # With min_fuel_gal=1.5 and sensor ±2%, error can be ±133%
+        # Ensure signal > noise for reliable MPG
+        expected_noise = 0.02 * 120  # 2% of 120 gal tank = 2.4 gal
+        signal = state.fuel_accum_gal
+        snr = signal / expected_noise if expected_noise > 0 else 999
+
+        if snr < 1.0:
+            # Signal < noise - extend window for better SNR
+            logger.warning(
+                f"[{truck_id}] Low SNR ({snr:.2f}): signal={signal:.2f}gal, "
+                f"noise={expected_noise:.2f}gal. Extending window to 2.5 gal."
+            )
+            # Temporarily increase threshold for this window
+            effective_min_fuel = 2.5
+
+            if state.fuel_accum_gal < effective_min_fuel:
+                # Wait for more fuel consumption
+                return state
 
         # Calculate raw MPG
         raw_mpg = state.distance_accum / state.fuel_accum_gal
@@ -349,14 +357,9 @@ def update_mpg_state(
                 # Apply EMA: new_value = alpha * raw + (1-alpha) * old
                 old_mpg = state.mpg_current
                 state.mpg_current = alpha * raw_mpg + (1 - alpha) * state.mpg_current
-                
-                # 🔧 CRITICAL FIX: Clamp post-EMA to prevent values exceeding physical limits
-                # Even if raw_mpg is valid, EMA can push current value out of bounds
-                state.mpg_current = max(config.min_mpg, min(state.mpg_current, config.max_mpg))
-                
                 variance = state.get_variance()
                 logger.info(
-                    f"[{truck_id}] MPG updated: {old_mpg:.2f} → {state.mpg_current:.2f} "
+                    f"[{truck_id}] MPG updated: {old_mpg:.2f} 鈫?{state.mpg_current:.2f} "
                     f"(raw: {raw_mpg:.2f}, alpha: {alpha:.2f}, variance: {variance:.3f}, "
                     f"window: {state.distance_accum:.1f}mi/{state.fuel_accum_gal:.2f}gal)"
                 )
@@ -470,10 +473,9 @@ def get_mpg_status(state: MPGState, config: MPGConfig) -> dict:
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🆕 v3.12.28: PER-TRUCK MPG BASELINE
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?# 馃啎 v3.12.28: PER-TRUCK MPG BASELINE
 # Learns historical baseline per truck for anomaly detection
-# ═══════════════════════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
 
 @dataclass
@@ -517,9 +519,11 @@ class TruckMPGBaseline:
             return 1.0  # Default uncertainty
         mean = self._mpg_sum / self.sample_count
         variance = (self._mpg_squared_sum / self.sample_count) - (mean**2)
-        # 🔧 v5.7.8: Fix BUG #10 - prevent negative variance from floating point errors
+        # 馃敡 v5.7.8: Fix BUG #10 - prevent negative variance from floating point errors
         variance = max(variance, 0.0)
-        return max(variance**0.5, 0.1)  # At least 0.1 to avoid division issues
+        # 🔧 FIX DEC 29: Minimum std_dev=0.1 prevents division by zero in SNR/Z-score calculations
+        # If variance=0 (all samples identical), we still assume 0.1 MPG uncertainty
+        return max(variance**0.5, 0.1)
 
     def update(
         self, mpg_value: float, timestamp: float, config: MPGConfig = MPGConfig()
@@ -648,7 +652,7 @@ class TruckMPGBaseline:
 class TruckBaselineManager:
     """
     Manages per-truck MPG baselines for the fleet.
-    🔧 v3.14.0: Added auto-save/load with configurable persistence
+    馃敡 v3.14.0: Added auto-save/load with configurable persistence
 
     Usage:
         manager = TruckBaselineManager()
@@ -671,7 +675,7 @@ class TruckBaselineManager:
         self._update_count = 0
         self._dirty = False  # Track if we need to save
 
-        # 🔧 v3.14.0: Auto-load on initialization
+        # 馃敡 v3.14.0: Auto-load on initialization
         if auto_load:
             self.load_from_file(self._baseline_file)
 
@@ -692,7 +696,7 @@ class TruckBaselineManager:
         baseline = self.get_or_create(truck_id)
         baseline.update(mpg_value, timestamp, config)
 
-        # 🔧 v3.14.0: Auto-save periodically
+        # 馃敡 v3.14.0: Auto-save periodically
         self._dirty = True
         self._update_count += 1
         if self._update_count >= self.SAVE_INTERVAL:
@@ -762,7 +766,7 @@ class TruckBaselineManager:
         logger.info(f"Loaded {len(self._baselines)} truck baselines from {filepath}")
 
     def _auto_save(self):
-        """🔧 v3.14.0: Periodic auto-save to prevent data loss"""
+        """馃敡 v3.14.0: Periodic auto-save to prevent data loss"""
         if self._dirty:
             try:
                 self.save_to_file(self._baseline_file)
@@ -772,54 +776,10 @@ class TruckBaselineManager:
                 logger.error(f"Auto-save failed: {e}")
 
     def shutdown(self):
-        """🔧 v3.14.0: Call on service shutdown to save pending changes"""
+        """馃敡 v3.14.0: Call on service shutdown to save pending changes"""
         if self._dirty:
             logger.info("Saving baselines on shutdown...")
             self._auto_save()
-
-    def cleanup_inactive_trucks(
-        self, active_truck_ids: set, max_inactive_days: int = 30
-    ) -> int:
-        """
-        🆕 v6.5.0: Remove baselines for trucks inactive > max_inactive_days.
-
-        Prevents memory leaks from trucks removed from fleet.
-
-        Args:
-            active_truck_ids: Set of currently active truck IDs
-            max_inactive_days: Days of inactivity before cleanup (default 30)
-
-        Returns:
-            Number of trucks cleaned up
-        """
-        from datetime import datetime
-
-        cleaned_count = 0
-        cutoff_timestamp = datetime.now().timestamp() - (max_inactive_days * 86400)
-        trucks_to_remove = []
-
-        for truck_id, baseline in self._baselines.items():
-            # Remove if not in active fleet
-            if truck_id not in active_truck_ids:
-                trucks_to_remove.append(truck_id)
-                continue
-
-            # Check if last update is older than cutoff
-            if baseline.last_updated and baseline.last_updated < cutoff_timestamp:
-                trucks_to_remove.append(truck_id)
-
-        # Remove inactive trucks
-        for truck_id in trucks_to_remove:
-            del self._baselines[truck_id]
-            cleaned_count += 1
-            self._dirty = True
-            logger.info(f"🧹 Cleaned up MPG baseline for inactive truck: {truck_id}")
-
-        # Save after cleanup
-        if self._dirty:
-            self._auto_save()
-
-        return cleaned_count
 
 
 # Global baseline manager instance
@@ -835,22 +795,21 @@ def get_baseline_manager() -> TruckBaselineManager:
 
 
 def shutdown_baseline_manager():
-    """🔧 v3.14.0: Call on service shutdown to persist baselines"""
+    """馃敡 v3.14.0: Call on service shutdown to persist baselines"""
     global _baseline_manager
     if _baseline_manager is not None:
         _baseline_manager.shutdown()
         logger.info("Baseline manager shutdown complete")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🆕 v5.7.8: ALGORITHM 1 - LOAD-AWARE CONSUMPTION FACTOR
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?# 馃啎 v5.7.8: ALGORITHM 1 - LOAD-AWARE CONSUMPTION FACTOR
 # Adjusts expected consumption based on engine load percentage
-# ═══════════════════════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
 
 def calculate_load_factor(engine_load_pct: Optional[float]) -> float:
     """
-    🆕 v5.7.8: Calculate consumption adjustment factor based on engine load.
+    馃啎 v5.7.8: Calculate consumption adjustment factor based on engine load.
 
     Engine load significantly affects fuel consumption:
     - Idle/low load (0-20%): ~50% baseline consumption
@@ -894,7 +853,7 @@ def get_load_adjusted_consumption(
     engine_load_pct: Optional[float],
 ) -> dict:
     """
-    🆕 v5.7.8: Get consumption adjusted for engine load.
+    馃啎 v5.7.8: Get consumption adjusted for engine load.
 
     Args:
         base_consumption_lph: Base fuel consumption in liters per hour
@@ -915,26 +874,25 @@ def get_load_adjusted_consumption(
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🆕 v5.7.8: ALGORITHM 2 - WEATHER MPG ADJUSTMENT FACTOR
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?# 馃啎 v5.7.8: ALGORITHM 2 - WEATHER MPG ADJUSTMENT FACTOR
 # Adjusts expected MPG based on ambient temperature
-# ═══════════════════════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
 
 def calculate_weather_mpg_factor(ambient_temp_f: Optional[float]) -> float:
     """
-    🆕 v5.7.8: Calculate MPG adjustment factor based on ambient temperature.
+    馃啎 v5.7.8: Calculate MPG adjustment factor based on ambient temperature.
 
     Temperature affects fuel economy:
-    - Cold weather (<32°F): Increases fuel consumption due to:
+    - Cold weather (<32掳F): Increases fuel consumption due to:
       - Thicker engine oil viscosity
       - Longer warm-up periods
       - Heater usage
-    - Hot weather (>95°F): Slightly increases consumption due to:
+    - Hot weather (>95掳F): Slightly increases consumption due to:
       - A/C usage
       - Engine cooling demands
 
-    Optimal temperature range: 50-75°F (no adjustment needed)
+    Optimal temperature range: 50-75掳F (no adjustment needed)
 
     Args:
         ambient_temp_f: Ambient temperature in Fahrenheit, None if unavailable
@@ -944,12 +902,12 @@ def calculate_weather_mpg_factor(ambient_temp_f: Optional[float]) -> float:
         Returns 1.0 (no adjustment) if temperature is None or in optimal range.
 
     Reference ranges (based on EPA and fleet studies):
-    - <20°F: 0.88-0.90 (10-12% worse MPG)
-    - 20-32°F: 0.92-0.95 (5-8% worse)
-    - 32-50°F: 0.96-0.98 (2-4% worse)
-    - 50-75°F: 1.0 (optimal)
-    - 75-95°F: 0.98-1.0 (0-2% worse)
-    - >95°F: 0.95-0.97 (3-5% worse)
+    - <20掳F: 0.88-0.90 (10-12% worse MPG)
+    - 20-32掳F: 0.92-0.95 (5-8% worse)
+    - 32-50掳F: 0.96-0.98 (2-4% worse)
+    - 50-75掳F: 1.0 (optimal)
+    - 75-95掳F: 0.98-1.0 (0-2% worse)
+    - >95掳F: 0.95-0.97 (3-5% worse)
 
     Examples:
         >>> calculate_weather_mpg_factor(70)    # Optimal
@@ -964,35 +922,35 @@ def calculate_weather_mpg_factor(ambient_temp_f: Optional[float]) -> float:
     if ambient_temp_f is None:
         return 1.0  # No adjustment if data unavailable
 
-    # Very cold: < 20°F
+    # Very cold: < 20掳F
     if ambient_temp_f < 20:
         return 0.88
 
-    # Cold: 20-32°F
+    # Cold: 20-32掳F
     if ambient_temp_f < 32:
-        # Linear interpolation: 0.88 at 20°F to 0.92 at 32°F
+        # Linear interpolation: 0.88 at 20掳F to 0.92 at 32掳F
         return 0.88 + ((ambient_temp_f - 20) / 12) * 0.04
 
-    # Cool: 32-50°F
+    # Cool: 32-50掳F
     if ambient_temp_f < 50:
-        # Linear interpolation: 0.92 at 32°F to 0.96 at 50°F
+        # Linear interpolation: 0.92 at 32掳F to 0.96 at 50掳F
         return 0.92 + ((ambient_temp_f - 32) / 18) * 0.04
 
-    # Optimal: 50-75°F
+    # Optimal: 50-75掳F
     if ambient_temp_f <= 75:
         return 1.0
 
-    # Warm: 75-95°F
+    # Warm: 75-95掳F
     if ambient_temp_f <= 95:
-        # Linear interpolation: 1.0 at 75°F to 0.97 at 95°F
+        # Linear interpolation: 1.0 at 75掳F to 0.97 at 95掳F
         return 1.0 - ((ambient_temp_f - 75) / 20) * 0.03
 
-    # Hot: > 95°F
+    # Hot: > 95掳F
     if ambient_temp_f <= 110:
-        # Linear interpolation: 0.97 at 95°F to 0.94 at 110°F
+        # Linear interpolation: 0.97 at 95掳F to 0.94 at 110掳F
         return 0.97 - ((ambient_temp_f - 95) / 15) * 0.03
 
-    # Extreme heat: > 110°F
+    # Extreme heat: > 110掳F
     return 0.94
 
 
@@ -1001,7 +959,7 @@ def get_weather_adjusted_mpg(
     ambient_temp_f: Optional[float],
 ) -> dict:
     """
-    🆕 v5.7.8: Get MPG expectation adjusted for weather.
+    馃啎 v5.7.8: Get MPG expectation adjusted for weather.
 
     Args:
         base_mpg: Expected MPG under normal conditions
@@ -1037,10 +995,9 @@ def get_weather_adjusted_mpg(
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🆕 v5.7.8: ALGORITHM 3 - DAYS-TO-FAILURE PREDICTION
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?# 馃啎 v5.7.8: ALGORITHM 3 - DAYS-TO-FAILURE PREDICTION
 # Estimates time until maintenance needed based on trend analysis
-# ═══════════════════════════════════════════════════════════════════════════════
+# 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
 
 def calculate_days_to_failure(
@@ -1051,7 +1008,7 @@ def calculate_days_to_failure(
     max_days: float = 365.0,
 ) -> Optional[float]:
     """
-    🆕 v5.7.8: Calculate estimated days until a metric crosses a threshold.
+    馃啎 v5.7.8: Calculate estimated days until a metric crosses a threshold.
 
     This is a simple linear extrapolation based on observed trend.
     Used for predictive maintenance scheduling.
@@ -1122,10 +1079,10 @@ def predict_maintenance_timing(
     warning_threshold: float,
     critical_threshold: float,
     is_higher_worse: bool = True,
-    readings_per_day: float = 1.0,  # 🆕 v6.2.2: BUG-024 FIX - Explicit parameter
+    readings_per_day: float = 1.0,  # 馃啎 v6.2.2: BUG-024 FIX - Explicit parameter
 ) -> dict:
     """
-    🆕 v5.7.8 / 🔧 v6.2.2: Comprehensive maintenance timing prediction for a sensor.
+    馃啎 v5.7.8 / 馃敡 v6.2.2: Comprehensive maintenance timing prediction for a sensor.
 
     Analyzes recent history to determine trend and predicts when
     maintenance will be needed.
@@ -1138,7 +1095,7 @@ def predict_maintenance_timing(
         critical_threshold: Threshold for critical state
         is_higher_worse: If True, increasing values are bad (e.g., temperature)
                         If False, decreasing values are bad (e.g., battery voltage)
-        readings_per_day: 🆕 Number of readings per day in history data.
+        readings_per_day: 馃啎 Number of readings per day in history data.
                          1.0 = daily aggregated (default)
                          24.0 = hourly readings
                          96.0 = 15-min readings
@@ -1147,11 +1104,11 @@ def predict_maintenance_timing(
     Returns:
         Dict with prediction details
 
-    ⚠️ CRITICAL (BUG-024): Always specify readings_per_day if using non-daily data!
+    鈿狅笍 CRITICAL (BUG-024): Always specify readings_per_day if using non-daily data!
     If readings are hourly and you pass 1.0, predictions will be off by 24x.
     If readings are raw (15s) and you pass 1.0, predictions will be off by 5760x!
     """
-    # 🆕 v6.2.2: Validate readings_per_day parameter
+    # 馃啎 v6.2.2: Validate readings_per_day parameter
     if not (0.1 <= readings_per_day <= 10000):
         logger.error(
             f"Invalid readings_per_day={readings_per_day} for {sensor_name}. "
@@ -1162,7 +1119,7 @@ def predict_maintenance_timing(
     # Warn if suspicious value
     if readings_per_day > 100 and len(history) < 10:
         logger.warning(
-            f"⚠️ {sensor_name}: readings_per_day={readings_per_day} but only "
+            f"鈿狅笍 {sensor_name}: readings_per_day={readings_per_day} but only "
             f"{len(history)} data points. Are you sure this is correct? "
             f"This suggests <1 day of data with high-frequency sampling."
         )
@@ -1198,10 +1155,8 @@ def predict_maintenance_timing(
     slope = numerator / denominator  # Units per reading interval
 
     # Convert slope from "per reading" to "per day"
-    # ═══════════════════════════════════════════════════════════════════════════
-    # 🔧 v6.2.2: BUG-024 FIX - Use explicit readings_per_day parameter
-    # ═══════════════════════════════════════════════════════════════════════════
-    # readings_per_day now comes from the parameter, NOT hardcoded.
+    # 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?    # 馃敡 v6.2.2: BUG-024 FIX - Use explicit readings_per_day parameter
+    # 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?    # readings_per_day now comes from the parameter, NOT hardcoded.
     # Callers MUST specify the correct frequency:
     # - Daily aggregated data: readings_per_day=1.0 (default)
     # - Hourly rollups: readings_per_day=24.0
@@ -1210,14 +1165,13 @@ def predict_maintenance_timing(
     #
     # If wrong value is passed, predictions will be catastrophically wrong:
     # Example: Hourly data with readings_per_day=1.0
-    #   → slope=0.5°F/hour becomes 0.5°F/day (should be 12°F/day)
-    #   → "30 days to critical" becomes "1.25 days to critical" (HUGE ERROR!)
-    # ═══════════════════════════════════════════════════════════════════════════
-    trend_slope_per_day = slope * readings_per_day
+    #   鈫?slope=0.5掳F/hour becomes 0.5掳F/day (should be 12掳F/day)
+    #   鈫?"30 days to critical" becomes "1.25 days to critical" (HUGE ERROR!)
+    # 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?    trend_slope_per_day = slope * readings_per_day
 
     result["trend_slope_per_day"] = round(trend_slope_per_day, 4)
     result["readings_frequency"] = (
-        f"{readings_per_day} readings/day"  # 🆕 Add to output
+        f"{readings_per_day} readings/day"  # 馃啎 Add to output
     )
 
     # Determine trend direction relative to "worse"

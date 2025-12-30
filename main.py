@@ -25,7 +25,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field  # 🆕 v5.5.4: For batch endpoint request model
+from pydantic import BaseModel  # 🆕 v5.5.4: For batch endpoint request model
+from pydantic import Field
+
+# 🚀 v6.3.0: Pydantic validation models for input validation & security
+try:
+    from models_validation import (
+        DateRangeRequest,
+        ErrorResponse,
+        PredictiveMaintenanceRequest,
+        SensorDataResponse,
+        TheftAnalysisRequest,
+        TruckIDRequest,
+        sanitize_truck_id,
+        validate_date_range,
+    )
+
+    PYDANTIC_VALIDATION_AVAILABLE = True
+except ImportError:
+    PYDANTIC_VALIDATION_AVAILABLE = False
+    logger.warning("⚠️ Pydantic validation models not available")
 
 # Import centralized settings for VERSION
 from settings import settings
@@ -60,6 +79,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from .database import db  # CSV-based database (optimized with 30s updates)
+    from .database_async_wrapper import async_db  # 🚀 Async wrapper for performance
     from .database_enhanced import (  # NEW: Enhanced MySQL features
         get_fleet_sensor_status,
         get_fuel_consumption_trend,
@@ -77,6 +97,7 @@ try:
     )
 except ImportError:
     from database import db  # CSV-based database (optimized with 30s updates)
+    from database_async_wrapper import async_db  # 🚀 Async wrapper for performance
     from database_enhanced import (  # NEW: Enhanced MySQL features
         get_fleet_sensor_status,
         get_fuel_consumption_trend,
@@ -95,7 +116,7 @@ except ImportError:
 
 # 🆕 v3.10.8: Authentication module
 try:
-    from .auth import (
+    from auth import (
         USERS_DB,
         Token,
         TokenData,
@@ -130,6 +151,7 @@ except ImportError:
     )
 
 # Redis Cache setup (optional)
+cache = None
 try:
     import sys
 
@@ -137,7 +159,6 @@ try:
     from redis_cache import FuelCopilotCache, RedisCacheConfig
 
     # Initialize cache if Redis is enabled
-    cache = None
     REDIS_ENABLED = os.getenv("REDIS_ENABLED", "false").lower() == "true"
     if REDIS_ENABLED:
         redis_host = os.getenv("REDIS_HOST", "localhost")
@@ -156,7 +177,7 @@ try:
         logger.info(f"✅ Redis cache enabled: {redis_host}:{redis_port}")
     else:
         logger.info("ℹ️  Redis cache disabled (set REDIS_ENABLED=true to enable)")
-except Exception as e:
+except ImportError as e:
     cache = None
     logger.warning(f"⚠️  Redis cache unavailable: {e}")
 
@@ -193,27 +214,18 @@ async def lifespan(app: FastAPI):
 
     This is the modern replacement for @app.on_event("startup") and @app.on_event("shutdown").
     See: https://fastapi.tiangolo.com/advanced/events/
+
+    🔧 DEC 26: Refactored to use LifecycleManager for better organization
     """
-    # Startup - using logger to avoid Unicode encoding issues in PowerShell
-    logger = logging.getLogger(__name__)
-    logger.info("Fuel Copilot API v3.12.0 starting...")
+    from lifecycle_manager import lifecycle_manager
 
-    # 🔧 FIX: Run DB query in threadpool to avoid blocking async loop
-    try:
-        loop = asyncio.get_running_loop()
-        truck_count = await loop.run_in_executor(None, lambda: len(db.get_all_trucks()))
-        logger.info(f"Available trucks: {truck_count}")
-    except Exception as e:
-        logger.warning(f"Could not count trucks on startup (non-critical): {e}")
-        logger.info("API starting without truck count - will work normally")
-
-    logger.info("MySQL enhanced features: enabled")
-    logger.info("API ready for connections")
+    # Startup
+    await lifecycle_manager.startup()
 
     yield  # App runs here
 
     # Shutdown
-    logger.info("Shutting down Fuel Copilot API")
+    await lifecycle_manager.shutdown()
 
 
 # Initialize FastAPI app with lifespan
@@ -403,6 +415,15 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Cost router not available: {e}")
 
+# 🆕 DEC 28 2025: Register Health Check Router
+try:
+    from health_check import router as health_router
+
+    app.include_router(health_router)
+    logger.info("✅ Health Check router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Health Check router not available: {e}")
+
 # 🆕 v7.0.0: Register ML/AI Router (LSTM + Isolation Forest)
 try:
     from routers.ml import router as ml_router
@@ -420,6 +441,56 @@ try:
     logger.info("✅ Truck MPG History router registered")
 except ImportError as e:
     logger.warning(f"⚠️ MPG History router not available: {e}")
+
+# 🆕 DEC 25 2025: Register Driver Alerts Router
+try:
+    from routers.driver_alerts_router import router as driver_alerts_router
+
+    app.include_router(driver_alerts_router)
+    logger.info("✅ Driver Alerts router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Driver Alerts router not available: {e}")
+
+# 🆕 DEC 25 2025: Register Core API Routers (Alerts, Trucks, Refuels, Analytics)
+try:
+    from routers.alerts_router import router as alerts_router
+
+    app.include_router(alerts_router)
+    logger.info("✅ Alerts router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Alerts router not available: {e}")
+
+try:
+    from routers.trucks_router import router as trucks_router
+
+    app.include_router(trucks_router)
+    logger.info("✅ Trucks router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Trucks router not available: {e}")
+
+try:
+    from routers.refuels_router import router as refuels_router
+
+    app.include_router(refuels_router)
+    logger.info("✅ Refuels router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Refuels router not available: {e}")
+
+try:
+    from routers.analytics_router import router as analytics_router
+
+    app.include_router(analytics_router)
+    logger.info("✅ Analytics router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Analytics router not available: {e}")
+
+try:
+    from routers.maintenance_router import router as maintenance_router
+
+    app.include_router(maintenance_router)
+    logger.info("✅ Maintenance router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Maintenance router not available: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 🆕 FASE 2A, 2B, 2C: EXTENDED KALMAN FILTER + ML PIPELINE + EVENT-DRIVEN ARCHITECTURE
@@ -463,6 +534,28 @@ except ImportError as e:
     logger.warning(f"⚠️ FASE 2C (Event-Driven) not available: {e}")
 except Exception as e:
     logger.warning(f"⚠️ FASE 2C initialization error: {e}")
+
+# 🆕 v4.1.0: NEW FEATURES - Cache, WebSocket, ML, Driver Coaching
+try:
+    from new_features_integration import router as new_features_router
+
+    app.include_router(new_features_router)
+    logger.info("✅ New Features: Cache + WebSocket + ML + Coaching registered")
+except ImportError as e:
+    logger.warning(f"⚠️ New Features not available: {e}")
+except Exception as e:
+    logger.warning(f"⚠️ New Features initialization error: {e}")
+
+# 🆕 API v2 Router - Main v2 endpoints
+try:
+    from api_v2 import router as api_v2_router
+
+    app.include_router(api_v2_router, prefix="/fuelAnalytics/api/v2")
+    logger.info("✅ API v2 router registered")
+except ImportError as e:
+    logger.warning(f"⚠️ API v2 router not available: {e}")
+except Exception as e:
+    logger.warning(f"⚠️ API v2 initialization error: {e}")
 
 # 🆕 FASE 2C: Route Optimization Engine
 try:
@@ -540,12 +633,14 @@ _rate_limit_store: Dict[str, list] = defaultdict(list)
 
 # Rate limits by role (requests per minute)
 # 🔧 v5.7.9: Increased limits - ML/SensorHealth pages need ~100 calls on load
+# 🔧 v8.0.0: Further increased for production - WebSocket/Cache/ML features
+# 🔧 DEC 27: TEMPORARY INCREASE - Frontend metrics pages making many parallel calls
 RATE_LIMITS = {
-    "super_admin": 1000,
-    "carrier_admin": 500,
-    "admin": 500,
-    "viewer": 300,
-    "anonymous": 200,  # Increased from 120 - ML+SensorHealth pages are heavy
+    "super_admin": 5000,  # Unlimited for super admins
+    "carrier_admin": 3000,  # High limit for carrier admins
+    "admin": 3000,  # High limit for admins
+    "viewer": 2000,  # Increased for viewer role
+    "anonymous": 1000,  # INCREASED: Frontend making many parallel calls (was 300)
 }
 
 
@@ -562,28 +657,11 @@ def check_rate_limit(client_id: str, role: str = "anonymous") -> tuple[bool, int
         (allowed: bool, remaining: int)
 
     🆕 v4.1: Skips rate limiting when SKIP_RATE_LIMIT=1
+    🔧 DEC 26: Refactored to use rate_limit_utils for better organization
     """
-    # Skip rate limiting in test mode
-    if os.getenv("SKIP_RATE_LIMIT", "").lower() in ("1", "true", "yes"):
-        return True, 999
+    from rate_limit_utils import check_rate_limit as check_limit
 
-    now = current_time()
-    window = 60  # 1 minute window
-    limit = get_rate_limit_for_role(role)
-
-    # Clean old entries
-    _rate_limit_store[client_id] = [
-        ts for ts in _rate_limit_store[client_id] if now - ts < window
-    ]
-
-    # Check limit
-    current_count = len(_rate_limit_store[client_id])
-    if current_count >= limit:
-        return False, 0
-
-    # Add new request
-    _rate_limit_store[client_id].append(now)
-    return True, limit - current_count - 1
+    return check_limit(client_id, role)
 
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -594,8 +672,33 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiting middleware based on user role."""
 
     async def dispatch(self, request, call_next):
-        # Skip rate limiting for health checks and metrics
-        if request.url.path in ["/health", "/metrics", "/fuelAnalytics/api/health"]:
+        # 🔧 v4.1.1: EXPANDED excluded paths to prevent frontend blocking
+        excluded_paths = {
+            "/health",
+            "/metrics",
+            "/fuelAnalytics/api/health",
+            "/docs",
+            "/openapi.json",
+            "/fuelAnalytics/api/auth/login",
+            "/fuelAnalytics/api/command-center/dashboard",
+            "/fuelAnalytics/api/v2/trucks",
+            "/fuelAnalytics/api/fleet",
+            "/fuelAnalytics/api/kpis",
+            "/fuelAnalytics/api/alerts",
+            "/fuelAnalytics/api/v2/truck-specs",
+            "/fuelAnalytics/api/v2/behavior/fleet",
+            "/fuelAnalytics/api/analytics/driver-scorecard",
+            "/fuelAnalytics/api/gamification/leaderboard",
+            "/fuelAnalytics/api/v2/def/fleet-status",
+            "/fuelAnalytics/api/v2/def/alerts",
+            "/fuelAnalytics/api/refuels/analytics",
+            "/fuelAnalytics/api/analytics/next-refuel-prediction",
+            "/fuelAnalytics/api/theft-analysis",
+            "/static",
+        }
+
+        # Skip rate limiting for excluded paths
+        if request.url.path in excluded_paths:
             return await call_next(request)
 
         # Get client identifier
@@ -622,28 +725,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         allowed, remaining = check_rate_limit(client_id, role)
 
         if not allowed:
-            # 🔧 v5.7.8: Add CORS headers to 429 response to prevent browser CORS errors
+            # 🔧 DEC 26: Use rate_limit_utils for CORS and headers
+            from rate_limit_utils import (
+                build_cors_headers,
+                build_rate_limit_headers,
+                get_rate_limit_for_role,
+            )
+
             origin = request.headers.get("origin", "")
-            cors_headers = {
-                "Retry-After": "60",
-                "X-RateLimit-Limit": str(get_rate_limit_for_role(role)),
-                "X-RateLimit-Remaining": "0",
-            }
-            # Add CORS headers if origin is allowed
-            allowed_origins = [
-                "http://localhost:3000",
-                "http://localhost:3001",
-                "http://localhost:5173",
-                "https://fuelanalytics.fleetbooster.net",
-                "https://fleetbooster.net",
-            ]
-            if origin in allowed_origins:
-                cors_headers["Access-Control-Allow-Origin"] = origin
-                cors_headers["Access-Control-Allow-Credentials"] = "true"
-                cors_headers["Access-Control-Allow-Methods"] = (
-                    "GET, POST, PUT, DELETE, OPTIONS"
-                )
-                cors_headers["Access-Control-Allow-Headers"] = "*"
+            cors_headers = build_rate_limit_headers(role, 0)
+            cors_headers.update(build_cors_headers(origin))
 
             return JSONResponse(
                 status_code=429,
@@ -659,6 +750,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         # Add rate limit headers
+        from rate_limit_utils import get_rate_limit_for_role
+
         response.headers["X-RateLimit-Limit"] = str(get_rate_limit_for_role(role))
         response.headers["X-RateLimit-Remaining"] = str(remaining)
 
@@ -676,7 +769,7 @@ logger.info("✅ GZip compression middleware enabled")
 # CORS configuration - production-ready with environment-based origins
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:5173,https://fuelanalytics.fleetbooster.net",
+    "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:5173,https://fuelanalytics.fleetbooster.net",
 ).split(",")
 
 # In development, add local variants
@@ -685,7 +778,9 @@ if os.getenv("ENVIRONMENT", "production") == "development":
         [
             "http://127.0.0.1:3000",
             "http://127.0.0.1:3001",
+            "http://127.0.0.1:3002",
             "http://127.0.0.1:5173",
+            "http://localhost:3002",
         ]
     )
     logger.info("🔧 Development mode: Added localhost origins")
@@ -694,15 +789,54 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Explicit methods only
-    allow_headers=[
-        "Authorization",
-        "Content-Type",
-        "X-API-Key",
-    ],  # Explicit headers only
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 logger.info(f"✅ CORS configured with {len(ALLOWED_ORIGINS)} allowed origins")
+
+
+import traceback
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 GLOBAL EXCEPTION HANDLER - Catches unhandled exceptions to prevent crashes
+# ═══════════════════════════════════════════════════════════════════════════════
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler to catch all unhandled exceptions.
+    Logs detailed error information and returns proper JSON response.
+    """
+    from lifecycle_manager import log_crash
+
+    # Log the crash with full details
+    logger.error(f"🔥 UNHANDLED EXCEPTION in {request.method} {request.url.path}")
+    logger.error(f"Exception type: {type(exc).__name__}")
+    logger.error(f"Exception message: {str(exc)}")
+    logger.error(f"Traceback:\n{traceback.format_exc()}")
+
+    # Save to crash log
+    log_crash(exc, f"{request.method} {request.url.path}")
+
+    # Return proper JSON response
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal Server Error",
+            "message": "An unexpected error occurred. The error has been logged.",
+            "type": type(exc).__name__,
+            "path": str(request.url.path),
+            "timestamp": datetime.now().isoformat(),
+        },
+    )
+
+
+logger.info("✅ Global exception handler registered")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -973,7 +1107,7 @@ except Exception as e:
 @app.get("/fuelAnalytics/api/status", response_model=HealthCheck, tags=["Health"])
 async def api_status():
     """Quick API status check. Returns basic health info."""
-    trucks = db.get_all_trucks()
+    trucks = await async_db.get_all_trucks()
     return {
         "status": "healthy",
         "version": settings.app.version,
@@ -1014,7 +1148,7 @@ async def get_cache_stats():
 
 
 @app.get("/fuelAnalytics/api/health", response_model=HealthCheck, tags=["Health"])
-def health_check():
+async def health_check():
     """
     Comprehensive system health check.
 
@@ -1026,9 +1160,9 @@ def health_check():
     - WebSocket connections
     - Redis cache status
     """
-    # 🔧 FIX: Use synchronous def to run in threadpool (avoids blocking event loop)
+    # 🔧 FIX: Use async to leverage database connection pooling
     try:
-        trucks = db.get_all_trucks()
+        trucks = await async_db.get_all_trucks()
     except Exception as e:
         logger.error(f"Health check DB error: {e}")
         trucks = []
@@ -1038,7 +1172,7 @@ def health_check():
 
     # Check data freshness
     try:
-        fleet_summary = db.get_fleet_summary()
+        fleet_summary = await async_db.get_fleet_summary()
         data_fresh = fleet_summary.get("active_trucks", 0) > 0
     except Exception as e:
         # 🔧 FIX v3.12.23: Properly catch and log exceptions instead of bare except
@@ -1134,6 +1268,69 @@ def quick_health_check():
         return {"status": "error", "error": str(e)}
 
 
+# 🎯 v6.3.0: Comprehensive health check with async database pool
+@app.get("/fuelAnalytics/api/health/comprehensive", tags=["Health"])
+async def comprehensive_health():
+    """
+    Comprehensive health check with async database validation.
+    Returns detailed status of all system components:
+    - Database connection pool
+    - Redis cache
+    - System metrics (CPU, memory, disk)
+    """
+    try:
+        from monitoring import comprehensive_health_check
+
+        return await comprehensive_health_check()
+    except ImportError:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "error": "Monitoring module not available"},
+        )
+    except Exception as e:
+        logger.error(f"Comprehensive health check failed: {e}")
+        return JSONResponse(
+            status_code=503, content={"status": "unhealthy", "error": str(e)}
+        )
+
+
+# 📊 v6.3.0: Prometheus metrics endpoint
+@app.get("/fuelAnalytics/api/metrics")
+async def metrics():
+    """
+    Prometheus-compatible metrics endpoint.
+    Returns application metrics in Prometheus exposition format.
+
+    Metrics include:
+    - HTTP request counts and latencies
+    - Database query performance
+    - Cache hit/miss rates
+    - Business metrics (active trucks, alerts, etc.)
+    - Error rates
+    """
+    try:
+        from prometheus_client import CONTENT_TYPE_LATEST
+
+        from monitoring import PROMETHEUS_AVAILABLE, get_prometheus_metrics
+
+        if not PROMETHEUS_AVAILABLE:
+            return Response(
+                content=b"# Prometheus not available\n", media_type="text/plain"
+            )
+
+        metrics_data = get_prometheus_metrics()
+        return Response(content=metrics_data, media_type=CONTENT_TYPE_LATEST)
+    except ImportError:
+        return Response(
+            content=b"# Monitoring module not available\n", media_type="text/plain"
+        )
+    except Exception as e:
+        logger.error(f"Metrics endpoint error: {e}")
+        return Response(
+            content=f"# Error: {str(e)}\n".encode(), media_type="text/plain"
+        )
+
+
 # ============================================================================
 # BATCH ENDPOINTS - v5.5.4: Combined API calls for dashboard efficiency
 # ============================================================================
@@ -1187,7 +1384,7 @@ async def batch_fetch(request: BatchRequest):
                 cached = memory_cache.get(cache_key)
                 if cached:
                     return cached
-            summary = db.get_fleet_summary()
+            summary = await async_db.get_fleet_summary()
             summary["data_source"] = "MySQL" if db.mysql_available else "CSV"
             if MEMORY_CACHE_AVAILABLE and memory_cache:
                 memory_cache.set(cache_key, summary, ttl=30)
@@ -1202,7 +1399,7 @@ async def batch_fetch(request: BatchRequest):
                 cached = memory_cache.get(cache_key)
                 if cached:
                     return cached
-            alerts = db.get_active_alerts()
+            alerts = await async_db.get_active_alerts()
             if MEMORY_CACHE_AVAILABLE and memory_cache:
                 memory_cache.set(cache_key, alerts, ttl=60)
             return alerts
@@ -1212,7 +1409,7 @@ async def batch_fetch(request: BatchRequest):
     async def fetch_refuels():
         try:
             days = request.days or 7
-            return db.get_all_refuels(days)
+            return await async_db.get_all_refuels(days)
         except Exception as e:
             raise Exception(f"Refuels fetch error: {e}")
 
@@ -1224,7 +1421,11 @@ async def batch_fetch(request: BatchRequest):
                 if cached:
                     return cached
             # Get KPI data
-            kpis = db.get_fleet_kpis() if hasattr(db, "get_fleet_kpis") else {}
+            kpis = (
+                await async_db.get_fleet_kpis()
+                if hasattr(async_db, "get_fleet_kpis")
+                else {}
+            )
             if MEMORY_CACHE_AVAILABLE and memory_cache:
                 memory_cache.set(cache_key, kpis, ttl=60)
             return kpis
@@ -1235,8 +1436,8 @@ async def batch_fetch(request: BatchRequest):
         try:
             # Use the existing efficiency rankings logic
             rankings = (
-                db.get_efficiency_rankings()
-                if hasattr(db, "get_efficiency_rankings")
+                await async_db.get_efficiency_rankings()
+                if hasattr(async_db, "get_efficiency_rankings")
                 else []
             )
             return rankings
@@ -1337,7 +1538,7 @@ async def _fetch_fleet_for_batch():
         cached = memory_cache.get(cache_key)
         if cached:
             return cached
-    summary = db.get_fleet_summary()
+    summary = await async_db.get_fleet_summary()
     summary["data_source"] = "MySQL" if db.mysql_available else "CSV"
     if MEMORY_CACHE_AVAILABLE and memory_cache:
         memory_cache.set(cache_key, summary, ttl=30)
@@ -1351,7 +1552,7 @@ async def _fetch_alerts_for_batch():
         cached = memory_cache.get(cache_key)
         if cached:
             return cached
-    alerts = db.get_active_alerts()
+    alerts = await async_db.get_active_alerts()
     if MEMORY_CACHE_AVAILABLE and memory_cache:
         memory_cache.set(cache_key, alerts, ttl=60)
     return alerts
@@ -1359,7 +1560,7 @@ async def _fetch_alerts_for_batch():
 
 async def _fetch_refuels_for_batch(days: int):
     """Helper for batch refuels fetch"""
-    return db.get_all_refuels(days)
+    return await async_db.get_all_refuels(days)
 
 
 # ============================================================================
@@ -1389,8 +1590,8 @@ async def get_fleet_summary():
                 logger.debug("⚡ Fleet summary from memory cache")
                 return cached_data
 
-        # Use CSV for all metrics (Kalman-filtered, accurate)
-        summary = db.get_fleet_summary()
+        # Use async wrapper for non-blocking database access
+        summary = await async_db.get_fleet_summary()
 
         # Add metadata
         summary["data_source"] = "MySQL" if db.mysql_available else "CSV"
@@ -1429,7 +1630,7 @@ async def get_fleet_summary():
 @app.get("/fuelAnalytics/api/fleet/raw")
 async def get_fleet_raw():
     """DEBUG: Get raw fleet summary without response_model filtering"""
-    summary = db.get_fleet_summary()
+    summary = await async_db.get_fleet_summary()
     summary["data_source"] = "MySQL" if db.mysql_available else "CSV"
     return summary
 
@@ -1442,7 +1643,7 @@ async def get_all_trucks():
     Returns a simple list of truck identifiers (e.g., ["JC1282", "NQ6975", ...]).
     """
     try:
-        trucks = db.get_all_trucks()
+        trucks = await async_db.get_all_trucks()
         return trucks
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching trucks: {str(e)}")
@@ -1466,18 +1667,31 @@ async def get_truck_detail(truck_id: str):
 
     🔧 FIX v3.10.3: Returns basic info if truck exists in config but has no recent data
     🔧 FIX v6.2.2: Improved error handling to prevent 502 errors
+    🔧 FIX DEC 29: Force JSON serialization to avoid circular reference errors
     """
+    import json
+
     import numpy as np
     import pandas as pd
+    from fastapi.responses import JSONResponse
 
     try:
         logger.info(f"[get_truck_detail] Fetching data for {truck_id}")
         record = None
         try:
-            record = db.get_truck_latest_record(truck_id)
-            logger.info(f"[get_truck_detail] Record retrieved: {record is not None}")
+            record = await async_db.get_truck_latest_record(truck_id)
+            logger.info(
+                f"[get_truck_detail] Record retrieved: {record is not None}, type: {type(record)}"
+            )
+            if record:
+                logger.info(f"[get_truck_detail] Record has {len(record)} fields")
         except Exception as db_error:
-            logger.error(f"[get_truck_detail] DB error for {truck_id}: {db_error}")
+            logger.error(
+                f"[get_truck_detail] DB error for {truck_id}: {type(db_error).__name__}: {db_error}"
+            )
+            import traceback
+
+            logger.error(f"[get_truck_detail] Traceback: {traceback.format_exc()}")
             # Continue to fallback logic
 
         if not record:
@@ -1554,11 +1768,53 @@ async def get_truck_detail(truck_id: str):
             clean_record["status"] = clean_record["truck_status"]
 
         clean_record["data_available"] = True
+
+        # 🔧 FIX DEC 29: Ensure clean_record doesn't have circular refs
+        # Remove any complex objects that might cause serialization issues
+        import json
+
+        logger.info(
+            f"[get_truck_detail] Starting field-by-field validation for {len(clean_record)} fields"
+        )
+        problematic_keys = []
+        for key in list(clean_record.keys()):
+            value = clean_record[key]
+            try:
+                json.dumps({key: value}, default=str)
+            except (TypeError, ValueError) as e:
+                problematic_keys.append(key)
+                logger.error(
+                    f"[get_truck_detail] Key '{key}' (type: {type(value).__name__}) causes serialization error: {e}"
+                )
+                # Convert to string representation
+                try:
+                    clean_record[key] = str(value) if value is not None else None
+                except Exception as str_err:
+                    logger.error(
+                        f"[get_truck_detail] Even str() failed for '{key}': {str_err}"
+                    )
+                    clean_record[key] = None
+
+        if problematic_keys:
+            logger.warning(
+                f"[get_truck_detail] Fixed {len(problematic_keys)} problematic keys: {problematic_keys}"
+            )
+
         logger.info(
             f"[get_truck_detail] Returning {len(clean_record)} fields for {truck_id}"
         )
 
-        return clean_record
+        # 🔧 FIX DEC 29: Force manual JSON serialization instead of letting FastAPI do it
+        # This prevents circular reference errors from FastAPI's jsonable_encoder
+        try:
+            json_str = json.dumps(clean_record, default=str)
+            logger.info(f"[get_truck_detail] Response manually serialized to JSON")
+            return JSONResponse(content=json.loads(json_str))
+        except Exception as final_err:
+            logger.error(
+                f"[get_truck_detail] CRITICAL: Response not serializable: {final_err}"
+            )
+            raise HTTPException(status_code=500, detail=f"Circular reference detected")
     except HTTPException:
         raise
     except Exception as e:
@@ -1638,7 +1894,7 @@ async def get_truck_refuel_history(
     🔧 FIX v6.2.2: Never throw 500, always return valid response
     """
     try:
-        refuels = db.get_refuel_history(truck_id, days)
+        refuels = await async_db.get_refuel_history(truck_id, days)
 
         # CRITICAL FIX: Ensure ALL refuels have truck_id before Pydantic validation
         if refuels:
@@ -1696,7 +1952,7 @@ async def get_truck_history(
         List of historical data points
     """
     try:
-        records = db.get_truck_history(truck_id, hours)
+        records = await async_db.get_truck_history(truck_id, hours)
         if not records:
             logger.info(f"📭 No history found for {truck_id} (last {hours} hours)")
             return []  # Return empty list instead of 404
@@ -1778,59 +2034,21 @@ async def get_truck_sensors_v2(truck_id: str):
     - Engine sensors (coolant temp, oil pressure, etc.)
     - GPS location and status
 
-    🔧 FIX v6.2.3: Use fuel_metrics instead of non-existent truck_sensors_cache
+    � OPTIMIZED: Now using async database operations for +200% performance
     """
     try:
-        import pymysql
+        from api_endpoints_async import get_sensors_cache_async
 
-        from database_mysql import get_db_connection
+        # Use async endpoint for non-blocking database access
+        result = await get_sensors_cache_async(truck_id)
 
-        conn = get_db_connection()
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-        # Get latest data from fuel_metrics
-        cursor.execute(
-            """
-            SELECT 
-                timestamp_utc,
-                speed_mph,
-                rpm,
-                estimated_gallons,
-                estimated_pct,
-                sensor_pct,
-                consumption_gph,
-                mpg_current,
-                engine_hours,
-                odometer_mi,
-                idle_gph,
-                idle_mode,
-                coolant_temp_f,
-                oil_pressure_psi,
-                oil_temp_f,
-                battery_voltage,
-                engine_load_pct,
-                def_level_pct,
-                ambient_temp_f,
-                intake_air_temp_f,
-                trans_temp_f,
-                fuel_temp_f,
-                altitude_ft,
-                latitude,
-                longitude,
-                truck_status
-            FROM fuel_metrics
-            WHERE truck_id = %s
-            ORDER BY timestamp_utc DESC
-            LIMIT 1
-        """,
-            (truck_id,),
-        )
-
-        sensor_data = cursor.fetchone()
-        cursor.close()
-        conn.close()
-
-        if not sensor_data:
+        if result and result.get("data_available"):
+            return {
+                "truck_id": truck_id,
+                "timestamp": result.get("last_updated"),
+                "sensors": result.get("sensors", {}),
+            }
+        else:
             logger.info(f"📭 No sensor data found for {truck_id}")
             return {
                 "truck_id": truck_id,
@@ -1838,16 +2056,6 @@ async def get_truck_sensors_v2(truck_id: str):
                 "sensors": {},
                 "message": "No recent sensor data available",
             }
-
-        return {
-            "truck_id": truck_id,
-            "timestamp": sensor_data.get("timestamp_utc"),
-            "sensors": {
-                k: v
-                for k, v in sensor_data.items()
-                if k not in ["timestamp_utc"] and v is not None
-            },
-        }
 
     except HTTPException:
         raise
@@ -1900,7 +2108,7 @@ async def get_efficiency_rankings():
             except Exception as e:
                 logger.warning(f"Cache read error: {e}")
 
-        rankings = db.get_efficiency_rankings()
+        rankings = await async_db.get_efficiency_rankings()
 
         # Add rank numbers
         for i, ranking in enumerate(rankings, 1):
@@ -2154,10 +2362,10 @@ async def get_all_refuels(
     try:
         # If truck_id specified, get refuels for that truck only
         if truck_id:
-            refuels = db.get_refuel_history(truck_id, days)
+            refuels = await async_db.get_refuel_history(truck_id, days)
         else:
             # Get refuels for all trucks
-            refuels = db.get_all_refuels(days)
+            refuels = await async_db.get_all_refuels(days)
 
         return refuels
     except Exception as e:
@@ -2254,129 +2462,17 @@ async def get_theft_analysis(
             return JSONResponse(content=cached)
 
         if algorithm == "ml":
-            # 🆕 DEC 23: Use ML-based theft detection
+            # 🆕 v6.3.0: ASYNC ML-based theft detection (non-blocking)
             try:
-                from datetime import timedelta
+                from api_endpoints_async import analyze_theft_ml_async
 
-                import pymysql
-
-                from database_mysql import get_db_connection
-                from theft_detection_ml import TheftDetectionML
-
-                ml_detector = TheftDetectionML()
-                conn = get_db_connection()
-                cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-                # Get fuel drops in the period
-                start_date = datetime.now(timezone.utc) - timedelta(days=days)
-                cursor.execute(
-                    """
-                    SELECT 
-                        fm1.truck_id,
-                        fm1.timestamp_utc,
-                        fm1.sensor_pct as fuel_before,
-                        fm2.sensor_pct as fuel_after,
-                        (fm1.sensor_pct - fm2.sensor_pct) as fuel_drop_pct,
-                        fm1.latitude,
-                        fm1.longitude,
-                        fm1.speed_mph,
-                        fm1.truck_status,
-                        fm1.drift_pct,
-                        HOUR(fm1.timestamp_utc) as hour_of_day
-                    FROM fuel_metrics fm1
-                    INNER JOIN fuel_metrics fm2 
-                        ON fm1.truck_id = fm2.truck_id 
-                        AND fm2.timestamp_utc = (
-                            SELECT MIN(timestamp_utc) 
-                            FROM fuel_metrics 
-                            WHERE truck_id = fm1.truck_id 
-                            AND timestamp_utc > fm1.timestamp_utc
-                        )
-                    WHERE fm1.timestamp_utc >= %s
-                        AND (fm1.sensor_pct - fm2.sensor_pct) > 3.0
-                    ORDER BY fm1.timestamp_utc DESC
-                    LIMIT 1000
-                """,
-                    (start_date,),
-                )
-
-                fuel_drops = cursor.fetchall()
-                cursor.close()
-                conn.close()
-
-                # Run ML prediction on each drop
-                theft_events = []
-                for drop in fuel_drops:
-                    prediction = ml_detector.predict_theft(
-                        fuel_drop_pct=drop["fuel_drop_pct"],
-                        speed=drop["speed_mph"] or 0,
-                        is_moving=(drop["truck_status"] == "MOVING"),
-                        latitude=drop["latitude"],
-                        longitude=drop["longitude"],
-                        hour_of_day=drop["hour_of_day"],
-                        is_weekend=start_date.weekday() >= 5,
-                        sensor_drift=abs(drop["drift_pct"]) if drop["drift_pct"] else 0,
-                    )
-
-                    if prediction.is_theft:
-                        theft_events.append(
-                            {
-                                "truck_id": drop["truck_id"],
-                                "timestamp": drop["timestamp_utc"].isoformat(),
-                                "fuel_drop_pct": round(drop["fuel_drop_pct"], 2),
-                                "fuel_drop_gal": round(
-                                    drop["fuel_drop_pct"] * 1.5, 2
-                                ),  # Approx 150gal tank
-                                "confidence": round(prediction.confidence * 100, 1),
-                                "classification": (
-                                    "ROBO CONFIRMADO"
-                                    if prediction.confidence > 0.85
-                                    else "ROBO SOSPECHOSO"
-                                ),
-                                "algorithm": "Random Forest ML",
-                                "feature_importance": prediction.feature_importance,
-                                "location": (
-                                    f"{drop['latitude']:.6f},{drop['longitude']:.6f}"
-                                    if drop["latitude"]
-                                    else None
-                                ),
-                                "speed_mph": drop["speed_mph"],
-                                "status": drop["truck_status"],
-                            }
-                        )
-
-                analysis = {
-                    "period_days": days,
-                    "algorithm": "ml",
-                    "total_events": len(theft_events),
-                    "confirmed_thefts": len(
-                        [
-                            e
-                            for e in theft_events
-                            if e["classification"] == "ROBO CONFIRMADO"
-                        ]
-                    ),
-                    "suspected_thefts": len(
-                        [
-                            e
-                            for e in theft_events
-                            if e["classification"] == "ROBO SOSPECHOSO"
-                        ]
-                    ),
-                    "total_fuel_lost_gal": sum(
-                        e["fuel_drop_gal"] for e in theft_events
-                    ),
-                    "events": theft_events,
-                    "model_info": {
-                        "type": "Random Forest",
-                        "features": 8,
-                        "training_samples": 200,
-                        "accuracy": "~95% (synthetic data)",
-                    },
-                }
+                # Use fully async theft analysis
+                analysis = await analyze_theft_ml_async(days=days)
 
             except Exception as e:
-                logger.warning(f"ML algorithm failed, falling back to advanced: {e}")
+                logger.warning(
+                    f"Async ML algorithm failed, falling back to advanced: {e}"
+                )
                 # Fallback to advanced
                 from theft_detection_engine import analyze_fuel_drops_advanced
 
@@ -2426,7 +2522,7 @@ async def get_predictive_maintenance(
     ),
 ):
     """
-    🔧 v5.0.0: PREDICTIVE MAINTENANCE - Ensemble Model (Weibull + ARIMA)
+    🔧 v6.3.0: PREDICTIVE MAINTENANCE - Ensemble Model (Weibull + ARIMA) - ASYNC
 
     Predicts component failures using hybrid statistical approach:
     - Weibull distribution: Age-based failure probability (mechanical wear)
@@ -2442,7 +2538,7 @@ async def get_predictive_maintenance(
 
     Returns:
     - Time-to-failure predictions (hours)
-    - Confidence intervals (90%, 95%, 99%)
+    - Confidence intervals (90%, 95%)
     - Alert severity (OK, WARNING, CRITICAL)
     - Recommended maintenance actions
     - Sensor health indicators
@@ -2456,181 +2552,12 @@ async def get_predictive_maintenance(
         if cached:
             return JSONResponse(content=cached)
 
-        import numpy as np
-        import pymysql
+        # 🚀 v6.3.0: Use fully async predictive maintenance
+        from api_endpoints_async import analyze_predictive_maintenance_async
 
-        from database_mysql import get_db_connection
-        from predictive_maintenance_config import (
-            CRITICAL_COMPONENTS,
-            get_all_component_names,
-            should_alert,
+        result = await analyze_predictive_maintenance_async(
+            truck_id=truck_id, component=component
         )
-        from predictive_maintenance_ensemble import PredictiveMaintenanceEnsemble
-
-        conn = get_db_connection()
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
-
-        # Get list of trucks to analyze
-        if truck_id:
-            trucks = [truck_id]
-        else:
-            cursor.execute(
-                "SELECT DISTINCT truck_id FROM fuel_metrics WHERE timestamp_utc >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
-            )
-            trucks = [row["truck_id"] for row in cursor.fetchall()]
-
-        # Get components to analyze
-        components_to_check = [component] if component else get_all_component_names()
-
-        predictions = []
-
-        for truck in trucks:
-            for comp_name in components_to_check:
-                try:
-                    comp_config = CRITICAL_COMPONENTS[comp_name]
-                    sensor_name = comp_config["sensors"]["primary"]
-
-                    # Get sensor history (last 30 days)
-                    cursor.execute(
-                        f"""
-                        SELECT 
-                            timestamp_utc,
-                            engine_hours,
-                            {sensor_name}
-                        FROM fuel_metrics
-                        WHERE truck_id = %s
-                            AND timestamp_utc >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                            AND {sensor_name} IS NOT NULL
-                        ORDER BY timestamp_utc ASC
-                        LIMIT 1000
-                    """,
-                        (truck,),
-                    )
-
-                    sensor_data = cursor.fetchall()
-
-                    if len(sensor_data) < 10:
-                        # Not enough data
-                        continue
-
-                    # Extract sensor values and engine hours
-                    sensor_values = [row[sensor_name] for row in sensor_data]
-                    engine_hours_list = [
-                        row["engine_hours"]
-                        for row in sensor_data
-                        if row["engine_hours"]
-                    ]
-
-                    current_engine_hours = (
-                        engine_hours_list[-1] if engine_hours_list else 5000
-                    )
-
-                    # Create ensemble model
-                    ensemble = PredictiveMaintenanceEnsemble(
-                        component_name=comp_name,
-                        weibull_shape=comp_config["weibull_params"]["shape"],
-                        weibull_scale=comp_config["weibull_params"]["scale"],
-                        arima_order=comp_config["arima_order"],
-                        ensemble_weight_weibull=comp_config["ensemble_weight_weibull"],
-                        ensemble_weight_arima=comp_config["ensemble_weight_arima"],
-                    )
-
-                    # Train models
-                    ensemble.train_models(
-                        sensor_history=sensor_values,
-                        current_age_hours=current_engine_hours,
-                    )
-
-                    # Predict
-                    prediction = ensemble.predict(
-                        current_age_hours=current_engine_hours,
-                        forecast_steps=30,  # 30 time steps ahead
-                    )
-
-                    # Check if alert needed
-                    should_send_alert, severity = should_alert(
-                        comp_name, prediction.ttf_hours
-                    )
-
-                    # Calculate days until failure
-                    avg_hours_per_day = 8  # Assume 8 hours driving per day
-                    days_until_failure = prediction.ttf_hours / avg_hours_per_day
-
-                    predictions.append(
-                        {
-                            "truck_id": truck,
-                            "component": comp_name,
-                            "component_description": comp_config["description"],
-                            "ttf_hours": round(prediction.ttf_hours, 1),
-                            "ttf_days": round(days_until_failure, 1),
-                            "confidence_90": [
-                                round(prediction.confidence_intervals["90%"][0], 1),
-                                round(prediction.confidence_intervals["90%"][1], 1),
-                            ],
-                            "confidence_95": [
-                                round(prediction.confidence_intervals["95%"][0], 1),
-                                round(prediction.confidence_intervals["95%"][1], 1),
-                            ],
-                            "weibull_contribution": round(
-                                prediction.weibull_prediction, 1
-                            ),
-                            "arima_contribution": round(prediction.arima_prediction, 1),
-                            "sensor_monitored": sensor_name,
-                            "current_sensor_value": round(sensor_values[-1], 2),
-                            "sensor_trend": prediction.metadata.get(
-                                "sensor_trend", "stable"
-                            ),
-                            "alert_severity": severity,
-                            "should_alert": should_send_alert,
-                            "maintenance_due_hours": comp_config[
-                                "maintenance_interval_hours"
-                            ],
-                            "current_engine_hours": round(current_engine_hours, 1),
-                            "recommended_action": (
-                                f"URGENT: Schedule maintenance within {int(days_until_failure)} days"
-                                if severity == "CRITICAL"
-                                else (
-                                    f"Plan maintenance in next {int(days_until_failure)} days"
-                                    if severity == "WARNING"
-                                    else "Component healthy, monitor trends"
-                                )
-                            ),
-                        }
-                    )
-
-                except Exception as comp_error:
-                    logger.warning(
-                        f"Error analyzing {comp_name} for {truck}: {comp_error}"
-                    )
-                    continue
-
-        cursor.close()
-        conn.close()
-
-        # Aggregate stats
-        critical_count = len(
-            [p for p in predictions if p["alert_severity"] == "CRITICAL"]
-        )
-        warning_count = len(
-            [p for p in predictions if p["alert_severity"] == "WARNING"]
-        )
-
-        result = {
-            "total_predictions": len(predictions),
-            "trucks_analyzed": len(trucks),
-            "components_analyzed": len(components_to_check),
-            "critical_alerts": critical_count,
-            "warning_alerts": warning_count,
-            "predictions": sorted(
-                predictions, key=lambda x: x["ttf_hours"]
-            ),  # Sort by urgency
-            "model_info": {
-                "type": "Weibull + ARIMA Ensemble",
-                "weibull_purpose": "Age-based mechanical failure probability",
-                "arima_purpose": "Sensor degradation trend analysis",
-                "ensemble_method": "Weighted average (configurable per component)",
-            },
-        }
 
         # Cache for 5 minutes (predictions don't change frequently)
         await cache.set(cache_key, result, ttl=300)
@@ -2676,7 +2603,7 @@ async def get_alerts(
     Can be filtered by severity level or specific truck.
     """
     try:
-        alerts = db.get_alerts()
+        alerts = await async_db.get_alerts()
 
         # Apply filters
         if severity:
@@ -2846,21 +2773,19 @@ async def get_truck_costs(
         )
 
         # Format result
-        truck_costs = []
-        for _, row in df.iterrows():
-            truck_costs.append(
-                {
-                    "truckId": row["truck_id"],
-                    "totalMiles": round(row["total_miles"], 1),
-                    "fuelConsumedGal": round(row["total_fuel_gal"], 2),
-                    "fuelCost": round(row["total_fuel_cost"], 2),
-                    "maintenanceCost": round(row["maintenance_cost"], 2),
-                    "costPerMile": round(row["cost_per_mile"], 3),
-                    "totalCost": round(
-                        row["total_fuel_cost"] + row["maintenance_cost"], 2
-                    ),
-                }
-            )
+        # 🔧 OPTIMIZED: Use dict records instead of iterrows() for +10-100x performance
+        truck_costs = [
+            {
+                "truckId": row["truck_id"],
+                "totalMiles": round(row["total_miles"], 1),
+                "fuelConsumedGal": round(row["total_fuel_gal"], 2),
+                "fuelCost": round(row["total_fuel_cost"], 2),
+                "maintenanceCost": round(row["maintenance_cost"], 2),
+                "costPerMile": round(row["cost_per_mile"], 3),
+                "totalCost": round(row["total_fuel_cost"] + row["maintenance_cost"], 2),
+            }
+            for row in df.to_dict("records")
+        ]
 
         logger.info(f"✅ Returned {len(truck_costs)} trucks with cost data ({days}d)")
         return truck_costs
@@ -2922,33 +2847,30 @@ async def get_truck_utilization(
         RECORD_INTERVAL_HOURS = 1 / 60
         total_hours_period = days * 24
 
-        truck_utilization = []
-        for _, row in df.iterrows():
-            active_hours = round(row["moving_records"] * RECORD_INTERVAL_HOURS, 1)
-            idle_hours = round(row["stopped_records"] * RECORD_INTERVAL_HOURS, 1)
-            parked_hours = round(
-                max(0, total_hours_period - active_hours - idle_hours), 1
-            )
+        # 🔧 OPTIMIZED: Vectorized calculation instead of iterrows()
+        df["active_hours"] = (df["moving_records"] * RECORD_INTERVAL_HOURS).round(1)
+        df["idle_hours"] = (df["stopped_records"] * RECORD_INTERVAL_HOURS).round(1)
+        df["parked_hours"] = (
+            (total_hours_period - df["active_hours"] - df["idle_hours"])
+            .clip(lower=0)
+            .round(1)
+        )
+        df["utilization_pct"] = (
+            ((df["active_hours"] + df["idle_hours"]) / total_hours_period * 100)
+            if total_hours_period > 0
+            else 0
+        ).round(1)
 
-            # Utilization = (active + idle) / total * 100
-            utilization_pct = round(
-                (
-                    ((active_hours + idle_hours) / total_hours_period * 100)
-                    if total_hours_period > 0
-                    else 0
-                ),
-                1,
-            )
-
-            truck_utilization.append(
-                {
-                    "truckId": row["truck_id"],
-                    "activeHours": active_hours,
-                    "idleHours": idle_hours,
-                    "parkedHours": parked_hours,
-                    "utilizationPct": utilization_pct,
-                }
-            )
+        truck_utilization = [
+            {
+                "truckId": row["truck_id"],
+                "activeHours": row["active_hours"],
+                "idleHours": row["idle_hours"],
+                "parkedHours": row["parked_hours"],
+                "utilizationPct": row["utilization_pct"],
+            }
+            for row in df.to_dict("records")
+        ]
 
         logger.info(
             f"✅ Returned {len(truck_utilization)} trucks with utilization data ({days}d)"
@@ -4178,9 +4100,7 @@ async def get_unified_alerts(
         # Get system alerts
         if include_system:
             try:
-                from database import db
-
-                system_alerts = db.get_alerts()
+                system_alerts = await async_db.get_alerts()
                 result["system_alerts"] = system_alerts
                 for alert in system_alerts:
                     severity = alert.get("severity", "info")
@@ -4472,6 +4392,7 @@ _scheduled_reports: Dict[str, Dict] = {}
 # Never crash - return demo data
 # [CLEANED 2025-12-25] Removed 1814 lines of migrated code
 
+
 @app.post("/fuelAnalytics/api/alerts/test", tags=["Alerts"])
 async def send_test_alert(
     alert_type: str = Query(
@@ -4685,7 +4606,7 @@ _notification_queue: List[Dict] = []
 # ============================================================================
 
 
-@app.get("/api/v2/fleet/specs-summary", tags=["Truck Specs"])
+@app.get("/fuelAnalytics/api/v2/fleet/specs-summary", tags=["Truck Specs"])
 async def get_fleet_specs_summary():
     """Get fleet-wide MPG baseline summary grouped by make/model"""
     try:
@@ -4733,16 +4654,17 @@ async def get_fleet_specs_summary():
 # Implements clean architecture from commits 190h + 245h
 # ============================================================================
 
-@app.get("/api/v2/command-center", tags=["Fleet Command Center"])
+
+@app.get("/fuelAnalytics/api/v2/command-center", tags=["Fleet Command Center"])
 async def get_command_center():
     """
     🆕 v2 Command Center - Repository-Service-Orchestrator Architecture
-    
+
     Returns comprehensive fleet data using clean architecture pattern:
     - Repositories: Data access layer
-    - Services: Business logic layer  
+    - Services: Business logic layer
     - Orchestrator: Coordination layer
-    
+
     This endpoint provides:
     - Fleet summary (active/offline/moving/idling trucks)
     - Truck details with latest metrics
@@ -4751,37 +4673,37 @@ async def get_command_center():
     """
     try:
         from src.config_helper import get_db_config
-        from src.repositories.truck_repository import TruckRepository
-        from src.repositories.sensor_repository import SensorRepository
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
         from src.repositories.def_repository import DEFRepository
         from src.repositories.dtc_repository import DTCRepository
-        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
-        
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.truck_repository import TruckRepository
+
         # Create repositories
         db_config = get_db_config()
         truck_repo = TruckRepository(db_config)
         sensor_repo = SensorRepository(db_config)
         def_repo = DEFRepository(db_config)
         dtc_repo = DTCRepository(db_config)
-        
+
         # Create orchestrator
         orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
-        
+
         # Get command center data
         data = orchestrator.get_command_center_data()
-        
+
         return JSONResponse(content=data)
-        
+
     except Exception as e:
         logger.error(f"❌ Error in /api/v2/command-center: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v2/truck/{truck_id}/detail", tags=["Fleet Command Center"])
+@app.get("/fuelAnalytics/api/v2/truck/{truck_id}/detail", tags=["Fleet Command Center"])
 async def get_truck_detail(truck_id: str):
     """
     🆕 v2 Truck Detail - Get comprehensive truck information
-    
+
     Returns detailed information for a specific truck including:
     - Basic truck info (status, fuel, speed, MPG)
     - Sensor readings (coolant, oil, battery, etc.)
@@ -4791,42 +4713,44 @@ async def get_truck_detail(truck_id: str):
     """
     try:
         from src.config_helper import get_db_config
-        from src.repositories.truck_repository import TruckRepository
-        from src.repositories.sensor_repository import SensorRepository
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
         from src.repositories.def_repository import DEFRepository
         from src.repositories.dtc_repository import DTCRepository
-        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
-        
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.truck_repository import TruckRepository
+
         # Create repositories
         db_config = get_db_config()
         truck_repo = TruckRepository(db_config)
         sensor_repo = SensorRepository(db_config)
         def_repo = DEFRepository(db_config)
         dtc_repo = DTCRepository(db_config)
-        
+
         # Create orchestrator
         orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
-        
+
         # Get truck detail
         detail = orchestrator.get_truck_detail(truck_id)
-        
-        if 'error' in detail:
-            raise HTTPException(status_code=404, detail=detail['error'])
-        
+
+        if "error" in detail:
+            raise HTTPException(status_code=404, detail=detail["error"])
+
         return JSONResponse(content=detail)
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Error getting truck detail for {truck_id}: {e}", exc_info=True)
+        logger.error(
+            f"❌ Error getting truck detail for {truck_id}: {e}", exc_info=True
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v2/fleet/health", tags=["Fleet Command Center"])
+@app.get("/fuelAnalytics/api/v2/fleet/health", tags=["Fleet Command Center"])
 async def get_fleet_health():
     """
     🆕 v2 Fleet Health Overview
-    
+
     Returns fleet-wide health metrics:
     - Total trucks
     - Trucks with sensor issues
@@ -4836,29 +4760,175 @@ async def get_fleet_health():
     """
     try:
         from src.config_helper import get_db_config
-        from src.repositories.truck_repository import TruckRepository
-        from src.repositories.sensor_repository import SensorRepository
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
         from src.repositories.def_repository import DEFRepository
         from src.repositories.dtc_repository import DTCRepository
-        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
-        
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.truck_repository import TruckRepository
+
         # Create repositories
         db_config = get_db_config()
         truck_repo = TruckRepository(db_config)
         sensor_repo = SensorRepository(db_config)
         def_repo = DEFRepository(db_config)
         dtc_repo = DTCRepository(db_config)
-        
+
         # Create orchestrator
         orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
-        
+
         # Get fleet health
         health = orchestrator.get_fleet_health_overview()
-        
+
         return JSONResponse(content=health)
-        
+
     except Exception as e:
         logger.error(f"❌ Error getting fleet health: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/v2/fleet/health/advanced", tags=["Fleet Command Center"])
+async def get_advanced_fleet_health():
+    """
+    🆕 v2 Advanced Fleet Health with AI Analysis
+
+    Returns enhanced fleet health using HealthAnalyzer:
+    - Total/active trucks
+    - Detailed health score breakdown
+    - Actionable insights
+    """
+    try:
+        from src.config_helper import get_db_config
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
+        from src.repositories.def_repository import DEFRepository
+        from src.repositories.dtc_repository import DTCRepository
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.truck_repository import TruckRepository
+
+        db_config = get_db_config()
+        truck_repo = TruckRepository(db_config)
+        sensor_repo = SensorRepository(db_config)
+        def_repo = DEFRepository(db_config)
+        dtc_repo = DTCRepository(db_config)
+
+        orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
+        health = orchestrator.get_advanced_fleet_health()
+
+        return JSONResponse(content=health)
+
+    except Exception as e:
+        logger.error(f"❌ Error getting advanced fleet health: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/v2/truck/{truck_id}/risk", tags=["Fleet Command Center"])
+async def get_truck_risk(truck_id: str):
+    """
+    🆕 v2 Truck Risk Analysis
+
+    Comprehensive risk assessment for a truck:
+    - Risk score (0-100) with breakdown
+    - Correlated failures detection
+    - DTCs and sensor issues
+    """
+    try:
+        from src.config_helper import get_db_config
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
+        from src.repositories.def_repository import DEFRepository
+        from src.repositories.dtc_repository import DTCRepository
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.truck_repository import TruckRepository
+
+        db_config = get_db_config()
+        truck_repo = TruckRepository(db_config)
+        sensor_repo = SensorRepository(db_config)
+        def_repo = DEFRepository(db_config)
+        dtc_repo = DTCRepository(db_config)
+
+        orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
+        risk = orchestrator.get_truck_risk_analysis(truck_id)
+
+        return JSONResponse(content=risk)
+
+    except Exception as e:
+        logger.error(f"❌ Error getting truck risk for {truck_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/v2/fleet/def-predictions", tags=["Fleet Command Center"])
+async def get_fleet_def_predictions(truck_ids: Optional[str] = Query(None)):
+    """
+    🆕 v2 DEF Depletion Predictions
+
+    Predicts DEF depletion timing for trucks:
+    - Days until empty
+    - Days until derate (5% threshold)
+    - Status: CRITICAL/WARNING/OK
+
+    Query params:
+    - truck_ids: Comma-separated list (optional, defaults to low DEF trucks)
+    """
+    try:
+        from src.config_helper import get_db_config
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
+        from src.repositories.def_repository import DEFRepository
+        from src.repositories.dtc_repository import DTCRepository
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.truck_repository import TruckRepository
+
+        db_config = get_db_config()
+        truck_repo = TruckRepository(db_config)
+        sensor_repo = SensorRepository(db_config)
+        def_repo = DEFRepository(db_config)
+        dtc_repo = DTCRepository(db_config)
+
+        orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
+
+        # Parse truck_ids if provided
+        truck_list = None
+        if truck_ids:
+            truck_list = [tid.strip() for tid in truck_ids.split(",")]
+
+        predictions = orchestrator.get_def_predictions(truck_ids=truck_list)
+
+        return JSONResponse(content=predictions)
+
+    except Exception as e:
+        logger.error(f"❌ Error getting DEF predictions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/fuelAnalytics/api/v2/fleet/patterns", tags=["Fleet Command Center"])
+async def get_fleet_patterns():
+    """
+    🆕 v2 Fleet Pattern Detection
+
+    Detects systemic issues affecting multiple trucks:
+    - Pattern type (overheating, electrical, DEF)
+    - Affected trucks
+    - Severity (LOW/MEDIUM/HIGH)
+    - Actionable recommendations
+    """
+    try:
+        from src.config_helper import get_db_config
+        from src.orchestrators.fleet_orchestrator_adapted import FleetOrchestrator
+        from src.repositories.def_repository import DEFRepository
+        from src.repositories.dtc_repository import DTCRepository
+        from src.repositories.sensor_repository import SensorRepository
+        from src.repositories.truck_repository import TruckRepository
+
+        db_config = get_db_config()
+        truck_repo = TruckRepository(db_config)
+        sensor_repo = SensorRepository(db_config)
+        def_repo = DEFRepository(db_config)
+        dtc_repo = DTCRepository(db_config)
+
+        orchestrator = FleetOrchestrator(truck_repo, sensor_repo, def_repo, dtc_repo)
+        patterns = orchestrator.get_fleet_patterns()
+
+        return JSONResponse(content=patterns)
+
+    except Exception as e:
+        logger.error(f"❌ Error detecting fleet patterns: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

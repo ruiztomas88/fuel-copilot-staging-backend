@@ -61,7 +61,7 @@ class TestFleetDirectExecution:
             trend="+5",
             threshold="<40",
             confidence="HIGH",
-            action_type=ActionType.SCHEDULE_URGENT,
+            action_type=ActionType.SCHEDULE_THIS_WEEK,
             action_steps=["Step 1"],
             icon="🛢️",
             sources=["Test"],
@@ -155,19 +155,20 @@ class TestFleetDirectExecution:
         assert Priority.HIGH.value is not None
         assert Priority.MEDIUM.value is not None
         assert Priority.LOW.value is not None
-        assert Priority.INFO.value is not None
+        assert Priority.NONE.value is not None  # Changed from INFO to NONE
 
     def test_issue_category_enum_values(self):
         """Test all issue category enum values"""
         assert IssueCategory.ENGINE.value is not None
         assert IssueCategory.TRANSMISSION.value is not None
-        assert IssueCategory.COOLING.value is not None
         assert IssueCategory.ELECTRICAL.value is not None
         assert IssueCategory.DEF.value is not None
         assert IssueCategory.FUEL.value is not None
-        assert IssueCategory.BRAKE.value is not None
+        assert IssueCategory.BRAKES.value is not None  # Changed from BRAKE to BRAKES
         assert IssueCategory.SENSOR.value is not None
         assert IssueCategory.EFFICIENCY.value is not None
+        assert IssueCategory.TURBO.value is not None  # Added
+        assert IssueCategory.GPS.value is not None  # Added
         assert IssueCategory.GENERAL.value is not None
 
     def test_action_type_enum_values(self):

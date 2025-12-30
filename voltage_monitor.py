@@ -23,11 +23,11 @@ Date: December 2025
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
+import logging
 from dataclasses import dataclass
-from typing import Optional, Dict, List
 from datetime import datetime
 from enum import Enum
-import logging
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,9 @@ def analyze_voltage(
     🔧 v5.7.5: Parameter renamed from pwr_int to voltage for clarity.
     Use pwr_ext (truck battery 12-14V), NOT pwr_int (GPS backup 3-4V).
 
+    🔧 v6.5.1 DEC 30 2025: Better engine detection - if voltage > 13.2V,
+    alternator must be running (engine on), even if RPM is NULL.
+
     Args:
         voltage: Truck battery voltage from pwr_ext sensor (volts)
         rpm: RPM del motor (None si no disponible, 0 = apagado, >0 = encendido)
@@ -135,11 +138,15 @@ def analyze_voltage(
         return None
 
     # Determinar si motor está encendido
-    is_running = rpm is not None and rpm > 100
+    # 🔧 v6.5.1: Can't rely only on RPM (may be NULL)
+    # If voltage > 13.2V, alternator is charging = engine MUST be on
+    rpm_running = rpm is not None and rpm > 100
+    voltage_running = voltage > 13.2
+    is_running = rpm_running or voltage_running
 
     # Analizar según estado del motor
     if is_running:
-        return _analyze_charging_voltage(voltage, rpm, truck_id, thresholds)
+        return _analyze_charging_voltage(voltage, rpm or 0, truck_id, thresholds)
     else:
         return _analyze_battery_voltage(voltage, truck_id, thresholds)
 

@@ -1,0 +1,115 @@
+{
+  "timestamp": "2025-12-28T09:06:58.845419",
+  "duration_seconds": 74.944877,
+  "total_modules": 15,
+  "modules_with_coverage": 0,
+  "modules_80_plus": 0,
+  "average_coverage": 0,
+  "results": [
+    {
+      "module": "auth",
+      "coverage_pct": null,
+      "tests_passed": 21,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "database_mysql",
+      "coverage_pct": null,
+      "tests_passed": 8,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "cache_service",
+      "coverage_pct": null,
+      "tests_passed": 25,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "alert_service",
+      "coverage_pct": null,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "driver_scoring_engine",
+      "coverage_pct": null,
+      "tests_passed": 28,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "mpg_engine",
+      "coverage_pct": null,
+      "tests_passed": 48,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "theft_detection_engine",
+      "coverage_pct": null,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "predictive_maintenance_engine",
+      "coverage_pct": null,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "driver_behavior_engine",
+      "coverage_pct": null,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "idle_engine",
+      "coverage_pct": null,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "gamification_engine",
+      "coverage_pct": null,
+      "tests_passed": 73,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "api_middleware",
+      "coverage_pct": null,
+      "tests_passed": 37,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "wialon_data_loader",
+      "coverage_pct": null,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "status": "no_data"
+    },
+    {
+      "module": "fleet_command_center",
+      "coverage_pct": null,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "status": "timeout"
+    },
+    {
+      "module": "models",
+      "coverage_pct": null,
+      "tests_passed": 0,
+      "tests_failed": 0,
+      "status": "no_data"
+    }
+  ]
+}

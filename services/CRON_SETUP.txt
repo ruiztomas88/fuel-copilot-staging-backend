@@ -1,0 +1,25 @@
+# ============================================================================
+# CRON CONFIGURATION - MySQL Backups Every 6 Hours
+# ============================================================================
+#
+# INSTALACIÓN:
+# 1. Editar crontab: crontab -e
+# 2. Copiar esta línea al final del archivo:
+#
+# Backup cada 6 horas (00:00, 06:00, 12:00, 18:00)
+0 */6 * * * /Users/tomasruiz/Desktop/Fuel-Analytics-Backend/services/backup_mysql.sh >> /Users/tomasruiz/Desktop/Fuel-Analytics-Backend/logs/cron_backup.log 2>&1
+#
+# ============================================================================
+# NOTAS:
+# - Los backups se guardan en: /Users/tomasruiz/Desktop/Fuel-Analytics-Backend/backups/
+# - Se mantienen backups de los últimos 7 días
+# - Cada backup se comprime con gzip para ahorrar espacio
+# - El log de cron se guarda en: logs/cron_backup.log
+# ============================================================================
+#
+# VERIFICAR CRON ACTIVO:
+# crontab -l | grep backup
+#
+# RESTAURAR UN BACKUP:
+# gunzip < backups/fuel_copilot_local_YYYYMMDD_HHMMSS.sql.gz | mysql -u root fuel_copilot_local
+# ============================================================================

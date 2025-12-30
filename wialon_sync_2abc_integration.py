@@ -116,26 +116,44 @@ class Wialon2ABCIntegration:
             # Extraer datos relevantes
             fuel_level_pct = sensor_data.get("fuel_lvl")
             fuel_rate_lph = sensor_data.get("fuel_rate")
+            speed_mph = sensor_data.get("speed")
+            rpm = sensor_data.get("rpm")
             timestamp = sensor_data.get("timestamp", datetime.now(timezone.utc))
 
-            # Crear fusion data con sensores disponibles
-            fusion_data = {
-                "fuel_level_pct": fuel_level_pct,
-                "fuel_rate_lph": fuel_rate_lph,
-                "timestamp": timestamp,
-            }
+            # Convertir fuel_rate de L/h a gph para EKF
+            fuel_rate_gph = (fuel_rate_lph / 3.78541) if fuel_rate_lph else 0
 
-            # Actualizar EKF
-            result = self.ekf_manager.update_with_fusion(truck_id, fusion_data)
+            # Validar y convertir valores numéricos (evitar NoneType comparisons)
+            speed_mph = float(speed_mph) if speed_mph is not None else 0.0
+            rpm = int(rpm) if rpm is not None else 0
+
+            # Actualizar EKF con parámetros correctos
+            result = self.ekf_manager.update_with_fusion(
+                truck_id=truck_id,
+                fuel_lvl_pct=fuel_level_pct,
+                ecu_fuel_rate_gph=fuel_rate_gph,
+                speed_mph=speed_mph,
+                rpm=rpm,
+            )
 
             # Publicar evento de actualización de combustible
             if self.event_bus:
+                from kafka_event_bus import EventType
+
+                # Firma correcta: publish_fuel_event(truck_id, event_type, fuel_level_pct, consumption_gph, metadata)
                 self.event_bus.publish_fuel_event(
                     truck_id=truck_id,
+                    event_type=EventType.FUEL_LEVEL_CHANGE,
                     fuel_level_pct=result.get("fuel_level_pct", fuel_level_pct),
-                    consumption_gph=fuel_rate_lph / 3.78541 if fuel_rate_lph else 0,
-                    timestamp=timestamp,
-                    source="ekf",
+                    consumption_gph=fuel_rate_gph,
+                    metadata={
+                        "source": "ekf",
+                        "timestamp": (
+                            timestamp.isoformat()
+                            if hasattr(timestamp, "isoformat")
+                            else str(timestamp)
+                        ),
+                    },
                 )
 
             return result
@@ -161,20 +179,25 @@ class Wialon2ABCIntegration:
 
         try:
             # Preparar features para anomalía
-            fuel_level_pct = sensor_data.get("fuel_lvl", 0)
-            speed = sensor_data.get("speed", 0)
-            rpm = sensor_data.get("rpm", 0)
-            fuel_rate_lph = sensor_data.get("fuel_rate", 0)
+            fuel_level_pct = sensor_data.get("fuel_lvl")
+            speed = sensor_data.get("speed")
+            rpm = sensor_data.get("rpm")
+            fuel_rate_lph = sensor_data.get("fuel_rate")
             timestamp = sensor_data.get("timestamp", datetime.now(timezone.utc))
 
+            # Validar y convertir valores numéricos
+            speed = float(speed) if speed is not None else 0.0
+            fuel_rate_lph = float(fuel_rate_lph) if fuel_rate_lph is not None else 0.0
+
             # Detectar anomalías
+            # Firma correcta v2: detect_anomalies(truck_id, consumption_gph, speed_mph, idle_pct, ambient_temp_c)
+            consumption_gph = (fuel_rate_lph / 3.78541) if fuel_rate_lph > 0 else 0.0
             result = self.anomaly_detector.detect_anomalies(
                 truck_id=truck_id,
-                fuel_level_pct=fuel_level_pct,
+                consumption_gph=consumption_gph,
                 speed_mph=speed,
-                rpm=rpm,
-                fuel_rate_lph=fuel_rate_lph,
-                timestamp=timestamp,
+                idle_pct=0,  # TODO: calcular idle % real
+                ambient_temp_c=20,  # TODO: obtener temperatura real
             )
 
             # Publicar evento de anomalía si se detecta
@@ -251,7 +274,13 @@ class Wialon2ABCIntegration:
             return {}
 
         try:
-            predictions = self.lstm_predictor.predict(truck_id=truck_id)
+            # Firma correcta: predict(truck_id, recent_consumption, hours_ahead)
+            # Por ahora usamos lista vacía ya que no tenemos historial reciente
+            predictions = self.lstm_predictor.predict(
+                truck_id=truck_id,
+                recent_consumption=[],  # TODO: obtener consumo reciente de DB
+                hours_ahead=4,
+            )
             return predictions
         except Exception as e:
             logger.error(f"Error predicting fuel for {truck_id}: {e}")

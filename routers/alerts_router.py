@@ -19,13 +19,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from database import db
+from models import Alert  # 🔧 Use Alert model from models.py
 from observability import logger
 
 # 🆕 v5.7.0: Import diagnostic modules
 try:
-    from voltage_monitor import analyze_voltage, VoltageStatus
-    from gps_quality import analyze_gps_quality, GPSQuality
-    from dtc_analyzer import process_dtc_from_sensor_data, DTCSeverity, get_dtc_analyzer
+    from dtc_analyzer import DTCSeverity, get_dtc_analyzer, process_dtc_from_sensor_data
+    from gps_quality import GPSQuality, analyze_gps_quality
+    from voltage_monitor import VoltageStatus, analyze_voltage
 
     DIAGNOSTICS_AVAILABLE = True
 except ImportError as e:
@@ -33,17 +34,6 @@ except ImportError as e:
     DIAGNOSTICS_AVAILABLE = False
 
 router = APIRouter(prefix="/fuelAnalytics/api", tags=["Alerts"])
-
-
-class Alert(BaseModel):
-    """Alert model"""
-
-    truck_id: str
-    alert_type: str
-    severity: str
-    message: str
-    timestamp: datetime
-    resolved: bool = False
 
 
 @router.get("/alerts", response_model=List[Alert])

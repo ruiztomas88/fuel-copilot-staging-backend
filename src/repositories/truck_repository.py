@@ -5,9 +5,10 @@ Truck Repository - Database access for truck operations
 Original commit 190h expected different schema - this is the adapted version.
 """
 
-from typing import List, Dict, Optional, Any
-from datetime import datetime, timedelta
 import logging
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 import pymysql
 from pymysql import cursors
 
@@ -30,7 +31,8 @@ class TruckRepository:
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT 
                         truck_id,
                         truck_status as status,
@@ -46,7 +48,8 @@ class TruckRepository:
                         WHERE fm2.truck_id = fm1.truck_id
                     )
                     ORDER BY truck_id
-                """)
+                """
+                )
                 trucks = cursor.fetchall()
                 logger.debug(f"Fetched {len(trucks)} trucks")
                 return trucks
@@ -58,7 +61,8 @@ class TruckRepository:
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT 
                         truck_id,
                         truck_status as status,
@@ -74,7 +78,9 @@ class TruckRepository:
                     WHERE truck_id = %s
                     ORDER BY timestamp_utc DESC
                     LIMIT 1
-                """, (truck_id,))
+                """,
+                    (truck_id,),
+                )
                 truck = cursor.fetchone()
                 if truck:
                     logger.debug(f"Truck found: {truck_id}")
@@ -94,7 +100,8 @@ class TruckRepository:
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT 
                         truck_id,
                         vin,
@@ -105,7 +112,9 @@ class TruckRepository:
                         baseline_mpg_empty
                     FROM truck_specs
                     WHERE truck_id = %s
-                """, (truck_id,))
+                """,
+                    (truck_id,),
+                )
                 return cursor.fetchone()
         finally:
             conn.close()
@@ -116,7 +125,8 @@ class TruckRepository:
         try:
             with conn.cursor() as cursor:
                 cutoff = datetime.utcnow() - timedelta(hours=hours)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT DISTINCT truck_id
                     FROM fuel_metrics fm1
                     WHERE timestamp_utc = (
@@ -126,20 +136,25 @@ class TruckRepository:
                     )
                     AND timestamp_utc < %s
                     ORDER BY truck_id
-                """, (cutoff,))
-                offline = [row['truck_id'] for row in cursor.fetchall()]
+                """,
+                    (cutoff,),
+                )
+                offline = [row["truck_id"] for row in cursor.fetchall()]
                 logger.debug(f"Found {len(offline)} offline trucks (>{hours}h)")
                 return offline
         finally:
             conn.close()
 
-    def get_truck_metrics_history(self, truck_id: str, hours: int = 24) -> List[Dict[str, Any]]:
+    def get_truck_metrics_history(
+        self, truck_id: str, hours: int = 24
+    ) -> List[Dict[str, Any]]:
         """Get truck metrics history for specified hours."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cursor:
                 cutoff = datetime.utcnow() - timedelta(hours=hours)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT 
                         truck_id,
                         timestamp_utc,
@@ -153,9 +168,13 @@ class TruckRepository:
                     WHERE truck_id = %s
                       AND timestamp_utc >= %s
                     ORDER BY timestamp_utc ASC
-                """, (truck_id, cutoff))
+                """,
+                    (truck_id, cutoff),
+                )
                 metrics = cursor.fetchall()
-                logger.debug(f"Fetched {len(metrics)} metrics for {truck_id} ({hours}h)")
+                logger.debug(
+                    f"Fetched {len(metrics)} metrics for {truck_id} ({hours}h)"
+                )
                 return metrics
         finally:
             conn.close()
@@ -166,7 +185,8 @@ class TruckRepository:
         try:
             with conn.cursor() as cursor:
                 cutoff = datetime.utcnow() - timedelta(hours=hours)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT DISTINCT truck_id
                     FROM fuel_metrics fm1
                     WHERE timestamp_utc = (
@@ -176,8 +196,10 @@ class TruckRepository:
                     )
                     AND timestamp_utc >= %s
                     ORDER BY truck_id
-                """, (cutoff,))
-                active = [row['truck_id'] for row in cursor.fetchall()]
+                """,
+                    (cutoff,),
+                )
+                active = [row["truck_id"] for row in cursor.fetchall()]
                 logger.debug(f"Found {len(active)} active trucks (<{hours}h)")
                 return active
         finally:

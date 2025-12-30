@@ -129,6 +129,10 @@ class AnomalyService(MicroService):
             truck_id = event.get("truck_id")
             consumption_gph = event.get("consumption_gph")
 
+            # Validar que consumption_gph no sea None
+            if consumption_gph is None:
+                return None
+
             # Lógica simplificada de detección
             is_anomaly = consumption_gph > 10  # Consumo > 10 gph es anómalo
 

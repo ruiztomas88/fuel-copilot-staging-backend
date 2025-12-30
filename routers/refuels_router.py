@@ -25,14 +25,25 @@ router = APIRouter(prefix="/fuelAnalytics/api", tags=["Refuels"])
 
 
 class RefuelEvent(BaseModel):
-    """Refuel event model"""
+    """Refuel event model - supports both new and legacy field names"""
 
     truck_id: str
     timestamp: datetime
+
+    # New field names (preferred)
     gallons_added: float
     liters_added: float
     fuel_before_pct: float
     fuel_after_pct: float
+
+    # Legacy field names (for frontend compatibility)
+    date: Optional[str] = None
+    time: Optional[str] = None
+    gallons: Optional[float] = None
+    liters: Optional[float] = None
+    fuel_level_before: Optional[float] = None
+    fuel_level_after: Optional[float] = None
+
     location: Optional[str] = None
 
 

@@ -129,7 +129,7 @@ try:
     import redis
 
     REDIS_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover
     REDIS_AVAILABLE = False
     redis = None
 
@@ -5437,12 +5437,14 @@ async def get_comprehensive_truck_health(
         cc = get_command_center()
 
         # Get base Fleet Command Center data
+        current_data = cc.generate_command_center_data()
+
         # Find truck in current data
-        truck_actions = [a for a in cc.recent_actions if a.truck_id == truck_id]
+        truck_actions = [a for a in current_data.action_items if a.truck_id == truck_id]
 
         # Calculate base risk score
         try:
-            risk_data = cc.calculate_truck_risk_score(truck_id, cc.current_data)
+            risk_data = cc.calculate_truck_risk_score(truck_id, current_data)
             base_risk = risk_data.get("risk_score", 50)
         except Exception:
             base_risk = 50

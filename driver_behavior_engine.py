@@ -994,30 +994,33 @@ class DriverBehaviorEngine:
             engine = get_sqlalchemy_engine()
 
             # Get behavior events from last 7 days
-            # 🔧 v6.2.9: Use only columns that exist in fuel_metrics table
-            # Calculate acceleration/braking events from speed changes instead of missing columns
+            # 🔧 DEC 30 2025: Updated to use REAL harsh_accel, harsh_brake, gear columns
+            # These columns are now populated from calculate_acceleration() in wialon_sync
             query = """
                 SELECT 
                     truck_id,
+                    -- 🆕 DEC 30 2025: REAL harsh event counts from speed delta detection
+                    SUM(COALESCE(harsh_accel, 0)) as harsh_accel_count,
+                    SUM(COALESCE(harsh_brake, 0)) as harsh_brake_count,
                     -- High RPM: count minutes where RPM > 1800 (excessive)
                     SUM(CASE WHEN rpm > 1800 THEN 0.25 ELSE 0 END) as high_rpm_minutes,
-                    -- Very high RPM (aggressive driving indicator)
-                    SUM(CASE WHEN rpm > 2000 THEN 0.25 ELSE 0 END) as very_high_rpm_minutes,
                     -- Overspeeding: count minutes where speed > 65
                     SUM(CASE WHEN speed_mph > 65 THEN 0.25 ELSE 0 END) as overspeed_minutes,
-                    -- Severe overspeeding
-                    SUM(CASE WHEN speed_mph > 70 THEN 0.25 ELSE 0 END) as severe_overspeed_minutes,
+                    -- 🆕 DEC 30 2025: Wrong gear detection (high RPM in high gear while moving slow)
+                    SUM(CASE 
+                        WHEN gear IS NOT NULL AND gear > 0 AND gear <= 6 
+                        AND rpm > 1600 AND speed_mph > 25 THEN 1 
+                        ELSE 0 
+                    END) as wrong_gear_events,
                     -- MPG data for scoring
                     AVG(CASE WHEN speed_mph > 10 THEN mpg_current END) as avg_mpg,
-                    -- Low MPG events (could indicate aggressive driving)
-                    SUM(CASE WHEN mpg_current < 4 AND speed_mph > 20 THEN 1 ELSE 0 END) as low_mpg_events,
                     COUNT(DISTINCT DATE(timestamp_utc)) as active_days,
                     COUNT(*) as total_readings
                 FROM fuel_metrics
                 WHERE timestamp_utc >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 7 DAY)
                 GROUP BY truck_id
                 HAVING active_days >= 1
-                ORDER BY high_rpm_minutes DESC
+                ORDER BY harsh_accel_count DESC
             """
 
             with engine.connect() as conn:
@@ -1068,57 +1071,61 @@ class DriverBehaviorEngine:
 
             for row in rows:
                 truck_id = row[0]
-                # 🔧 v6.2.9: New column mapping without harsh_accel/harsh_brake
-                high_rpm_min = float(row[1] or 0)
-                very_high_rpm_min = float(row[2] or 0)
-                overspeed_min = float(row[3] or 0)
-                severe_overspeed_min = float(row[4] or 0)
-                avg_mpg = float(row[5]) if row[5] else 6.5
-                low_mpg_events = int(row[6] or 0)
+                # 🔧 DEC 30 2025: Updated column mapping to use REAL harsh event data
+                harsh_accel_count = int(row[1] or 0)  # REAL from speed delta
+                harsh_brake_count = int(row[2] or 0)  # REAL from speed delta
+                high_rpm_min = float(row[3] or 0)
+                overspeed_min = float(row[4] or 0)
+                wrong_gear_events = int(row[5] or 0)  # REAL from gear vs RPM analysis
+                avg_mpg = float(row[6]) if row[6] else 6.5
                 active_days = int(row[7] or 1)
                 total_readings = int(row[8] or 1)
 
-                # Use very high RPM as proxy for aggressive acceleration
-                # Use low MPG events as additional indicator
-                estimated_accel_events = int(very_high_rpm_min / 2) + int(
-                    low_mpg_events / 5
-                )
-                estimated_brake_events = int(
-                    severe_overspeed_min / 3
-                )  # Hard braking often follows overspeeding
-
-                # Calculate daily averages
-                daily_accel = estimated_accel_events / active_days
-                daily_brake = estimated_brake_events / active_days
+                # Use REAL event counts now instead of estimates
+                daily_accel = harsh_accel_count / active_days
+                daily_brake = harsh_brake_count / active_days
                 daily_rpm_high = high_rpm_min / active_days
                 daily_overspeed = overspeed_min / active_days
+                daily_wrong_gear = wrong_gear_events / active_days
 
                 # Calculate score (100 = perfect, lower = worse)
-                # Scoring based on available data
-                accel_penalty = min(daily_accel * 3, 15)  # Up to 15 points
-                brake_penalty = min(daily_brake * 2, 10)  # Up to 10 points
+                # 🔧 DEC 30 2025: Updated scoring using REAL event data
+                accel_penalty = min(
+                    daily_accel * 4, 20
+                )  # Up to 20 points (4 pts per harsh accel/day)
+                brake_penalty = min(
+                    daily_brake * 3, 15
+                )  # Up to 15 points (3 pts per harsh brake/day)
                 rpm_penalty = min(daily_rpm_high * 0.3, 15)  # Up to 15 points
                 speed_penalty = min(daily_overspeed * 0.2, 15)  # Up to 15 points
+                gear_penalty = min(
+                    daily_wrong_gear * 2, 10
+                )  # Up to 10 points (2 pts per wrong gear/day)
 
                 score = max(
-                    0, 100 - accel_penalty - brake_penalty - rpm_penalty - speed_penalty
+                    0,
+                    100
+                    - accel_penalty
+                    - brake_penalty
+                    - rpm_penalty
+                    - speed_penalty
+                    - gear_penalty,
                 )
 
                 # Calculate fuel waste estimates (gallons)
-                waste_accel = (
-                    estimated_accel_events * self.config.fuel_waste_hard_accel_gal
-                )
-                waste_brake = (
-                    estimated_brake_events * self.config.fuel_waste_hard_brake_gal
-                )
+                waste_accel = harsh_accel_count * self.config.fuel_waste_hard_accel_gal
+                waste_brake = harsh_brake_count * self.config.fuel_waste_hard_brake_gal
                 waste_rpm = high_rpm_min * self.config.fuel_waste_high_rpm_gal_per_min
                 waste_speed = (
                     overspeed_min * self.config.fuel_waste_overspeeding_gal_per_min
                 )
+                # 🆕 DEC 30 2025: Wrong gear fuel waste (estimated 0.02 gal per event)
+                waste_wrong_gear = wrong_gear_events * 0.02
 
                 total_waste["hard_acceleration"] += waste_accel
                 total_waste["hard_braking"] += waste_brake
                 total_waste["high_rpm"] += waste_rpm
+                total_waste["wrong_gear"] += waste_wrong_gear
                 total_waste["overspeeding"] += waste_speed
 
                 # Determine grade
@@ -1141,29 +1148,45 @@ class DriverBehaviorEngine:
                         "score": round(score, 1),
                         "grade": grade,
                         "trend": trend,
-                        # 🔧 v6.2.10: Match frontend expected structure
+                        # 🔧 DEC 30 2025: Updated to use REAL event counts
                         "components": {
-                            "acceleration": round(100 - (daily_accel * 8), 1),
-                            "braking": round(100 - (daily_brake * 6), 1),
-                            "rpm_management": round(100 - (daily_rpm_high * 0.3), 1),
-                            "gear_usage": round(100 - (daily_rpm_high * 0.2), 1),
-                            "speed_control": round(100 - (daily_overspeed * 0.2), 1),
+                            "acceleration": round(
+                                max(0, min(100, 100 - (daily_accel * 8))), 1
+                            ),
+                            "braking": round(
+                                max(0, min(100, 100 - (daily_brake * 6))), 1
+                            ),
+                            "rpm_management": round(
+                                max(0, min(100, 100 - (daily_rpm_high * 0.3))), 1
+                            ),
+                            "gear_usage": round(
+                                max(0, min(100, 100 - (daily_wrong_gear * 5))), 1
+                            ),
+                            "speed_control": round(
+                                max(0, min(100, 100 - (daily_overspeed * 0.2))), 1
+                            ),
                         },
                         "events": {
-                            "hard_accelerations": estimated_accel_events,
-                            "hard_brakes": estimated_brake_events,
+                            "hard_accelerations": harsh_accel_count,  # REAL
+                            "hard_brakes": harsh_brake_count,  # REAL
                             "high_rpm_minutes": round(high_rpm_min, 1),
-                            "wrong_gear_minutes": 0,
+                            "wrong_gear_events": wrong_gear_events,  # REAL
                             "overspeeding_minutes": round(overspeed_min, 1),
                         },
                         "fuel_impact": {
                             "total_waste_gallons": round(
-                                waste_accel + waste_brake + waste_rpm + waste_speed, 2
+                                waste_accel
+                                + waste_brake
+                                + waste_rpm
+                                + waste_speed
+                                + waste_wrong_gear,
+                                2,
                             ),
                             "breakdown": {
                                 "accel_gal": round(waste_accel, 3),
                                 "brake_gal": round(waste_brake, 3),
                                 "rpm_gal": round(waste_rpm, 3),
+                                "gear_gal": round(waste_wrong_gear, 3),
                                 "speed_gal": round(waste_speed, 3),
                             },
                         },

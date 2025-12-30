@@ -1,29 +1,38 @@
 """
-Fuel Estimator Module - Extracted from fuel_copilot_v2_1_fixed.py
+Fuel Estimator Module - Kalman Filter v6.2.1
 
-Kalman Filter for Fuel Level Estimation with:
+Kalman Filter for Fuel Level Estimation with production-validated improvements.
+
+Features:
 - Adaptive noise based on physical conditions
 - ECU-based consumption calculation
 - Emergency reset and auto-resync
 - Anchor-based calibration support
-- 🆕 v5.3.0: Adaptive Q_r based on truck status (PARKED/IDLE/MOVING)
-- 🆕 v5.3.0: Kalman confidence indicator
-- 🆕 v5.4.0: GPS Quality adaptive Q_L (satellites-based)
-- 🆕 v5.4.0: Voltage quality factor integration
-- 🔧 v5.8.4: Negative consumption treated as sensor error
-- 🔧 v5.8.5: More conservative Q_r for PARKED/IDLE states
-- 🔧 v5.8.5: Auto-resync cooldown (30 min) to prevent oscillation
-- 🔧 v5.9.0: Fix P growth during large time gaps (audit fix)
-- 🔧 v5.9.0: Removed legacy calculate_adaptive_noise (dead code)
-- 🔧 v5.8.5: Innovation-based K adjustment for faster correction
-- 🔧 v5.8.6: Unified Q_L calculation (GPS + Voltage combined)
+- v5.3.0: Adaptive Q_r based on truck status (PARKED/IDLE/MOVING)
+- v5.3.0: Kalman confidence indicator
+- v5.4.0: GPS Quality adaptive Q_L (satellites-based)
+- v5.4.0: Voltage quality factor integration
+- v5.8.4: Negative consumption treated as sensor error
+- v5.8.5: More conservative Q_r for PARKED/IDLE states
+- v5.8.5: Auto-resync cooldown (30 min) to prevent oscillation
+- v5.8.5: Innovation-based K adjustment for faster correction
+- v5.8.6: Unified Q_L calculation (GPS + Voltage combined)
+- v5.9.0: Fix P growth during large time gaps (audit fix)
+- v5.9.0: Removed legacy calculate_adaptive_noise (dead code)
+- v6.1.0: Sensor bias detection via innovation history tracking
+- v6.1.0: Adaptive R v2 based on consistency (not magnitude)
+- v6.1.0: Biodiesel blend correction for fuel density
+- v6.2.0: ECU consumption validation against physics-based model
+- v6.2.0: Calibrated consumption model for fallback and validation
+- v6.2.1: CRITICAL FIX - RPM vs ECU cross-validation (prevent engine-off drift)
 
 Author: Fuel Copilot Team
-Version: 5.8.6
-Date: December 2025
+Version: 6.2.1
+Date: December 29, 2025
 """
 
 import logging
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -174,11 +183,15 @@ class EstimatorConfig:
     emergency_drift_threshold: float = 30.0
     emergency_gap_hours: float = 2.0
     auto_resync_threshold: float = 15.0
+    resync_cooldown_sec: int = 1800  # 🔧 FIX DEC 29: Configurable (was hardcoded)
 
     # ECU validation
     min_consumption_gph: float = 0.1
     max_consumption_gph: float = 50.0
     max_ecu_failures: int = 5
+
+    # 🆕 v6.1.0: Biodiesel blend correction
+    biodiesel_blend_pct: float = 0.0  # % of biodiesel in fuel (0-100)
 
 
 class FuelEstimator:
@@ -249,6 +262,9 @@ class FuelEstimator:
         self.drift_pct = 0.0
         self.drift_warning = False
 
+        # 🔧 FIX DEC 29: Sensor skip counter for consistent failures
+        self.sensor_skip_count = 0
+
         # Internal Kalman state
         self.L = None
         self.P_L = 20.0
@@ -266,6 +282,44 @@ class FuelEstimator:
         self.last_voltage_quality = 1.0
         self.sensor_quality_factor = 1.0  # Combined quality factor
 
+        # v6.1.0: Innovation history for bias detection (last 4 measurements)
+        self.innovation_history: deque = deque(maxlen=4)
+        self.bias_detected = False
+        self.bias_magnitude = 0.0
+
+        # v6.1.0: Biodiesel blend percentage (affects fuel density)
+        self.biodiesel_blend_pct = config.get("biodiesel_blend_pct", 0.0)
+        self.biodiesel_correction = self._get_biodiesel_correction(
+            self.biodiesel_blend_pct
+        )
+
+        # 🆕 v6.2.0: Physics-based model parameters (loaded from calibration)
+        self.baseline_consumption: float = 0.015  # %/min default
+        self.load_factor: float = 0.002  # per % engine load
+        self.altitude_factor: float = 0.0001  # per m/min climb
+        self.calibration_loaded: bool = False
+
+    def _get_biodiesel_correction(self, blend_pct: float) -> float:
+        """
+        🆕 v6.1.0: Calculate correction factor for biodiesel blends.
+
+        Biodiesel has higher dielectric constant → capacitive sensors read high
+        Args:
+            blend_pct: Biodiesel percentage (0, 5, 10, 20)
+        Returns:
+            Correction factor (multiply sensor reading)
+        """
+        if blend_pct <= 0:
+            return 1.0
+        elif blend_pct <= 5:
+            return 0.997  # -0.3%
+        elif blend_pct <= 10:
+            return 0.994  # -0.6%
+        elif blend_pct <= 20:
+            return 0.988  # -1.2%
+        else:
+            return 0.980  # >20% blend
+
     def initialize(self, fuel_lvl_pct: float = None, sensor_pct: float = None):
         """Initialize the filter with a sensor reading"""
         pct = fuel_lvl_pct if fuel_lvl_pct is not None else sensor_pct
@@ -278,6 +332,171 @@ class FuelEstimator:
         self.initialized = True
         self.last_fuel_lvl_pct = pct
         self.P = 1.0
+
+    def load_calibrated_params(
+        self, calibration_file: str = "data/kalman_calibration.json"
+    ) -> bool:
+        """
+        🆕 v6.2.0: Load physics-based consumption model from calibration.
+
+        These parameters enable ECU validation and fallback consumption estimation.
+
+        Args:
+            calibration_file: Path to JSON file with calibrated parameters
+
+        Returns:
+            True if loaded successfully, False otherwise
+        """
+        import json
+        from pathlib import Path
+
+        try:
+            cal_path = Path(calibration_file)
+            if not cal_path.exists():
+                logger.info(
+                    f"[{self.truck_id}] No calibration file found at {calibration_file}, using defaults"
+                )
+                return False
+
+            with open(calibration_file, "r") as f:
+                cal = json.load(f)
+
+            params = cal.get("parameters", {})
+            self.baseline_consumption = params.get("baseline_consumption", 0.015)
+            self.load_factor = params.get("load_factor", 0.002)
+            self.altitude_factor = params.get("altitude_factor", 0.0001)
+            self.calibration_loaded = True
+
+            logger.info(
+                f"[{self.truck_id}] ✅ Loaded calibrated consumption model: "
+                f"baseline={self.baseline_consumption:.4f}, "
+                f"load_factor={self.load_factor:.4f}, "
+                f"altitude_factor={self.altitude_factor:.6f}"
+            )
+            return True
+
+        except Exception as e:
+            logger.warning(
+                f"[{self.truck_id}] Failed to load calibration: {e}, using defaults"
+            )
+            return False
+
+    def _calculate_physics_consumption(
+        self,
+        dt_hours: float,
+        engine_load_pct: Optional[float] = None,
+        altitude_change_m: Optional[float] = None,
+    ) -> float:
+        """
+        🆕 v6.2.0: Calculate consumption using physics-based model.
+
+        Model: fuel_rate = baseline + load_factor × load + altitude_factor × climb_rate
+
+        Used for ECU validation and fallback when ECU unavailable.
+
+        Args:
+            dt_hours: Time interval in hours
+            engine_load_pct: Engine load percentage (0-100)
+            altitude_change_m: Altitude change in meters during dt_hours
+
+        Returns:
+            Estimated consumption in LPH
+        """
+        # Base consumption (idle)
+        fuel_rate_pct_per_min = self.baseline_consumption
+
+        # Add engine load effect
+        if engine_load_pct is not None and engine_load_pct > 0:
+            fuel_rate_pct_per_min += self.load_factor * engine_load_pct
+
+        # Add altitude climbing effect
+        if altitude_change_m is not None and dt_hours > 0:
+            climb_rate_m_per_min = altitude_change_m / (dt_hours * 60)
+            fuel_rate_pct_per_min += self.altitude_factor * climb_rate_m_per_min
+
+        # Convert %/min to LPH
+        # Tank capacity in liters (120 gal ≈ 454 L)
+        fuel_rate_lph = (fuel_rate_pct_per_min / 100.0) * self.capacity_liters * 60.0
+
+        # Clamp to reasonable range
+        return max(2.0, min(fuel_rate_lph, 80.0))
+
+    def validate_ecu_consumption(
+        self,
+        ecu_consumption_lph: float,
+        dt_hours: float,
+        engine_load_pct: Optional[float] = None,
+        altitude_change_m: Optional[float] = None,
+        threshold_pct: float = 30.0,
+    ) -> dict:
+        """
+        🆕 v6.2.0: Validate ECU consumption against physics-based model.
+
+        Detects potentially faulty ECU sensors by comparing against calibrated model.
+
+        Args:
+            ecu_consumption_lph: ECU-reported consumption in LPH
+            dt_hours: Time interval
+            engine_load_pct: Engine load percentage
+            altitude_change_m: Altitude change in meters
+            threshold_pct: Max allowed deviation % (default 30%)
+
+        Returns:
+            Dict with validation results:
+            {
+                'valid': bool,
+                'ecu_lph': float,
+                'model_lph': float,
+                'deviation_pct': float,
+                'status': str,  # 'OK', 'WARNING', 'CRITICAL'
+                'message': str
+            }
+        """
+        if not self.calibration_loaded:
+            return {
+                "valid": True,
+                "ecu_lph": ecu_consumption_lph,
+                "model_lph": None,
+                "deviation_pct": 0.0,
+                "status": "NO_CALIBRATION",
+                "message": "Calibration not loaded, skipping validation",
+            }
+
+        # Calculate expected consumption using physics model
+        model_consumption_lph = self._calculate_physics_consumption(
+            dt_hours, engine_load_pct, altitude_change_m
+        )
+
+        # Calculate deviation
+        if model_consumption_lph > 0.1:
+            deviation_pct = (
+                abs(ecu_consumption_lph - model_consumption_lph) / model_consumption_lph
+            ) * 100.0
+        else:
+            deviation_pct = 0.0
+
+        # Determine status
+        if deviation_pct > threshold_pct:
+            status = "CRITICAL"
+            valid = False
+            message = f"ECU sensor possibly faulty: {deviation_pct:.1f}% deviation"
+        elif deviation_pct > threshold_pct * 0.5:  # Warning at 50% of threshold
+            status = "WARNING"
+            valid = True
+            message = f"ECU reading unusual: {deviation_pct:.1f}% deviation"
+        else:
+            status = "OK"
+            valid = True
+            message = "ECU sensor healthy"
+
+        return {
+            "valid": valid,
+            "ecu_lph": round(ecu_consumption_lph, 2),
+            "model_lph": round(model_consumption_lph, 2),
+            "deviation_pct": round(deviation_pct, 1),
+            "status": status,
+            "message": message,
+        }
 
     def check_emergency_reset(
         self, sensor_pct: float, time_gap_hours: float, truck_status: str = "UNKNOWN"
@@ -323,6 +542,7 @@ class FuelEstimator:
         🔧 v5.8.5: Added 30-minute cooldown to prevent oscillation.
         🔧 v5.9.1 (Fix C5): Added theft protection - don't auto-resync during
                            potential theft conditions (parked + downward drift).
+        🔧 v6.3.0: Improved theft protection using internal truck_status
 
         Args:
             sensor_pct: Current sensor reading as percentage
@@ -338,30 +558,42 @@ class FuelEstimator:
 
         RESYNC_THRESHOLD = 15.0
         RESYNC_THRESHOLD_REFUEL = 30.0
-        RESYNC_COOLDOWN_SECONDS = 1800  # 🆕 v5.8.5: 30 min cooldown
+        # 🔧 FIX DEC 29: Use configurable cooldown instead of hardcoded
+        resync_cooldown_sec = self.config.get("resync_cooldown_sec", 1800)
 
         # 🆕 v5.8.5: Check cooldown to prevent oscillation
         if hasattr(self, "_last_resync_time") and self._last_resync_time:
             time_since_resync = (
                 datetime.now(timezone.utc) - self._last_resync_time
             ).total_seconds()
-            if time_since_resync < RESYNC_COOLDOWN_SECONDS:
+            if time_since_resync < resync_cooldown_sec:
                 return  # Still in cooldown period
 
-        # 🆕 v5.9.1 (Fix C5): Theft protection - flag for review instead of auto-resync
-        # If truck is parked (speed < 2 mph) and drift is downward, potential theft
-        is_parked = speed is not None and speed < 2.0
-        is_inactive = is_trip_active is not None and not is_trip_active
+        # 🔧 v6.3.0: Determine truck status internally for better theft protection
+        # Prefer internal truck_status from update_adaptive_Q_r() if available
+        if hasattr(self, "truck_status"):
+            # Use tracked status from update_adaptive_Q_r()
+            is_parked = self.truck_status == "PARKED"
+        else:
+            # Fallback to external parameters
+            is_parked = speed is not None and speed < 2.0
+            is_inactive = is_trip_active is not None and not is_trip_active
+            is_parked = is_parked or is_inactive
 
+        # 🆕 v6.3.0: THEFT PROTECTION (production v5.8.6 logic)
+        # Block resync on downward drift while parked
         if drift_direction == "down" and drift_pct > RESYNC_THRESHOLD:
-            if is_parked or is_inactive:
-                # Potential theft - DO NOT auto-resync, flag for review
+            if is_parked:
+                # Potential theft - DO NOT auto-resync
                 logger.warning(
-                    f"[{self.truck_id}] 🚨 POTENTIAL THEFT DETECTED - Drift {drift_pct:.1f}% down while parked. "
-                    f"Flagged for review instead of auto-resync."
+                    f"[{self.truck_id}] 🔒 THEFT PROTECTION: "
+                    f"Blocking resync on downward drift while parked "
+                    f"(kalman={estimated_pct:.1f}%, sensor={sensor_pct:.1f}%, "
+                    f"drift={drift_pct:.1f}%)"
                 )
                 self._flag_potential_theft(drift_pct, sensor_pct, estimated_pct)
-                return  # Don't resync - let theft detection handle it
+                self.drift_warning = True
+                return  # Don't resync - preserve theft evidence
 
         if drift_pct > RESYNC_THRESHOLD and (
             not self.recent_refuel or drift_pct > RESYNC_THRESHOLD_REFUEL
@@ -404,11 +636,55 @@ class FuelEstimator:
         # Keep only last 10 flags
         self._potential_theft_flags = self._potential_theft_flags[-10:]
 
+    def _adaptive_measurement_noise_v2(self) -> float:
+        """
+        v6.1.0: Adaptive measurement noise (R) based on CONSISTENCY, not magnitude.
+
+        Uses innovation history to detect sensor bias:
+        - If last 4 innovations all same sign → sensor biased → R × 2.5
+        - If innovations alternate signs → sensor noisy but unbiased → R × 1.0
+        - If insufficient history → R × 1.0 (neutral)
+
+        This prevents systematic sensor bias from pulling Kalman estimate away from truth.
+
+        Returns:
+            R multiplier (1.0 = normal, 2.5 = biased sensor detected)
+        """
+        # Need at least 4 measurements to detect bias
+        if len(self.innovation_history) < 4:
+            self.bias_detected = False
+            self.bias_magnitude = 0.0
+            return 1.0
+
+        # Check if all innovations have same sign (persistent bias)
+        signs = [np.sign(inn) for inn in self.innovation_history]
+        all_positive = all(s > 0 for s in signs)
+        all_negative = all(s < 0 for s in signs)
+
+        if all_positive or all_negative:
+            # Sensor showing persistent bias → reduce trust (increase R)
+            self.bias_detected = True
+            self.bias_magnitude = sum(self.innovation_history) / len(
+                self.innovation_history
+            )
+            logger.debug(
+                f"[{self.truck_id}] Sensor bias detected: "
+                f"innovations={list(self.innovation_history)} → R×2.5, "
+                f"magnitude={self.bias_magnitude:.2f}L"
+            )
+            return 2.5
+        else:
+            # Sensor noisy but unbiased → normal trust
+            self.bias_detected = False
+            self.bias_magnitude = 0.0
+            return 1.0
+
     def update_adaptive_Q_r(
         self, speed: float = None, rpm: float = None, consumption_lph: float = None
     ):
         """
         🆕 v5.3.0: Update Q_r based on truck status for improved Kalman accuracy.
+        🔧 v6.3.0: Now tracks truck_status for theft protection in auto_resync
 
         Call this before predict() to adapt process noise to operational state.
 
@@ -436,6 +712,9 @@ class FuelEstimator:
                 status = "MOVING"
         else:
             status = "MOVING"  # Default to moving if unknown
+
+        # 🆕 v6.3.0: Store status for theft protection
+        self.truck_status = status
 
         # Calculate and set adaptive Q_r
         self.Q_r = calculate_adaptive_Q_r(status, consumption_lph or 0)
@@ -561,6 +840,9 @@ class FuelEstimator:
             },
         }
 
+    # 🔧 FIX DEC 29: Método duplicado eliminado - ver _calculate_physics_consumption() en línea 380
+    # 🔧 FIX DEC 29: Método duplicado eliminado - ver validate_ecu_consumption() en línea 420
+
     def predict(
         self,
         dt_hours: float,
@@ -599,13 +881,21 @@ class FuelEstimator:
             )
             consumption_lph = None  # Force fallback
 
-        # 🔧 v5.15.1: Check RPM before consuming fuel (fix engine-off drift)
-        # If engine is off (rpm=0), consumption should be ZERO
-        if consumption_lph is None:
-            # First check if engine is running
-            if rpm is not None and rpm == 0:
-                consumption_lph = 0.0  # Engine off - no consumption
-            elif speed_mph is not None and speed_mph < 5:
+        # 🆕 v6.2.1: CRITICAL FIX - Validate ECU vs RPM consistency
+        # If engine is OFF (rpm=0) but ECU reports consumption → ECU is wrong
+        if rpm is not None and rpm == 0:
+            if consumption_lph is not None and consumption_lph > 0.5:
+                logger.warning(
+                    f"[{self.truck_id}] ⚠️ ECU INCONSISTENCY: "
+                    f"rpm=0 (engine OFF) but ECU reports consumption={consumption_lph:.2f} LPH. "
+                    f"Forcing consumption to 0.0 (ECU sensor may be faulty)."
+                )
+            consumption_lph = 0.0  # Engine off - ZERO consumption, always
+
+        # 🔧 v5.15.1: Fallback logic (only if consumption_lph is still None)
+        elif consumption_lph is None:
+            # Engine running but no ECU data
+            if speed_mph is not None and speed_mph < 5:
                 consumption_lph = 2.0  # Idle fallback
             else:
                 consumption_lph = 15.0  # City fallback
@@ -736,16 +1026,52 @@ class FuelEstimator:
         # Fix M1: Handle NaN/Inf values to prevent corrupted calculations
         if measured_pct is None or not isinstance(measured_pct, (int, float)):
             logger.warning(f"[{self.truck_id}] Invalid measured_pct: {measured_pct}")
+            # 🔧 FIX DEC 29: Track consecutive sensor failures
+            self.sensor_skip_count += 1
+            if self.sensor_skip_count >= 10:
+                logger.error(
+                    f"[{self.truck_id}] SENSOR FAILURE: 10+ consecutive invalid readings - "
+                    f"filter predictions may diverge from reality"
+                )
             return
 
         import math
 
         if math.isnan(measured_pct) or math.isinf(measured_pct):
             logger.warning(f"[{self.truck_id}] NaN/Inf measured_pct: {measured_pct}")
+            self.sensor_skip_count += 1
+            if self.sensor_skip_count >= 10:
+                logger.error(
+                    f"[{self.truck_id}] SENSOR FAILURE: 10+ consecutive NaN/Inf readings"
+                )
             return
+
+        # Reset skip counter on valid reading
+        self.sensor_skip_count = 0
 
         # Clamp to valid range
         measured_pct = max(0.0, min(100.0, measured_pct))
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # 🚫 BIODIESEL CORRECTION - DISABLED (DEC 29, 2025)
+        # ═══════════════════════════════════════════════════════════════════════
+        # This feature is NOT currently used by any truck in the fleet.
+        # tanks.yaml does not have biodiesel_blend_pct configured for any truck.
+        # All trucks use standard diesel (biodiesel_blend_pct = 0).
+        #
+        # If biodiesel support is needed in the future:
+        # 1. Add biodiesel_blend_pct field to tanks.yaml for specific trucks
+        # 2. Load it in wialon_sync_enhanced.py load_tank_config()
+        # 3. Pass it to FuelEstimator config
+        # 4. VERIFY physics: biodiesel has HIGHER dielectric constant
+        #    → capacitive sensors read HIGH → should MULTIPLY to reduce, not DIVIDE
+        #
+        # Original code preserved for reference:
+        # if self.biodiesel_blend_pct > 0:
+        #     density_correction = 1.0 - (self.biodiesel_blend_pct / 100.0) * 0.12
+        #     measured_pct = measured_pct * density_correction  # FIX: multiply not divide
+        #     logger.debug(f"[{self.truck_id}] Biodiesel correction...")
+        # ═══════════════════════════════════════════════════════════════════════
 
         measured_liters = (measured_pct / 100.0) * self.capacity_liters
         self.last_update_time = datetime.now(timezone.utc)
@@ -754,8 +1080,14 @@ class FuelEstimator:
             self.initialize(sensor_pct=measured_pct)
             return
 
-        # Kalman Gain
-        R = self.Q_L
+        # 🆕 v6.1.0: Calculate innovation for bias detection
+        innovation = measured_liters - self.level_liters
+        self.innovation_history.append(innovation)
+
+        # 🆕 v6.1.0: Adaptive R based on consistency (not magnitude)
+        R_multiplier = self._adaptive_measurement_noise_v2()
+        R = self.Q_L * R_multiplier
+
         K = self.P / (self.P + R)
 
         # Fix M1: Validate K before proceeding
@@ -780,7 +1112,7 @@ class FuelEstimator:
         # 🆕 v5.8.5: Innovation-based K adjustment
         # If innovation is unexpectedly large (>3x expected noise), allow faster correction
         # This helps the filter react quickly to real changes (refuels, actual drift)
-        innovation = measured_liters - self.level_liters
+        # 🔧 FIX DEC 29: innovation already calculated above for bias detection (line 1054)
         innovation_pct = abs(innovation / self.capacity_liters * 100)
         expected_noise_pct = (R**0.5) * 2  # ~2 sigma of expected measurement noise
 
@@ -793,6 +1125,7 @@ class FuelEstimator:
             )
 
         K = min(K, k_max)
+        # Innovation ya calculado arriba para bias detection
         self.level_liters += K * innovation
         self.level_pct = (self.level_liters / self.capacity_liters) * 100.0
 
@@ -843,8 +1176,16 @@ class FuelEstimator:
             # 🆕 v5.4.0: Sensor quality info
             "sensor_quality_factor": self.sensor_quality_factor,
             "current_Q_L": self.Q_L,
-            # 🆕 v5.8.3: Kalman confidence
+            # v5.8.3: Kalman confidence
             "kalman_confidence": confidence,
+            # v6.1.0: Bias detection info
+            "bias_detected": self.bias_detected,
+            "bias_magnitude_pct": (
+                round((self.bias_magnitude / self.capacity_liters) * 100, 2)
+                if self.bias_detected
+                else 0.0
+            ),
+            "biodiesel_correction_applied": self.biodiesel_blend_pct > 0,
         }
 
         # Add GPS quality if available

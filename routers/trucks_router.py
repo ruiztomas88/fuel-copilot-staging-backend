@@ -13,10 +13,10 @@ Endpoints:
 - GET /efficiency - Efficiency rankings
 """
 
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
-import math
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -34,14 +34,25 @@ router = APIRouter(prefix="/fuelAnalytics/api", tags=["Trucks"])
 
 
 class RefuelEvent(BaseModel):
-    """Refuel event model"""
+    """Refuel event model - supports both new and legacy field names"""
 
     truck_id: str
     timestamp: datetime
+
+    # New field names (preferred)
     gallons_added: float
     liters_added: float
     fuel_before_pct: float
     fuel_after_pct: float
+
+    # Legacy field names (for frontend compatibility)
+    date: Optional[str] = None
+    time: Optional[str] = None
+    gallons: Optional[float] = None
+    liters: Optional[float] = None
+    fuel_level_before: Optional[float] = None
+    fuel_level_after: Optional[float] = None
+
     location: Optional[str] = None
 
 
@@ -86,8 +97,15 @@ async def get_truck_detail(truck_id: str):
     - Current MPG and idle consumption
     - GPS location and speed
     - Engine status and sensor health
+
+    🔧 FIX DEC 29: Improved sanitization to prevent circular reference errors
     """
+    import json
+
+    import numpy as np
+    import pandas as pd
     import yaml
+    from fastapi.responses import JSONResponse
 
     try:
         logger.info(f"[get_truck_detail] Fetching data for {truck_id}")
@@ -122,10 +140,41 @@ async def get_truck_detail(truck_id: str):
 
             raise HTTPException(status_code=404, detail=f"Truck {truck_id} not found")
 
-        return record
+        # 🔧 FIX DEC 29: Convert all types to JSON-serializable values
+        clean_record = {}
+        for key, value in record.items():
+            try:
+                # Handle various null types
+                if value is None:
+                    clean_record[key] = None
+                elif isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
+                    clean_record[key] = None
+                elif pd.isna(value):
+                    clean_record[key] = None
+                # Convert numpy types to Python native types
+                elif hasattr(np, "integer") and isinstance(value, np.integer):
+                    clean_record[key] = int(value)
+                elif hasattr(np, "floating") and isinstance(value, np.floating):
+                    clean_record[key] = float(value)
+                elif hasattr(np, "bool_") and isinstance(value, np.bool_):
+                    clean_record[key] = bool(value)
+                elif isinstance(value, pd.Timestamp):
+                    clean_record[key] = value.isoformat()
+                else:
+                    clean_record[key] = value
+            except (TypeError, ValueError) as conv_err:
+                logger.warning(
+                    f"[get_truck_detail] Failed to convert {key}: {conv_err}"
+                )
+                clean_record[key] = None
+
+        # Return via JSONResponse to avoid FastAPI's strict serialization
+        json_str = json.dumps(clean_record, default=str)
+        return JSONResponse(content=json.loads(json_str))
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"[get_truck_detail] Error: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Error fetching truck data: {str(e)}"
         )

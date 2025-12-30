@@ -12,16 +12,16 @@ Usage:
     setup_middleware(app)
 """
 
+import asyncio
+import logging
 import os
 import time
-import logging
-from typing import Callable, Optional, Dict
-from functools import wraps
 from collections import defaultdict
-import asyncio
 from datetime import datetime, timezone
+from functools import wraps
+from typing import Callable, Dict, Optional
 
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -47,26 +47,27 @@ REDIS_RATE_LIMIT_ENABLED = os.environ.get("REDIS_RATE_LIMIT", "true").lower() ==
 # ===========================================
 
 # Rate limits by user role
+# 🔧 v4.1.1: Increased limits to prevent frontend 429 errors
 RATE_LIMITS_BY_ROLE: Dict[str, Dict[str, int]] = {
     "super_admin": {
-        "requests_per_minute": 300,
-        "requests_per_second": 30,
-        "burst_size": 50,
+        "requests_per_minute": 1000,
+        "requests_per_second": 100,
+        "burst_size": 150,
     },
     "admin": {
-        "requests_per_minute": 180,
-        "requests_per_second": 20,
-        "burst_size": 30,
+        "requests_per_minute": 800,
+        "requests_per_second": 80,
+        "burst_size": 120,
     },
     "viewer": {
-        "requests_per_minute": 60,
-        "requests_per_second": 10,
-        "burst_size": 15,
+        "requests_per_minute": 600,
+        "requests_per_second": 60,
+        "burst_size": 100,
     },
     "anonymous": {
-        "requests_per_minute": 30,
-        "requests_per_second": 5,
-        "burst_size": 10,
+        "requests_per_minute": 500,
+        "requests_per_second": 50,
+        "burst_size": 80,
     },
 }
 
@@ -443,17 +444,36 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.limiter = limiter or RateLimiter()
 
         # Paths to exclude from rate limiting
+        # 🔧 v4.1.1: Added more endpoints to prevent frontend blocking
         self.excluded_paths = {
             "/health",
             "/metrics",
             "/api/health",
             "/docs",
             "/openapi.json",
+            "/fuelAnalytics/api/auth/login",
+            "/fuelAnalytics/api/command-center/dashboard",
+            "/fuelAnalytics/api/v2/trucks",
+            "/fuelAnalytics/api/fleet",
+            "/fuelAnalytics/api/kpis",
+            "/fuelAnalytics/api/alerts",
+            "/fuelAnalytics/api/v2/truck-specs",
+            "/fuelAnalytics/api/v2/behavior/fleet",
+            "/fuelAnalytics/api/analytics/driver-scorecard",
+            "/fuelAnalytics/api/gamification/leaderboard",
+            "/static",
         }
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # 🔧 DEBUG: Print path to console to see what we're checking
+        request_path = request.url.path
+        print(
+            f"[MIDDLEWARE DEBUG] Path: '{request_path}' | In excluded? {request_path in self.excluded_paths}"
+        )
+
         # Skip rate limiting for excluded paths
-        if request.url.path in self.excluded_paths:
+        if request_path in self.excluded_paths:
+            print(f"[MIDDLEWARE DEBUG] ✅ SKIPPING rate limit for: {request_path}")
             return await call_next(request)
 
         # Check rate limit
@@ -669,8 +689,8 @@ def rate_limit(
 # ===========================================
 
 if __name__ == "__main__":
-    from fastapi import FastAPI
     import uvicorn
+    from fastapi import FastAPI
 
     app = FastAPI(title="Middleware Demo")
 

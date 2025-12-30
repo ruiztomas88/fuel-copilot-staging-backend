@@ -1,0 +1,136 @@
+"""
+Comprehensive tests for TruckRepository
+Coverage: 100% of all methods
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.repositories.truck_repository import TruckRepository
+
+
+class TestTruckRepository:
+    """Test suite for TruckRepository"""
+
+    @pytest.fixture
+    def repository(self, mock_db_pool):
+        """Create repository with mocked database"""
+        with patch(
+            "src.repositories.truck_repository.get_pool",
+            return_value=mock_db_pool,
+        ):
+            return TruckRepository()
+
+    def test_get_all_trucks_success(
+        self, repository, mock_db_pool, sample_fleet_trucks
+    ):
+        """Test getting all trucks successfully"""
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.fetchall.return_value = sample_fleet_trucks
+
+        result = repository.get_all_trucks()
+
+        assert len(result) == 3
+        assert result[0]["truck_id"] == "RA1234"
+        mock_cursor.execute.assert_called_once()
+
+    def test_get_all_trucks_empty(self, repository, mock_db_pool):
+        """Test getting all trucks when none exist"""
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.fetchall.return_value = []
+
+        result = repository.get_all_trucks()
+
+        assert result == []
+
+    def test_get_all_trucks_database_error(self, repository, mock_db_pool):
+        """Test database error handling"""
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.execute.side_effect = Exception("Database connection failed")
+
+        with pytest.raises(Exception):
+            repository.get_all_trucks()
+
+    def test_get_truck_by_id_success(self, repository, mock_db_pool, sample_truck_data):
+        """Test getting truck by ID successfully"""
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.fetchone.return_value = sample_truck_data
+
+        result = repository.get_truck_by_id("RA1234")
+
+        assert result is not None
+        assert result["truck_id"] == "RA1234"
+        assert result["mpg_current"] == 6.2
+
+    def test_get_truck_by_id_not_found(self, repository, mock_db_pool):
+        """Test getting truck that doesn't exist"""
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.fetchone.return_value = None
+
+        result = repository.get_truck_by_id("NONEXISTENT")
+
+        assert result is None
+
+    def test_get_trucks_offline_success(self, repository, mock_db_pool):
+        """Test getting offline trucks"""
+        offline_trucks = [
+            {"truck_id": "JX9900", "truck_status": "OFFLINE", "data_age_min": 120},
+            {"truck_id": "AB5678", "truck_status": "OFFLINE", "data_age_min": 180},
+        ]
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.fetchall.return_value = offline_trucks
+
+        result = repository.get_trucks_offline(threshold_minutes=60)
+
+        assert len(result) == 2
+        assert all(t["truck_status"] == "OFFLINE" for t in result)
+
+    def test_get_trucks_with_low_fuel(self, repository, mock_db_pool):
+        """Test getting trucks with low fuel"""
+        low_fuel_trucks = [
+            {"truck_id": "JX9900", "fuel_pct": 15.5, "fuel_gallons": 31.0},
+            {"truck_id": "CD4321", "fuel_pct": 18.2, "fuel_gallons": 36.4},
+        ]
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.fetchall.return_value = low_fuel_trucks
+
+        result = repository.get_trucks_with_low_fuel(threshold_pct=20)
+
+        assert len(result) == 2
+        assert all(t["fuel_pct"] < 20 for t in result)
+
+    def test_get_trucks_with_dtcs(self, repository, mock_db_pool):
+        """Test getting trucks with active DTCs"""
+        trucks_with_dtcs = [
+            {"truck_id": "RA1234", "dtc_count": 3, "critical_dtcs": 1},
+            {"truck_id": "FF7702", "dtc_count": 1, "critical_dtcs": 0},
+        ]
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.fetchall.return_value = trucks_with_dtcs
+
+        result = repository.get_trucks_with_dtcs()
+
+        assert len(result) == 2
+        assert result[0]["dtc_count"] == 3
+
+    def test_update_truck_data(self, repository, mock_db_pool):
+        """Test updating truck data"""
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.rowcount = 1
+
+        updates = {"fuel_pct": 80.5, "mpg_current": 6.5, "rpm": 1400}
+
+        result = repository.update_truck_data("RA1234", updates)
+
+        assert result is True
+        mock_cursor.execute.assert_called_once()
+
+    def test_update_truck_data_no_changes(self, repository, mock_db_pool):
+        """Test updating truck with no actual changes"""
+        mock_cursor = mock_db_pool.get_connection().cursor()
+        mock_cursor.rowcount = 0
+
+        result = repository.update_truck_data("RA1234", {})
+
+        assert result is False

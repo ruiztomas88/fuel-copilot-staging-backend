@@ -14,9 +14,9 @@ Changelog:
 - v3.14.0: Added shutdown_baseline_manager() for clean service shutdown
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -197,25 +197,28 @@ class MPGConfig:
     - Dry van empty, highway: 6.5 - 7.5 MPG
     - Optimal (descent, empty): 7.0 - 8.5 MPG
 
-    馃敡 v3.12.18: Reduced min_miles from 10.0 to 5.0 for faster MPG updates
-    This allows MPG to update more frequently while still having enough data
-    for a reasonable calculation. Trade-off: slightly more variance in readings.
+    馃敡 v3.15.0 DEC 29: CRITICAL FIX for inflated MPG readings
+    - Increased min_miles from 5.0 to 20.0 (reduce sensor error impact)
+    - Increased min_fuel_gal from 0.75 to 2.5 (reduce percentage error)
+    - Reduced max_mpg from 9.0 to 8.5 (more realistic for Clase 8)
+    - Reduced ema_alpha from 0.4 to 0.20 (more conservative smoothing)
+    - DISABLED dynamic_alpha (was causing instability)
     """
 
-    min_miles: float = 5.0  # 馃敡 v3.12.18: Reduced from 10.0 for faster updates
-    min_fuel_gal: float = 0.75  # 馃敡 v3.12.18: Reduced from 1.5 proportionally
+    min_miles: float = 20.0  # 馃敡 v3.15.0: Increased from 5.0 to reduce sensor noise
+    min_fuel_gal: float = 2.5  # 馃敡 v3.15.0: Increased from 0.75 to reduce % error
 
     # Physical limits for Class 8 trucks (realistic ranges)
     min_mpg: float = 3.5  # Absolute minimum (reefer, loaded, mountain, city)
-    max_mpg: float = 9.0  # 馃敡 v3.10.7: Absolute maximum (empty, downhill, highway)
-    ema_alpha: float = 0.4  # 馃敡 v3.10.7: Reduced from 0.6 for smoother readings
-    fallback_mpg: float = 5.7  # 馃敡 v3.12.31: Updated to fleet average (was 5.8)
+    max_mpg: float = 8.5  # 馃敡 v3.15.0: Reduced from 9.0 (more realistic)
+    ema_alpha: float = 0.20  # 馃敡 v3.15.0: Reduced from 0.4 for smoother readings
+    fallback_mpg: float = 5.7  # Fleet average
 
-    # Dynamic alpha settings
-    use_dynamic_alpha: bool = True  # Enable variance-based alpha adjustment
-    alpha_high_variance: float = 0.3  # Alpha when variance is high (smoother)
-    alpha_low_variance: float = 0.6  # Alpha when variance is low (more responsive)
-    variance_threshold: float = 0.25  # Variance threshold to switch alpha
+    # Dynamic alpha settings - DISABLED for stability
+    use_dynamic_alpha: bool = False  # 馃敡 v3.15.0: Disabled (was causing instability)
+    alpha_high_variance: float = 0.20  # Not used when dynamic disabled
+    alpha_low_variance: float = 0.25  # Not used when dynamic disabled
+    variance_threshold: float = 0.30  # Not used when dynamic disabled
 
     def __post_init__(self):
         """Validate config"""

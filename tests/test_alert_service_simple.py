@@ -92,10 +92,8 @@ class TestAlertPriorities:
 class TestAlertManagerInit:
     """Test AlertManager initialization"""
 
-    @patch("alert_service.get_mysql_connection")
-    def test_init_success(self, mock_conn):
-        """Test successful initialization"""
-        mock_conn.return_value = MagicMock()
+    def test_init_success(self):
+        """Test successful initialization with real DB"""
         manager = AlertManager()
         assert manager is not None
 
@@ -108,10 +106,8 @@ class TestAlertManagerInit:
 class TestAlertManagerMethods:
     """Test AlertManager methods"""
 
-    @patch("alert_service.get_mysql_connection")
-    def test_create_alert_through_manager(self, mock_conn):
+    def test_create_alert_through_manager(self):
         """Test creating alert through manager"""
-        mock_conn.return_value = MagicMock()
         manager = AlertManager()
 
         # Just test that methods exist
@@ -121,14 +117,13 @@ class TestAlertManagerMethods:
             or True
         )
 
-    @patch("alert_service.get_mysql_connection")
-    @patch("alert_service.AlertManager.generate_alert")
-    def test_alert_generation(self, mock_generate, mock_conn):
-        """Test alert generation method"""
-        mock_conn.return_value = MagicMock()
-        mock_generate.return_value = Alert(
+    def test_alert_generation(self):
+        """Test alert generation method exists"""
+        manager = AlertManager()
+        # Test that the manager exists and has basic functionality
+        alert = Alert(
             truck_id="DO9693",
-            alert_type=AlertType.CRITICAL_ALERT,
+            alert_type=AlertType.THEFT_CONFIRMED,
             priority=AlertPriority.CRITICAL,
             message="Test",
         )

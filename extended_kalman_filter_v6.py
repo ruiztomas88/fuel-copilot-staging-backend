@@ -197,9 +197,13 @@ class ExtendedKalmanFilterV6:
         # h = x[0]  → dh/dx[0] = 1, dh/dx[1] = 0
         H = np.array([[1.0, 0.0]])
 
+        # 🚀 OPTIMIZATION: Adaptive R matrix based on innovation
+        # If innovation is large, sensor might be noisy → increase R (less trust)
+        R_adaptive = self._adaptive_measurement_noise(y)
+
         # Innovation covariance
         # S = H * P * H^T + R
-        S = H @ self.P @ H.T + self.R
+        S = H @ self.P @ H.T + R_adaptive
 
         # Kalman gain
         # K = P * H^T * S^-1
@@ -215,6 +219,36 @@ class ExtendedKalmanFilterV6:
         self.P = (I - np.outer(K, H)) @ self.P
 
         return self.x
+
+    def _adaptive_measurement_noise(self, innovation: float) -> float:
+        """
+        🚀 OPTIMIZATION: Adaptive measurement noise (R) based on innovation.
+
+        Large innovations suggest noisy sensor → increase R (trust less)
+        Small innovations suggest good sensor → decrease R (trust more)
+
+        Args:
+            innovation: Measurement residual (measurement - prediction)
+
+        Returns:
+            Adaptive R value
+        """
+        base_R = self.R
+
+        # Calculate normalized innovation (abs value)
+        abs_innovation = abs(innovation)
+
+        # Adaptive factor: 0.5x to 2.0x base R
+        if abs_innovation < 2.0:  # Small innovation = trust sensor more
+            factor = 0.7
+        elif abs_innovation < 5.0:  # Medium innovation = normal trust
+            factor = 1.0
+        elif abs_innovation < 10.0:  # Large innovation = trust less
+            factor = 1.5
+        else:  # Very large innovation = sensor likely bad
+            factor = 2.5
+
+        return base_R * factor
 
     def get_fuel_estimate(self) -> float:
         """Get current fuel level estimate"""
@@ -232,6 +266,45 @@ class ExtendedKalmanFilterV6:
             "uncertainty_fuel": float(np.sqrt(self.P[0, 0])),
             "uncertainty_rate": float(np.sqrt(self.P[1, 1])),
         }
+
+    @staticmethod
+    def temperature_correction(
+        fuel_pct: float, temp_f: float, capacity_gal: float = 120.0
+    ) -> float:
+        """
+        🚀 OPTIMIZATION: Correct fuel level for diesel thermal expansion.
+
+        Diesel expands ~1% per 15°F temperature increase.
+        Capacitive sensors measure volume, so hot fuel reads higher.
+
+        Args:
+            fuel_pct: Raw sensor reading (%)
+            temp_f: Ambient temperature (°F)
+            capacity_gal: Tank capacity in gallons
+
+        Returns:
+            Temperature-corrected fuel percentage
+
+        Example:
+            Sensor reads 50% at 90°F
+            Corrected = 50% - 2% = 48% (actual fuel mass)
+        """
+        BASE_TEMP_F = 60.0  # Standard reference temperature
+        EXPANSION_COEFF = 0.00067  # Per degree F for diesel
+
+        # Calculate temperature delta from reference
+        temp_delta = temp_f - BASE_TEMP_F
+
+        # Calculate correction factor (negative for expansion)
+        correction_factor = temp_delta * EXPANSION_COEFF
+
+        # Apply correction to percentage
+        # Hot fuel: sensor reads high, subtract correction
+        # Cold fuel: sensor reads low, add correction
+        corrected_pct = fuel_pct * (1 - correction_factor)
+
+        # Clamp to valid range
+        return max(0.0, min(100.0, corrected_pct))
 
 
 class TruckEKFManager:

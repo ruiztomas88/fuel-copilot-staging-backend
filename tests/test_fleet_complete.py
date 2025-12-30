@@ -21,12 +21,14 @@ class TestFleetComplete:
         assert IssueCategory.DEF
         assert IssueCategory.ELECTRICAL
         assert IssueCategory.FUEL
-        assert IssueCategory.BRAKE
+        assert IssueCategory.BRAKES
         assert IssueCategory.SENSOR
         assert IssueCategory.EFFICIENCY
-        assert IssueCategory.GENERAL
+        assert IssueCategory.DRIVER
+        assert IssueCategory.GPS
+        assert IssueCategory.TURBO
         assert ActionType.STOP_IMMEDIATELY
-        assert ActionType.SCHEDULE_MAINTENANCE
+        assert ActionType.SCHEDULE_THIS_WEEK
         assert ActionType.MONITOR
 
     def test_all_dataclasses(self):

@@ -75,11 +75,11 @@ class WialonConfig:
         "total_fuel_used": "total_fuel_used",  # ECU cumulative fuel counter (gallons)
         "total_idle_fuel": "total_idle_fuel",  # ECU idle fuel counter
         "engine_load": "engine_load",  # Engine load % (indicates effort)
-        "ambient_temp": "air_temp",  # Ambient temperature
+        "ambient_temp": "air_temp",  # 🔧 DEC30: Ambient temperature (from Wialon sensor config)
         # 🆕 v3.12.26: Engine Health sensors from Pacific Track
         "oil_temp": "oil_temp",  # Oil Temperature (°F)
         "def_level": "def_level",  # DEF Level (%) - Fixed: was def_lvl
-        "intake_air_temp": "intk_t",  # 🔧 DEC20: Fixed - Wialon truncates to intk_t
+        "intake_air_temp": "intk_t",  # Intake manifold air temperature
         # 🆕 v3.12.28: New sensors for DTC alerts, GPS quality, idle validation
         "dtc": "dtc",  # DTC count (number of active codes)
         "j1939_spn": "j1939_spn",  # 🔧 v5.12.1: J1939 SPN code (Suspect Parameter Number)
@@ -92,12 +92,14 @@ class WialonConfig:
         "fuel_economy": "fuel_economy",  # ECU fuel economy (MPG) - for cross-validation
         "gear": "gear",  # Current gear position (1-18) - for heavy foot detection
         "barometer": "barometer",  # Barometric pressure - engine load correlation
+        "obd_speed": "obd_speed",  # OBD speed (mph) - ECU speed for GPS validation
+        "engine_brake": "actual_retarder",  # Engine brake/retarder (0-100%) - fuel efficiency
         # 🆕 v5.10.1: Full Pacific Track sensor suite
         # Temperatures (Page 2)
         "fuel_temp": "fuel_t",  # 🔧 DEC20: Fixed - Wialon truncates to fuel_t
         "intercooler_temp": "intrclr_t",  # 🔧 DEC20: Fixed - Wialon truncates to intrclr_t
         "turbo_temp": "turbo_temp",  # Turbo temperature (°F) - turbo health
-        "trans_temp": "trans_temp",  # Transmission oil temperature (°F)
+        "trans_temp": "trams_t",  # 🔧 DEC30: Fixed - Wialon uses trams_t (typo in their DB)
         # Pressures (Page 2)
         "intake_press": "intake_pressure",  # 🔧 DEC20: Fixed - Wialon uses intake_pressure
         "boost": "intake_pressure",  # 🔧 DEC20: Fixed - alias for intake_pressure
@@ -122,13 +124,16 @@ class WialonConfig:
         # 🆕 v5.11.0: Additional sensors found in Wialon (Dec 2025)
         "rssi": "rssi",  # Signal strength indicator (dBm) - GPS tracker health
         "coolant_level": "cool_lvl",  # Coolant level (%) - engine health
-        "oil_level": "oil_level",  # Oil level (%) - predictive maintenance
+        # ❌ REMOVED: "oil_level" duplicate - we use "oil_lvl" (fixed at bottom of dict)
         "gps_locked": "gps_locked",  # GPS lock status (0/1)
         "battery": "battery",  # Device battery level
         "roaming": "roaming",  # Cellular roaming status
         "event_id": "event_id",  # Pacific Track event identifier
         "bus": "bus",  # CAN bus status/identifier
         "mode": "mode",  # Device operation mode
+        # 🔧 DEC30 2025: Fixed sensor names that were incorrectly mapped
+        "oil_lvl": "oil_level",  # ✅ FIX: Wialon uses 'oil_level' not 'oil_lvl'
+        "cool_lvl": "cool_lvl",  # Coolant level is correct
     }
 
 
@@ -182,6 +187,8 @@ class TruckSensorData:
     fuel_economy: Optional[float] = None  # ECU fuel economy (MPG) - cross-validation
     gear: Optional[int] = None  # Current gear position (1-18)
     barometer: Optional[float] = None  # Barometric pressure (kPa)
+    obd_speed: Optional[float] = None  # OBD speed (mph) - ECU speed for validation
+    engine_brake: Optional[int] = None  # Engine brake/retarder status (0-100%)
     # 🆕 v5.10.1: Full Pacific Track sensor suite
     # Temperatures
     fuel_temp: Optional[float] = None  # Fuel temperature (°F)
@@ -424,6 +431,9 @@ class WialonReader:
         if not self.connection:
             logger.error("Not connected to database")
             return None
+
+        # Get truck_id from unit mapping
+        truck_id = self._unit_to_beyondid.get(unit_id, f"UNIT_{unit_id}")
 
         try:
             with self.connection.cursor() as cursor:
@@ -739,6 +749,50 @@ class WialonReader:
                 except Exception as fuel_e:
                     logger.warning(f"Deep fuel_lvl search failed: {fuel_e}")
 
+                # 🔧 DEC30 2025: DEEP SEARCH for oil_level and pto_hours (update VERY infrequently)
+                # oil_level: updates every ~11 hours when engine starts
+                # pto_hours: updates every ~20 hours when PTO is used
+                # Extend search to 12 hours (aligned with production)
+                infrequent_cutoff_epoch = int(time.time()) - 43200  # 12 hours
+                try:
+                    infrequent_query = f"""
+                        SELECT unit, p as param_name, value, m as epoch_time
+                        FROM sensors
+                        WHERE unit IN ({unit_placeholders})
+                            AND m >= %s
+                            AND m < %s
+                            AND p IN ('oil_level', 'pto_hours')
+                        ORDER BY m DESC
+                    """
+                    # Get oil_level/pto_hours data between 4h-24h ago (not already in main query)
+                    infrequent_query_args = unit_ids + [
+                        infrequent_cutoff_epoch,
+                        cutoff_epoch,
+                    ]
+                    cursor.execute(infrequent_query, infrequent_query_args)
+                    infrequent_results = cursor.fetchall()
+
+                    # Add infrequent sensor data to unit_data if not already present
+                    for row in infrequent_results:
+                        unit_id = row["unit"]
+                        param = row["param_name"]
+                        # Check if this truck already has this sensor data
+                        has_sensor = any(
+                            r.get("param_name") == param
+                            for r in unit_data.get(unit_id, [])
+                        )
+                        if not has_sensor:
+                            unit_data[unit_id].append(row)
+                            truck_id = self._unit_to_beyondid.get(unit_id, unit_id)
+                            hours_ago = (int(time.time()) - row["epoch_time"]) / 3600
+                            logger.debug(
+                                f"[{truck_id}] 🔍 Deep {param} found: {row['value']} (age={hours_ago:.1f}h)"
+                            )
+                except Exception as infrequent_e:
+                    logger.warning(
+                        f"Deep oil_level/pto_hours search failed: {infrequent_e}"
+                    )
+
                 # 🔧 v5.12.1: DEEP SEARCH for j1939_spn and j1939_fmi (DTC codes)
                 # These sensors update VERY infrequently (only when DTCs change)
                 # Extend search to 48 hours to capture active DTCs
@@ -820,12 +874,18 @@ class WialonReader:
                         elif param_name in (
                             "cool_temp",
                             "oil_temp",
-                            "rpm",
                             "engine_load",
                             "oil_press",
                             "def_level",
+                            "barometer",
+                            "oil_level",
+                            "gear",
+                            "air_temp",
+                            "pto_hours",
                         ):
-                            max_age = 14400  # 🔧 DEC22: 4 hours for health sensors (update less frequently than GPS)
+                            # 🔧 DEC30 2025: 4 hours for infrequent sensors (aligned with production)
+                            # oil_level, pto_hours, barometer, air_temp, gear update less frequently
+                            max_age = 14400  # 4 hours
 
                         if age_sec > max_age:
                             continue
@@ -898,6 +958,15 @@ class WialonReader:
                             sats=sensor_data.get("sats"),
                             pwr_int=sensor_data.get("pwr_int"),
                             course=sensor_data.get("course"),
+                            # 🆕 DEC30 2025: Additional sensors (gear, barometer, oil_level, pto_hours)
+                            gear=sensor_data.get("gear"),
+                            barometer=sensor_data.get("barometer"),
+                            oil_level=sensor_data.get(
+                                "oil_lvl"
+                            ),  # Note: internal name is oil_lvl
+                            pto_hours=sensor_data.get("pto_hours"),
+                            obd_speed=sensor_data.get("obd_speed"),
+                            engine_brake=sensor_data.get("engine_brake"),
                         )
                         all_data.append(truck_data)
                         trucks_with_data.add(truck_id)

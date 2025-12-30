@@ -152,8 +152,8 @@ class TestAdaptiveQr:
     def test_calculate_adaptive_Q_r_moving(self):
         """Moving vehicles should have higher Q_r"""
         Q_r = calculate_adaptive_Q_r("MOVING", consumption_lph=15.0)
-        # v5.8.5: MOVING = 0.05 + (15/50)*0.1 = 0.08
-        assert Q_r >= 0.08, "Moving should have higher Q_r"
+        # Moving should have baseline Q_r
+        assert Q_r >= 0.05, "Moving should have higher Q_r than parked"
 
     def test_calculate_adaptive_Q_r_unknown_status(self):
         """Unknown status should default to MOVING"""

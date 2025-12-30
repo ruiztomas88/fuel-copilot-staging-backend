@@ -52,7 +52,7 @@ try:
 
     _mysql_available = True
     logger.info("✅ MySQL available for Predictive Maintenance persistence")
-except ImportError:
+except ImportError:  # pragma: no cover
     logger.warning("⚠️ MySQL not available, using JSON fallback for PM persistence")
 
 
@@ -872,6 +872,7 @@ class PredictiveMaintenanceEngine:
 
         # 🔧 FIX P2: Add NaN check to prevent invalid calculations
         import math
+
         if trend is not None and not math.isnan(trend) and abs(trend) > 0.01:
             if config.is_higher_bad:
                 # Subiendo hacia umbral (temp subiendo es malo)

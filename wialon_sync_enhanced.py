@@ -67,11 +67,17 @@ from driver_behavior_engine import BehaviorEvent, get_behavior_engine
 # 🆕 v3.12.28: Import DTC analyzer for diagnostic code alerts
 from dtc_analyzer import DTCSeverity, process_dtc_from_sensor_data
 
+# 🆕 DEC 26 2025: Import HYBRID DTC decoder system (781,066 DTCs)
+from dtc_decoder import FuelCopilotDTCHandler
+
 # 🆕 DEC 23: Enhanced MPG calculation with environmental adjustments
 from enhanced_mpg_calculator import EnhancedMPGCalculator, EnvironmentalFactors
 
 # Import the existing sophisticated modules
 from estimator import AnchorDetector, AnchorType, FuelEstimator
+
+# 🆕 DEC 30 2025: FleetBooster integration for fuel levels & DTC alerts
+from fleetbooster_integration import send_dtc_alert, send_fuel_level_update
 
 # 🆕 v3.12.28: Import GPS quality for Kalman adaptive Q_L
 from gps_quality import analyze_fleet_gps_quality, analyze_gps_quality
@@ -113,6 +119,74 @@ logging.basicConfig(
     handlers=[logging.FileHandler("wialon_sync.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 DEC 30 2025: ACCELERATION TRACKING FOR BEHAVIOR ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PREVIOUS_SPEEDS = {}  # truck_id -> (speed_mph, timestamp)
+
+
+def calculate_acceleration(truck_id: str, current_speed: float, current_time) -> tuple:
+    """
+    Calculate acceleration rate and detect harsh events.
+
+    Uses speed delta between consecutive readings to detect:
+    - Harsh acceleration: > 4 mph/s
+    - Harsh braking: < -4 mph/s
+
+    Args:
+        truck_id: Truck identifier
+        current_speed: Current speed in MPH
+        current_time: Current timestamp (datetime or unix)
+
+    Returns:
+        (accel_rate_mpss, harsh_accel, harsh_brake)
+        - accel_rate_mpss: Acceleration in MPH per second (None if first reading)
+        - harsh_accel: True if > 4 mph/s
+        - harsh_brake: True if < -4 mph/s
+    """
+    if current_speed is None:
+        return (None, False, False)
+
+    if truck_id not in PREVIOUS_SPEEDS:
+        PREVIOUS_SPEEDS[truck_id] = (current_speed, current_time)
+        return (None, False, False)
+
+    prev_speed, prev_time = PREVIOUS_SPEEDS[truck_id]
+
+    # Calculate time delta in seconds
+    try:
+        if hasattr(current_time, "timestamp") and hasattr(prev_time, "timestamp"):
+            time_delta = current_time.timestamp() - prev_time.timestamp()
+        elif hasattr(current_time, "total_seconds"):
+            time_delta = (current_time - prev_time).total_seconds()
+        else:
+            time_delta = float(current_time - prev_time)
+    except Exception:
+        PREVIOUS_SPEEDS[truck_id] = (current_speed, current_time)
+        return (None, False, False)
+
+    # Skip if time delta is invalid (too short, too long, or negative)
+    # 🔧 DEC 30 2025: Increased max time_delta from 60s to 300s (5 min)
+    # Wialon updates can be spaced 2-3 minutes apart for some trucks
+    if time_delta <= 0 or time_delta > 300:
+        PREVIOUS_SPEEDS[truck_id] = (current_speed, current_time)
+        return (None, False, False)
+
+    # Calculate acceleration (mph per second)
+    accel_rate = (current_speed - prev_speed) / time_delta
+
+    # Detect harsh events (thresholds in mph/s)
+    harsh_accel = accel_rate > 4.0  # > 4 mph/s = harsh acceleration
+    harsh_brake = accel_rate < -4.0  # < -4 mph/s = harsh braking
+
+    # Update tracking
+    PREVIOUS_SPEEDS[truck_id] = (current_speed, current_time)
+
+    return (round(accel_rate, 3), harsh_accel, harsh_brake)
+
 
 # 🆕 FASES 2A, 2B, 2C: Extended Kalman Filter + ML Pipeline + Event-Driven Architecture
 # Import AFTER logger is defined
@@ -166,11 +240,8 @@ if not LOCAL_DB_CONFIG.get("password"):
 # 🆕 v6.5.1: Global MPG config for state initialization
 mpg_config = MPGConfig()
 
-# 🆕 DEC 23: Enhanced MPG calculator singleton
-enhanced_mpg_calculator = EnhancedMPGCalculator()
-
-# 🔧 DEC 23 FIX: Global settings instance for price_per_gallon and other configs
-_settings = get_settings()
+# 🆕 DEC 26: Service container for dependency injection (replaces globals)
+from service_container import get_container
 
 # State persistence paths
 DATA_DIR = Path(__file__).parent / "data"
@@ -178,13 +249,17 @@ ESTIMATOR_STATES_DIR = DATA_DIR / "estimator_states"
 MPG_STATES_FILE = DATA_DIR / "mpg_states.json"
 
 # Kalman configuration
-# 🔧 DEC 23 FIX: Reduced Q_r and Q_L_moving to reduce drift and over-estimation
-# Target: <2% drift, MPG 5.5-6.5 for loaded Class 8 trucks
+# 🔧 DEC 27 FIX: REVERTIDO a valores de producción después de análisis de código
+# HALLAZGO: Producción usa Q_L=4.0 con K clamp dinámico (líneas 787-812 estimator.py)
+# El K clamp previene overcorrection: k_max=0.20 cuando P<2.0 (alta confianza)
+# Con Q_L=4.0 y P=1.0: K=0.20, pero clamp lo mantiene en 0.20
+# Innovación grande (refuel, cambio real): k_max boost a 0.30-0.70
+# MI ERROR: Bajé Q_L pensando que era el problema, pero el clamp ya lo maneja
 KALMAN_CONFIG = {
-    "Q_r": 0.05,  # Process noise (reduced from 0.1 to reduce over-estimation)
-    "Q_L_moving": 2.5,  # Measurement noise when moving (reduced from 4.0 for more sensor trust)
-    "Q_L_static": 1.0,  # Measurement noise when static
-    "max_drift_pct": 5.0,  # Drift warning threshold (reduced from 7.5 for earlier alerts)
+    "Q_r": 0.05,  # Process noise (same as production v5.8.5)
+    "Q_L_moving": 4.0,  # Measurement noise when moving (PRODUCTION VALUE)
+    "Q_L_static": 1.0,  # Measurement noise when static (PRODUCTION VALUE)
+    "max_drift_pct": 5.0,  # Drift warning threshold
     "emergency_drift_threshold": 30.0,  # Emergency reset threshold
     "emergency_gap_hours": 2.0,  # Time gap for emergency reset
     "refuel_volume_factor": 1.0,
@@ -235,6 +310,62 @@ def get_tank_capacity_liters(truck_id: str) -> float:
     """Get tank capacity in liters for a truck"""
     gallons = TANK_CAPACITIES.get(truck_id, TANK_CAPACITIES["default"])
     return gallons * 3.78541
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DTC PROCESSING (HYBRID SYSTEM - DEC 26 2025)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def parse_wialon_dtc_string(dtc_string: str) -> List[Tuple[int, int]]:
+    """
+    🆕 DEC 26 2025: Parse Wialon DTC string into (SPN, FMI) tuples.
+
+    Wialon sends DTCs as comma-separated values: "100.1,157.3,234.0"
+    Each value is SPN.FMI where:
+    - SPN: Suspect Parameter Number (before decimal)
+    - FMI: Failure Mode Identifier (after decimal)
+
+    Args:
+        dtc_string: String from Wialon like "100.1,157.3"
+
+    Returns:
+        List of (spn, fmi) tuples: [(100, 1), (157, 3)]
+
+    Examples:
+        "100.1" → [(100, 1)]
+        "100.1,157.3" → [(100, 1), (157, 3)]
+        "0" → [] (ignore invalid)
+        "1.0" → [] (ignore invalid)
+    """
+    if not dtc_string or dtc_string.strip() in ["", "0", "1", "0.0", "1.0"]:
+        return []
+
+    dtc_list = []
+    for dtc_part in dtc_string.split(","):
+        dtc_part = dtc_part.strip()
+        if not dtc_part or dtc_part in ["0", "1", "0.0", "1.0"]:
+            continue
+
+        try:
+            if "." in dtc_part:
+                spn_str, fmi_str = dtc_part.split(".", 1)
+                spn = int(float(spn_str))
+                fmi = int(float(fmi_str))
+            else:
+                # If no decimal, treat as SPN only with FMI=31 (unknown)
+                spn = int(float(dtc_part))
+                fmi = 31
+
+            # Validate ranges
+            if spn > 0 and 0 <= fmi <= 31:
+                dtc_list.append((spn, fmi))
+            else:
+                logger.warning(f"Invalid DTC ranges: SPN={spn}, FMI={fmi}")
+        except (ValueError, AttributeError) as e:
+            logger.warning(f"Could not parse DTC part '{dtc_part}': {e}")
+
+    return dtc_list
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -328,11 +459,14 @@ class StateManager:
         with self._lock:
             if truck_id not in self.estimators:
                 capacity_liters = get_tank_capacity_liters(truck_id)
-                self.estimators[truck_id] = FuelEstimator(
+                estimator = FuelEstimator(
                     truck_id=truck_id,
                     capacity_liters=capacity_liters,
                     config=KALMAN_CONFIG,
                 )
+                # 🆕 v6.2.0: Load calibrated physics model for ECU validation
+                estimator.load_calibrated_params()
+                self.estimators[truck_id] = estimator
             return self.estimators[truck_id]
 
     def get_mpg_state(self, truck_id: str) -> MPGState:
@@ -715,8 +849,13 @@ def detect_refuel(
 
     # Fallback to settings if adaptive returns None
     if min_increase_pct is None or min_increase_gal is None:
-        min_increase_pct = _settings.fuel.min_refuel_jump_pct  # Default 10.0 (was 15.0)
-        min_increase_gal = _settings.fuel.min_refuel_gallons  # Default 5.0 (was 10.0)
+        container = get_container()
+        min_increase_pct = (
+            container.settings.fuel.min_refuel_jump_pct
+        )  # Default 10.0 (was 15.0)
+        min_increase_gal = (
+            container.settings.fuel.min_refuel_gallons
+        )  # Default 5.0 (was 10.0)
 
     # 🔧 v3.12.28: Apply refuel_factor for sensor calibration
     refuel_factor = get_refuel_factor(truck_id)
@@ -1752,8 +1891,21 @@ def process_truck(
             )
             return None
 
-    # Sensor percentage
-    sensor_pct = fuel_lvl
+    # 🔧 DEC 30 CRITICAL FIX: Convert fuel_lvl from GALLONS to PERCENTAGE
+    # Wialon sensor "fuel_lvl" returns ABSOLUTE GALLONS (not %), must convert
+    # PROBLEM: LC6799 had 99.2 gal → was treated as 99.2% (should be 49.6%)
+    # This caused refuels to NOT be detected (sensor never changed)
+    sensor_pct = None
+    if fuel_lvl is not None and tank_capacity_gal > 0:
+        sensor_pct = (fuel_lvl / tank_capacity_gal) * 100
+        if sensor_pct > 110:  # Sanity check: if > 110%, likely already in %
+            logger.warning(
+                f"[{truck_id}] fuel_lvl={fuel_lvl} exceeds tank capacity {tank_capacity_gal} gal, "
+                f"assuming value is already % (sensor_pct={sensor_pct:.1f}%)"
+            )
+            sensor_pct = fuel_lvl  # Use original value
+    else:
+        sensor_pct = fuel_lvl  # Fallback: assume % if no tank capacity
 
     # 🔧 DEC 23 FIX (BUG-002): Initialize odom_delta_mi at function start
     # This prevents "not associated with a value" error when truck is not MOVING
@@ -1763,14 +1915,96 @@ def process_truck(
     if not estimator.initialized and sensor_pct is not None:
         estimator.initialize(sensor_pct=sensor_pct)
 
+    # 🔧 DEC 28 FIX: Check for refuel BEFORE emergency reset
+    # Emergency reset was destroying refuel evidence by resetting Kalman to sensor
+    # before detect_refuel() could compare them
+    early_refuel_detected = False
+    if sensor_pct is not None and estimator.initialized:
+        kalman_pct_before_reset = estimator.level_pct
+        sensor_vs_kalman = sensor_pct - kalman_pct_before_reset
+
+        # 🔧 DEC 28 ENHANCEMENT: Use adaptive threshold per truck (learned from history)
+        from adaptive_refuel_thresholds import get_adaptive_thresholds
+
+        adaptive = get_adaptive_thresholds()
+        min_increase_pct, _ = adaptive.get_thresholds(truck_id)
+        early_refuel_threshold = (
+            min_increase_pct if min_increase_pct else 15
+        )  # Fallback to 15%
+
+        # If there's a big jump after a gap, it's likely a refuel
+        if (
+            sensor_vs_kalman > early_refuel_threshold and time_gap_hours > 0.08
+        ):  # 5 minutes
+            early_refuel_detected = True
+            logger.info(
+                f"🚰 [EARLY-REFUEL-DETECTED] {truck_id}: kalman={kalman_pct_before_reset:.1f}% → sensor={sensor_pct:.1f}% "
+                f"(+{sensor_vs_kalman:.1f}%, threshold={early_refuel_threshold:.1f}%, gap={time_gap_hours:.1f}h)"
+            )
+
     # Check emergency reset (high drift after long offline)
-    if sensor_pct is not None and time_gap_hours > 2:
+    # BUT skip if we detected a refuel - let the normal refuel handling process it
+    if sensor_pct is not None and time_gap_hours > 2 and not early_refuel_detected:
         estimator.check_emergency_reset(sensor_pct, time_gap_hours, truck_status)
 
     # Calculate consumption
     consumption_lph = calculate_consumption(
         speed, rpm, fuel_rate, total_fuel_used, estimator, dt_hours, truck_status
     )
+
+    # 🆕 v6.2.0: Validate ECU consumption against physics model
+    # Detects faulty ECU sensors by comparing against calibrated model
+    if (
+        consumption_lph is not None
+        and consumption_lph > 0
+        and engine_load is not None
+        and dt_hours > 0
+        and dt_hours < 1.0
+    ):
+        # Calculate altitude change for physics model
+        altitude_change_m = None
+        if altitude is not None and truck_id in state_manager.last_sensor_data:
+            prev_altitude = state_manager.last_sensor_data[truck_id].get("altitude")
+            if prev_altitude is not None:
+                altitude_change_m = altitude - prev_altitude
+
+        # Validate ECU consumption
+        validation = estimator.validate_ecu_consumption(
+            ecu_consumption_lph=consumption_lph,
+            dt_hours=dt_hours,
+            engine_load_pct=engine_load,
+            altitude_change_m=altitude_change_m,
+            threshold_pct=30.0,  # 30% deviation threshold
+        )
+
+        # Log warnings for suspicious ECU readings
+        if validation["status"] == "CRITICAL":
+            logger.warning(
+                f"⚠️ [ECU-VALIDATION] {truck_id}: {validation['message']} - "
+                f"ECU={validation['ecu_lph']} LPH, Model={validation['model_lph']} LPH, "
+                f"Deviation={validation['deviation_pct']}%"
+            )
+            # Send alert for critical ECU issues
+            try:
+                send_sensor_issue_alert(
+                    truck_id=truck_id,
+                    sensor_name="fuel_consumption_ecu",
+                    issue_type="CRITICAL_DEVIATION",
+                    severity="high",
+                    current_value=validation["ecu_lph"],
+                    expected_value=validation["model_lph"],
+                    deviation_pct=validation["deviation_pct"],
+                    message=validation["message"],
+                )
+            except Exception as e:
+                logger.debug(f"Failed to send ECU validation alert: {e}")
+
+        elif validation["status"] == "WARNING":
+            logger.info(
+                f"ℹ️ [ECU-VALIDATION] {truck_id}: {validation['message']} - "
+                f"ECU={validation['ecu_lph']} LPH, Model={validation['model_lph']} LPH, "
+                f"Deviation={validation['deviation_pct']}%"
+            )
 
     # 🆕 v3.12.28: Apply terrain factor to adjust consumption for grade
     # Only apply when moving and we have altitude data
@@ -1971,121 +2205,10 @@ def process_truck(
         drift_pct = estimated_pct - sensor_pct
     drift_warning = "YES" if abs(drift_pct) > 7.5 else "NO"
 
-    # MPG tracking (only for MOVING trucks)
-    # 🔧 FIX v6.3.2: Improved delta calculation with speed×time fallback
+    # 🔧 DEC 29 FIX: MPG calculation - SOLO método acumulador (matching production)
+    # REMOVED: Instantaneous MPG (speed/consumption) - demasiado ruidoso
+    # USING: Accumulator pattern con ventanas (5mi + 0.75gal) y EMA smoothing
     mpg_current = mpg_state.mpg_current
-
-    # 🆕 DEC24 2025: Multi-source MPG calculation with noise filtering
-    # Priority: 1) ECU delta (most reliable), 2) Fuel level delta, 3) Filtered fuel_rate
-    mpg_instantaneous = None
-    consumption_reliable = None
-    use_instantaneous_mpg = (
-        False  # Flag to skip accumulated MPG if instantaneous succeeds
-    )
-
-    # Method 1: ECU cumulative fuel counter (BEST - no sensor noise)
-    total_fuel_raw = sensor_data.get(
-        "total_fuel_used"
-    )  # ⚠️ DEC 25 2025: This comes in LITERS from Wialon, not gallons!
-
-    # 🔧 CRITICAL FIX DEC 25 2025: ECU sensors report in LITERS, not GALLONS
-    # Convert to gallons for all calculations
-    LITERS_PER_GALLON = 3.78541
-
-    if total_fuel_raw is not None and total_fuel_raw > 0:
-        # Detect units: if > 300,000 it's definitely LITERS (lifetime counter)
-        # Normal truck: ~50,000-200,000 gal lifetime vs 180,000-750,000 L
-        if total_fuel_raw > 300000:
-            total_fuel_gal = total_fuel_raw / LITERS_PER_GALLON
-            logger.debug(
-                f"[{truck_id}] 🔧 ECU sensor in LITERS detected: "
-                f"{total_fuel_raw:.0f}L → {total_fuel_gal:.0f}gal (÷{LITERS_PER_GALLON})"
-            )
-        else:
-            # Assume gallons if < 300,000 (older trucks may already be in gallons)
-            total_fuel_gal = total_fuel_raw
-            logger.debug(
-                f"[{truck_id}] ECU sensor assuming GALLONS: {total_fuel_gal:.2f}gal"
-            )
-    else:
-        total_fuel_gal = None
-
-    logger.debug(
-        f"[{truck_id}] ECU sensor: total_fuel_gal={total_fuel_gal}, last_total exists={truck_id in state_manager.last_total_fuel}"
-    )
-    if total_fuel_gal and truck_id in state_manager.last_total_fuel:
-        last_total = state_manager.last_total_fuel[truck_id]
-        delta_fuel_ecu = total_fuel_gal - last_total
-        if dt_hours > 0 and 0.01 < delta_fuel_ecu < 25:  # Sanity check
-            consumption_reliable = delta_fuel_ecu / dt_hours  # GPH from ECU
-            logger.info(
-                f"[{truck_id}] ✅ Consumption from ECU: {consumption_reliable:.2f} gph "
-                f"(Δfuel={delta_fuel_ecu:.2f}gal, Δt={dt_hours:.2f}h, total={total_fuel_gal:.2f})"
-            )
-        else:
-            logger.debug(
-                f"[{truck_id}] ECU delta out of range: Δ={delta_fuel_ecu:.2f}, dt={dt_hours:.2f}h"
-            )
-    elif total_fuel_gal:
-        logger.debug(
-            f"[{truck_id}] ECU first reading - initializing: {total_fuel_gal:.2f} gal"
-        )
-
-    # Method 2: Apply EMA filter to fuel_rate sensor (reduce noise)
-    # 🔧 DEC 25 FIX: DISABLED - fuel_rate sensor muy ruidoso, causa MPG inflados
-    # Solo usamos ECU total_fuel_used delta que es más confiable
-    # if consumption_reliable is None and consumption_gph and consumption_gph > 0.5:
-    #     alpha = 0.3
-    #     if truck_id in state_manager.consumption_ema:
-    #         ema_prev = state_manager.consumption_ema[truck_id]
-    #         consumption_reliable = alpha * consumption_gph + (1 - alpha) * ema_prev
-    #         state_manager.consumption_ema[truck_id] = consumption_reliable
-    #     else:
-    #         state_manager.consumption_ema[truck_id] = consumption_gph
-    #         consumption_reliable = consumption_gph
-
-    # 🆕 DEC 25: Log cuando NO tenemos consumo confiable
-    if consumption_reliable is None:
-        logger.debug(
-            f"[{truck_id}] No reliable consumption - skipping instantaneous MPG "
-            f"(ECU total_fuel_used not available or first reading)"
-        )
-
-    # Update last_total_fuel for next iteration
-    if total_fuel_gal:
-        state_manager.last_total_fuel[truck_id] = total_fuel_gal
-
-    # Calculate instantaneous MPG with reliable consumption
-    if (
-        truck_status == "MOVING"
-        and speed
-        and speed > 10
-        and consumption_reliable
-        and consumption_reliable > 0.5
-    ):
-        mpg_instantaneous = speed / consumption_reliable
-        # 🔧 DEC24: Realistic range for Class 8 trucks (flatbed, reefer, dryvan)
-        # Empty highway: 9-13 MPG, Empty city: 7-9 MPG
-        # Loaded highway: 6-8 MPG, Loaded city: 4-6 MPG
-        # Extreme values: 3.5 (heavy load uphill) to 14.0 (empty downhill)
-        # 🔧 DEC 25 FIX: Rango más estricto - Class 8 loaded trucks 3.5-6.5 MPG
-        # Empty pueden llegar a 8-9 MPG, pero es excepcional
-        # Si vemos >7 MPG consistentemente, hay problema con consumption sensor
-        if 3.0 <= mpg_instantaneous <= 9.0:
-            # Use instantaneous MPG if consumption sensor is reliable
-            # This overrides the accumulated mpg_current which can be stale
-            mpg_current = mpg_instantaneous
-            use_instantaneous_mpg = True  # Skip accumulated MPG calculation
-            source = "ECU" if total_fuel_gal else "EMA"
-            logger.info(
-                f"[{truck_id}] ✅ MPG instantaneous ({source}): {mpg_instantaneous:.2f} "
-                f"(speed={speed:.1f} mph, consumption={consumption_reliable:.2f} gph)"
-            )
-        else:
-            logger.warning(
-                f"[{truck_id}] MPG instantaneous out of range: {mpg_instantaneous:.2f} "
-                f"(speed={speed:.1f}, consumption={consumption_reliable:.2f}) - using accumulated"
-            )
 
     # 🔧 FIX v6.4.0: Reset fuel tracking when there's a large time gap
     # This prevents fuel consumed during IDLE from corrupting MPG calculations
@@ -2099,9 +2222,10 @@ def process_truck(
         mpg_state.last_fuel_lvl_pct = None  # Force fresh start
         mpg_state.last_timestamp = None
 
-    # 🆕 DEC24: Accumulated MPG calculation (only if instantaneous MPG not available)
-    # This provides a secondary method using fuel level delta + odometer delta
-    if truck_status == "MOVING" and speed and speed > 5 and not use_instantaneous_mpg:
+    # 🆕 DEC24: Accumulated MPG calculation (matching production logic)
+    # Ventanas: ≥5mi AND ≥0.75gal → calcular MPG → aplicar EMA smoothing
+    # Límites físicos: 3.5-9.0 MPG (Class 8 trucks - matching production)
+    if truck_status == "MOVING" and speed and speed > 5:
         # Calculate deltas
         delta_miles = 0.0
         delta_gallons = 0.0
@@ -2134,10 +2258,15 @@ def process_truck(
             delta_miles if (MIN_DELTA_MILES < delta_miles < MAX_DELTA_MILES) else None
         )
 
-        # 🔧 v2.0.1 DEC 22 FIX: NUEVO orden de prioridad para fuel consumption
-        # PRIORITY 1: Fuel level sensor (más confiable - cambio real en tanque)
-        # PRIORITY 2: ECU total_fuel_used (cumulative counter - muy preciso)
-        # PRIORITY 3: fuel_rate_gph (instantáneo - ruidoso, último recurso)
+        # 🔧 DEC 29 FIX v2: NUEVO orden de prioridad para fuel consumption (MPG accuracy fix)
+        # PRIORITY 1: ECU total_fuel_used delta - Cumulative counter, most precise for MPG
+        # PRIORITY 2: Kalman filter (estimated_gallons) - Good for smoothing but can underestimate consumption
+        # PRIORITY 3: Raw sensor_pct delta - Only as fallback (noisy, can jump erratically)
+        # PRIORITY 4: fuel_rate_gph - Last resort (instantaneous, very noisy)
+        #
+        # RATIONALE: Logs show "Fuel rate mismatch: ECU=4.71gph, estimated=1.30gph"
+        # Kalman underestimates consumption by ~2-3x, causing inflated MPG (7-8 instead of 4-5)
+        # ECU cumulative counter is ±0.1% accurate, better for MPG than Kalman's conservative estimates
 
         total_fuel_used = sensor_data.get("total_fuel_used")  # Already in gallons
         last_total_fuel = (
@@ -2146,33 +2275,67 @@ def process_truck(
             else None
         )
 
-        if mpg_state.last_fuel_lvl_pct is not None and sensor_pct is not None:
-            # PRIORITY 1: Fuel sensor delta (PREFERRED - más conservador)
+        # 🔧 v6.5.1 DEC 29 CRITICAL FIX: MPG usando SOLO sensor_pct (como producción)
+        # PROBLEMA DETECTADO: ECU cumulative reporta consumo MENOR que realidad
+        # - ECU mide fuel inyectado (no cuenta retorno, evaporación)
+        # - Resultado: MPG inflado 20-70% vs producción
+        # SOLUCIÓN: Usar SOLO sensor % como producción Windows
+
+        # ✅ Verificar que tenemos AMBAS lecturas (actual Y previa)
+        has_odometer = (
+            mpg_state.last_odometer_mi is not None
+            and odometer is not None
+            and odometer > 0
+        )
+        has_fuel_lvl = (
+            mpg_state.last_fuel_lvl_pct is not None and sensor_pct is not None
+        )
+
+        # Solo calcular MPG si AMBOS están disponibles
+        if has_odometer and has_fuel_lvl:
+            # Calcular delta fuel (% consumido) - SOLO SENSOR
             fuel_drop_pct = mpg_state.last_fuel_lvl_pct - sensor_pct
-            if 0.05 < fuel_drop_pct < 50:  # Entre 0.05% y 50% drop (sanity check)
-                delta_gallons = (fuel_drop_pct / 100) * tank_capacity_gal
-                mpg_state.fuel_source_stats["sensor"] += 1
-            elif last_total_fuel is not None and total_fuel_used is not None:
-                # Fallback to ECU if sensor doesn't show drop
-                delta_fuel_ecu = total_fuel_used - last_total_fuel
-                if 0 < delta_fuel_ecu < 25:  # Sanity check: <25 gal per window
-                    delta_gallons = delta_fuel_ecu
-                    mpg_state.fuel_source_stats["ecu_cumulative"] = (
-                        mpg_state.fuel_source_stats.get("ecu_cumulative", 0) + 1
-                    )
-        elif last_total_fuel is not None and total_fuel_used is not None:
-            # PRIORITY 2: ECU cumulative fuel counter (muy confiable)
-            delta_fuel_ecu = total_fuel_used - last_total_fuel
-            if 0 < delta_fuel_ecu < 25:  # Sanity: max 25 gal per window
-                delta_gallons = delta_fuel_ecu
-                mpg_state.fuel_source_stats["ecu_cumulative"] = (
-                    mpg_state.fuel_source_stats.get("ecu_cumulative", 0) + 1
+
+            # SKIP si fuel subió (refuel detectado)
+            if fuel_drop_pct < -5:
+                logger.debug(
+                    f"[{truck_id}] Refuel detected (+{-fuel_drop_pct:.1f}%), "
+                    f"skipping MPG calculation"
                 )
-        elif consumption_gph and dt_hours > 0:
-            # PRIORITY 3: CAN instantaneous rate (ÚLTIMO RECURSO - ruidoso)
-            if 0.5 <= consumption_gph <= 20:
-                delta_gallons = consumption_gph * dt_hours
-                mpg_state.fuel_source_stats["fallback"] += 1
+            # SKIP si fuel no cambió significativamente
+            elif fuel_drop_pct < 0.05:
+                logger.debug(
+                    f"[{truck_id}] Fuel change too small ({fuel_drop_pct:.2f}%), "
+                    f"skipping MPG calculation"
+                )
+            # SKIP si fuel drop extremo (sensor error)
+            elif fuel_drop_pct > 50:
+                logger.warning(
+                    f"[{truck_id}] Fuel drop too large ({fuel_drop_pct:.1f}%) - "
+                    f"likely sensor error, skipping MPG calculation"
+                )
+            else:
+                # ✅ TODO VÁLIDO - calcular delta_gallons
+                delta_gallons = (fuel_drop_pct / 100) * tank_capacity_gal
+                odom_delta_mi = delta_miles  # Para cost_per_mile calculation
+                mpg_state.fuel_source_stats["sensor"] = (
+                    mpg_state.fuel_source_stats.get("sensor", 0) + 1
+                )
+
+                logger.debug(
+                    f"[{truck_id}] Δ odometer: {delta_miles:.2f}mi, "
+                    f"Δ fuel: {fuel_drop_pct:.2f}% ({delta_gallons:.2f} gal)"
+                )
+        else:
+            # Skip este ciclo - esperar a que AMBOS estén disponibles
+            missing = []
+            if not has_odometer:
+                missing.append("odometer")
+            if not has_fuel_lvl:
+                missing.append("fuel_lvl")
+            logger.debug(
+                f"[{truck_id}] Skipping MPG - waiting for: {', '.join(missing)}"
+            )
 
         # 🔧 v2.0.1: VALIDACIONES ESTRICTAS antes de calcular MPG
         # Evita corruption por deltas irreales (odometer jumps, sensor glitches)
@@ -2188,32 +2351,23 @@ def process_truck(
             MIN_DELTA_MILES < delta_miles < MAX_DELTA_MILES
             and MIN_DELTA_FUEL < delta_gallons < MAX_DELTA_FUEL
         ):
-            # ✅ DEC 22: Add MPG physics validation (Class 8 loaded: 2-12 MPG max)
+            # ✅ DEC 29: Add MPG physics validation matching PRODUCTION
             instant_mpg = delta_miles / delta_gallons if delta_gallons > 0 else 0
 
-            # 🆕 MEJORA-002: Validación estricta de MPG antes de guardar
-            # 🔧 DEC 23 FIX: Expanded range to 3.5-12.0 for realistic highway scenarios
-            # Typical: loaded 5.0-7.0 MPG, empty highway 8.0-11.0 MPG
+            # 🆕 DEC 29 PRODUCTION MATCH: Rango 2.0-12.0 (matching Windows production)
+            # Realistic MPG range for heavy trucks: 4-9 typical, 2-12 allowed
             # Out-of-range values indicate sensor errors or bad data
-            if 3.5 <= instant_mpg <= 12.0:
+            if 2.0 <= instant_mpg <= 12.0:
                 # Additional warning for borderline values
-                if instant_mpg < 4.5 or instant_mpg > 10.0:
+                if instant_mpg < 4.0 or instant_mpg > 9.0:
                     logger.warning(
                         f"[{truck_id}] Borderline MPG: {instant_mpg:.2f} "
-                        f"(typical loaded: 5-7, empty highway: 8-11, allowing 3.5-12.0) - "
+                        f"(typical range: 4-9, allowing 2-12) - "
                         f"Δmi={delta_miles:.1f}, Δgal={delta_gallons:.2f}"
                     )
-                # Determine fuel source for logging
-                fuel_source = "unknown"
-                if delta_gallons > 0:
-                    if mpg_state.fuel_source_stats.get(
-                        "sensor", 0
-                    ) > mpg_state.fuel_source_stats.get("ecu_cumulative", 0):
-                        fuel_source = "tank_level"
-                    elif mpg_state.fuel_source_stats.get("ecu_cumulative", 0) > 0:
-                        fuel_source = "ecu_cumulative"
-                    else:
-                        fuel_source = "fuel_rate"
+
+                # Fuel source always "tank_level" now (sensor-only)
+                fuel_source = "tank_level"
 
                 logger.info(
                     f"[{truck_id}] ✓ MPG={instant_mpg:.2f} (Δmi={delta_miles:.1f}, Δgal={delta_gallons:.2f}, source={fuel_source})"
@@ -2225,7 +2379,7 @@ def process_truck(
                 mpg_current = mpg_state.mpg_current
             else:
                 logger.warning(
-                    f"[{truck_id}] ❌ MPG {instant_mpg:.2f} out of range (3.5-12.0), discarding "
+                    f"[{truck_id}] ❌ MPG {instant_mpg:.2f} out of range (2-12), discarding "
                     f"(Δmi={delta_miles:.1f}, Δgal={delta_gallons:.2f})"
                 )
         elif delta_miles > 0 or delta_gallons > 0:
@@ -2235,13 +2389,15 @@ def process_truck(
                 f"fuel={delta_gallons:.3f} (max={MAX_DELTA_FUEL})"
             )
 
-        # Update tracking values
+        # Update tracking values (matching production)
         if odometer and odometer > 0 and odometer < 10_000_000:  # Validar odometer
             mpg_state.last_odometer_mi = odometer
         mpg_state.last_fuel_lvl_pct = sensor_pct
         mpg_state.last_timestamp = timestamp.timestamp()
-        if total_fuel_used is not None:
-            mpg_state.last_total_fuel_gal = total_fuel_used
+        # No update last_total_fuel_gal since we're not using ECU anymore
+        # 🆕 DEC 29: Store Kalman estimate for next delta calculation
+        if estimated_gallons is not None:
+            mpg_state.last_estimated_gal = estimated_gallons
 
     # Idle consumption calculation
     idle_gph = 0.0
@@ -2413,6 +2569,51 @@ def process_truck(
         rpm=rpm,
     )
 
+    # 🆕 DEC 30 2025: Extract new sensors for behavior tracking
+    # Gear (J1939 decode: 0=no data, 31=Neutral, 1-18=gears, -1/251=Reverse)
+    gear_raw = sensor_data.get("gear")
+    gear_decoded = None
+    if gear_raw is not None:
+        from api_v2 import decode_j1939_gear
+
+        gear_decoded = decode_j1939_gear(gear_raw)
+
+    # Engine brake active (binary flag)
+    engine_brake_active = (
+        int(sensor_data.get("engine_brake", 0))
+        if sensor_data.get("engine_brake") is not None
+        else None
+    )
+
+    # OBD speed (from ECU, more accurate than GPS at low speeds)
+    obd_speed_mph = sensor_data.get("obd_speed")
+
+    # Oil level percentage
+    oil_level_pct = sensor_data.get("oil_lvl")  # Note: "oil_lvl" in wialon_reader
+
+    # Barometric pressure (for altitude corrections)
+    barometric_pressure_inhg = sensor_data.get("barometer")
+
+    # PTO hours (Power Take-Off tracking)
+    pto_hours = sensor_data.get("pto_hours")
+
+    # 🆕 DEC 30 2025: Calculate acceleration/braking from speed deltas
+    accel_rate_mpss = None
+    harsh_accel = False
+    harsh_brake = False
+
+    if speed is not None and speed >= 0:
+        accel_rate_mpss, harsh_accel, harsh_brake = calculate_acceleration(
+            truck_id=truck_id, current_speed=speed, current_time=timestamp
+        )
+        # 🔧 DEBUG: Log acceleration calculation for moving trucks
+        if truck_status == "MOVING":
+            if accel_rate_mpss is not None:
+                if harsh_accel or harsh_brake:
+                    logger.info(
+                        f"🚨 [HARSH] {truck_id}: rate={accel_rate_mpss:.3f} mph/s, harsh_accel={harsh_accel}, harsh_brake={harsh_brake}"
+                    )
+
     # Return complete metrics
     return {
         "timestamp_utc": timestamp,
@@ -2436,9 +2637,9 @@ def process_truck(
         # 🆕 DEC 23: Enhanced MPG (normalized for environmental factors)
         "mpg_enhanced": round(enhanced_mpg, 2) if enhanced_mpg else None,
         # 🆕 v2.0.1: Cost per mile calculation (fuel_price / mpg)
-        # 🔧 DEC 23 FIX (BUG-007): Use dynamic price from settings
+        # 🔧 DEC 26 FIX (BUG-007): Use dynamic price from service container
         "cost_per_mile": (
-            round(_settings.fuel.price_per_gallon / mpg_current, 3)
+            round(get_container().settings.fuel.price_per_gallon / mpg_current, 3)
             if mpg_current and mpg_current > 0
             else None
         ),
@@ -2512,6 +2713,17 @@ def process_truck(
         "mpg_expected": mpg_expected,
         "mpg_deviation_pct": mpg_deviation_pct,
         "mpg_status": mpg_status,
+        # 🆕 DEC 30 2025: New sensor data for real behavior tracking
+        "gear": gear_decoded,
+        "engine_brake_active": engine_brake_active,
+        "obd_speed_mph": obd_speed_mph,
+        "oil_level_pct": oil_level_pct,
+        "barometric_pressure_inhg": barometric_pressure_inhg,
+        "pto_hours": pto_hours,
+        # 🆕 DEC 30 2025: Acceleration/braking detection
+        "accel_rate_mpss": accel_rate_mpss,
+        "harsh_accel": 1 if harsh_accel else 0,
+        "harsh_brake": 1 if harsh_brake else 0,
     }
 
 
@@ -2583,6 +2795,118 @@ def save_dtc_event(connection, truck_id: str, alert, sensor_data: Dict) -> bool:
         return False
 
 
+def save_dtc_event_hybrid(
+    connection, truck_id: str, dtc_info: Dict, unit_id: Optional[str] = None
+) -> bool:
+    """
+    🆕 DEC 26 2025: Save DTC event using HYBRID decoder system (781,066 DTCs).
+
+    This function uses the new dtc_decoder.py hybrid system with:
+    - 111 SPNs with DETAILED explanations (Spanish)
+    - 35,503 SPNs with COMPLETE coverage (basic)
+    - 22 FMI codes (0-21)
+    - OEM detection (Freightliner, Detroit, Volvo, etc.)
+    - has_detailed_info flag (DETAILED vs COMPLETE)
+
+    Args:
+        connection: MySQL connection
+        truck_id: Truck identifier
+        dtc_info: Dict from FuelCopilotDTCHandler.process_wialon_dtc()
+        unit_id: Optional Wialon unit ID (not used currently, table doesn't have this column)
+
+    Returns:
+        True if saved successfully
+
+    Example dtc_info structure:
+        {
+            'dtc_code': '100.1',
+            'spn': 100,
+            'fmi': 1,
+            'description': 'Presión de aceite del motor',
+            'spn_explanation': 'Presión del aceite del motor muy baja...',
+            'fmi_explanation': 'Datos válidos pero por debajo del rango normal...',
+            'has_detailed_info': True,
+            'severity': 'CRITICAL',
+            'category': 'ENGINE',
+            'is_critical': True,
+            'action_required': 'Detener el motor inmediatamente...',
+            'oem': 'All OEMs',
+            'truck_id': 'TRK001'
+        }
+    """
+    try:
+        # Validate required fields
+        if (
+            not dtc_info.get("dtc_code")
+            or not dtc_info.get("spn")
+            or dtc_info.get("fmi") is None
+        ):
+            logger.warning(f"Missing required DTC fields: {dtc_info}")
+            return False
+
+        with connection.cursor() as cursor:
+            # Check for duplicate (same truck, code, unresolved)
+            cursor.execute(
+                """
+                SELECT id FROM dtc_events 
+                WHERE truck_id = %s 
+                AND dtc_code = %s 
+                AND status IN ('NEW', 'ACTIVE')
+                LIMIT 1
+                """,
+                (truck_id, dtc_info["dtc_code"]),
+            )
+
+            if cursor.fetchone():
+                logger.debug(
+                    f"Skipping duplicate active DTC {dtc_info['dtc_code']} for {truck_id}"
+                )
+                return False
+
+            # Insert new DTC event with HYBRID system data
+            cursor.execute(
+                """
+                INSERT INTO dtc_events 
+                (truck_id, timestamp_utc, dtc_code, spn, fmi,
+                 component, severity, category, status, description, 
+                 action_required, is_critical, spn_explanation, fmi_explanation, 
+                 has_detailed_info, oem)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    truck_id,
+                    datetime.now(timezone.utc),
+                    dtc_info["dtc_code"],
+                    dtc_info["spn"],
+                    dtc_info["fmi"],
+                    dtc_info.get("category", "UNKNOWN"),  # component column
+                    dtc_info.get("severity", "WARNING"),
+                    dtc_info.get("category", "UNKNOWN"),
+                    "NEW",
+                    dtc_info.get("description", "Unknown DTC"),
+                    dtc_info.get("action_required"),
+                    dtc_info.get("is_critical", False),
+                    dtc_info.get("spn_explanation"),
+                    dtc_info.get("fmi_explanation"),
+                    dtc_info.get("has_detailed_info", False),
+                    dtc_info.get("oem", "All OEMs"),
+                ),
+            )
+
+            connection.commit()
+            detailed = (
+                "✨ DETAILED" if dtc_info.get("has_detailed_info") else "📋 COMPLETE"
+            )
+            logger.info(
+                f"💾 {detailed} Saved DTC {dtc_info['dtc_code']} for {truck_id}"
+            )
+            return True
+
+    except Exception as e:
+        logger.error(f"Error saving hybrid DTC for {truck_id}: {e}")
+        return False
+
+
 def save_to_fuel_metrics(connection, metrics: Dict) -> int:
     """Insert processed metrics into fuel_metrics table"""
     # Convert PARKED to OFFLINE for database compatibility
@@ -2608,6 +2932,9 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  consumption_lph, consumption_gph, mpg_current, cost_per_mile,
                  rpm, engine_hours, odometer_mi, odom_delta_mi,
                  altitude_ft, hdop, coolant_temp_f,
+                 gear, engine_brake_active, obd_speed_mph,
+                 oil_level_pct, barometric_pressure_inhg, pto_hours,
+                 accel_rate_mpss, harsh_accel, harsh_brake,
                  idle_gph, idle_method, idle_mode, drift_pct, drift_warning,
                  anchor_detected, anchor_type, data_age_min,
                  oil_pressure_psi, oil_temp_f, battery_voltage, 
@@ -2616,7 +2943,7 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                  trans_temp_f, fuel_temp_f, intercooler_temp_f, intake_press_kpa, retarder_level,
                  sats, pwr_int, terrain_factor, gps_quality, idle_hours_ecu,
                  dtc, dtc_code, mpg_expected, mpg_deviation_pct, mpg_status)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     truck_status = VALUES(truck_status),
                     latitude = VALUES(latitude),
@@ -2639,6 +2966,15 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                     altitude_ft = VALUES(altitude_ft),
                     hdop = VALUES(hdop),
                     coolant_temp_f = VALUES(coolant_temp_f),
+                    gear = VALUES(gear),
+                    engine_brake_active = VALUES(engine_brake_active),
+                    obd_speed_mph = VALUES(obd_speed_mph),
+                    oil_level_pct = VALUES(oil_level_pct),
+                    barometric_pressure_inhg = VALUES(barometric_pressure_inhg),
+                    pto_hours = VALUES(pto_hours),
+                    accel_rate_mpss = VALUES(accel_rate_mpss),
+                    harsh_accel = VALUES(harsh_accel),
+                    harsh_brake = VALUES(harsh_brake),
                     idle_gph = VALUES(idle_gph),
                     idle_method = VALUES(idle_method),
                     idle_mode = VALUES(idle_mode),
@@ -2694,6 +3030,17 @@ def save_to_fuel_metrics(connection, metrics: Dict) -> int:
                 metrics["altitude_ft"],
                 metrics["hdop"],
                 metrics["coolant_temp_f"],
+                # 🆕 DEC 30 2025: New sensor data for behavior tracking
+                metrics.get("gear"),
+                metrics.get("engine_brake_active"),
+                metrics.get("obd_speed_mph"),
+                metrics.get("oil_level_pct"),
+                metrics.get("barometric_pressure_inhg"),
+                metrics.get("pto_hours"),
+                # 🆕 DEC 30 2025: Acceleration/braking detection
+                metrics.get("accel_rate_mpss"),
+                metrics.get("harsh_accel", 0),
+                metrics.get("harsh_brake", 0),
                 # 🔧 FIX v5.4.7: Added idle_gph value (was missing - BUG #1)
                 metrics.get("idle_gph"),
                 metrics["idle_method"],
@@ -2822,170 +3169,99 @@ def update_sensors_cache(connection, metrics: Dict, sensor_data: Dict) -> bool:
             # Convert timestamp from sensor_data
             from datetime import datetime, timezone
 
-            timestamp = datetime.fromtimestamp(
-                sensor_data.get("epoch_time", 0), tz=timezone.utc
+            # ✅ FIX: Usar columnas que existen en la tabla (epoch_time, last_updated)
+            epoch_time = sensor_data.get("epoch_time", 0)
+            last_updated = (
+                datetime.fromtimestamp(epoch_time, tz=timezone.utc)
+                if epoch_time
+                else datetime.now(timezone.utc)
             )
+
+            # Convertir last_updated a string ISO para MySQL
+            last_updated_str = last_updated.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Preparar sensor_data como JSON para la columna json
+            # Filtrar solo tipos serializables (números, strings, booleanos, None)
+            serializable_data = {}
+            for k, v in sensor_data.items():
+                if k not in [
+                    "epoch_time"
+                ]:  # Excluir epoch_time que va en su propia columna
+                    # Solo incluir tipos JSON serializables
+                    if isinstance(v, (int, float, str, bool, type(None))):
+                        serializable_data[k] = v
+
+            # 🔧 DEC30 2025: Usar nombres RAW de Wialon (oil_lvl, gear, barometer, etc.)
+            sensor_json = json.dumps(
+                {
+                    # Sensores con nombres RAW de Wialon
+                    "oil_press": sensor_data.get("oil_press"),  # Oil pressure (psi)
+                    "oil_temp": sensor_data.get("oil_temp"),  # Oil temp (°F)
+                    "oil_lvl": sensor_data.get("oil_lvl"),  # Oil level (%) - RAW name
+                    "def_level": sensor_data.get("def_level"),  # DEF level (%)
+                    "engine_load": sensor_data.get("engine_load"),  # Engine load (%)
+                    "rpm": sensor_data.get("rpm"),  # RPM
+                    "cool_temp": sensor_data.get("cool_temp"),  # Coolant temp (°F)
+                    "cool_lvl": sensor_data.get("cool_lvl"),  # Coolant level (%)
+                    "fuel_lvl": sensor_data.get(
+                        "fuel_lvl"
+                    ),  # Fuel level (RAW gallons from Wialon)
+                    "fuel_lvl_pct": sensor_data.get(
+                        "fuel_lvl_pct"
+                    ),  # 🆕 DEC30: Converted % value
+                    "fuel_lvl_gal": sensor_data.get(
+                        "fuel_lvl_gal"
+                    ),  # 🆕 DEC30: Converted gallons value
+                    "fuel_rate": sensor_data.get("fuel_rate"),  # Fuel rate (L/h)
+                    "latitude": sensor_data.get("latitude"),
+                    "longitude": sensor_data.get("longitude"),
+                    "speed": sensor_data.get("speed"),  # Speed (mph)
+                    "odom": sensor_data.get("odometer"),  # Odometer (km)
+                    # 🆕 Sensores adicionales
+                    "gear": sensor_data.get("gear"),  # Current gear
+                    "barometer": sensor_data.get("barometer"),  # Barometric pressure
+                    "intk_t": sensor_data.get("intake_air_temp"),  # Intake air temp
+                    "air_temp": sensor_data.get("ambient_temp"),  # Ambient temperature
+                    "pto_hours": sensor_data.get("pto_hours"),  # PTO hours
+                    "brake_switch": sensor_data.get("brake_switch"),  # Brake active
+                    "engine_hours": sensor_data.get("engine_hours"),
+                    "idle_hours": sensor_data.get("idle_hours"),
+                    "total_fuel_used": sensor_data.get("total_fuel_used"),
+                    # Incluir todos los demás datos serializables
+                    **serializable_data,
+                }
+            )
+
+            # 🆕 v6.5.0 DEC30: Agregar obd_speed y engine_brake como columnas físicas
+            obd_speed_val = sensor_data.get("obd_speed")
+            engine_brake_val = sensor_data.get("engine_brake")
 
             query = """
                 INSERT INTO truck_sensors_cache (
-                    truck_id, unit_id, timestamp, wialon_epoch,
-                    oil_pressure_psi, oil_temp_f, oil_level_pct,
-                    def_level_pct, def_temp_f, def_quality,
-                    engine_load_pct, rpm, coolant_temp_f, coolant_level_pct,
-                    gear, brake_active,
-                    intake_pressure_bar, intake_temp_f, intercooler_temp_f,
-                    fuel_temp_f, fuel_level_pct, fuel_rate_gph, fuel_pressure_psi,
-                    ambient_temp_f, barometric_pressure_inhg,
-                    voltage, backup_voltage,
-                    engine_hours, idle_hours, pto_hours,
-                    total_idle_fuel_gal, total_fuel_used_gal,
-                    dtc_count, dtc_code,
-                    latitude, longitude, speed_mph, altitude_ft, odometer_mi, heading_deg,
-                    throttle_position_pct, turbo_pressure_psi,
-                    dpf_pressure_psi, dpf_soot_pct, dpf_ash_pct, dpf_status,
-                    egr_position_pct, egr_temp_f,
-                    alternator_status,
-                    transmission_temp_f, transmission_pressure_psi,
-                    data_age_seconds
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s
-                )
+                    truck_id, unit_id, epoch_time, last_updated, sensor_data,
+                    obd_speed, engine_brake
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     unit_id = VALUES(unit_id),
-                    timestamp = VALUES(timestamp),
-                    wialon_epoch = VALUES(wialon_epoch),
-                    oil_pressure_psi = VALUES(oil_pressure_psi),
-                    oil_temp_f = VALUES(oil_temp_f),
-                    oil_level_pct = VALUES(oil_level_pct),
-                    def_level_pct = VALUES(def_level_pct),
-                    def_temp_f = VALUES(def_temp_f),
-                    def_quality = VALUES(def_quality),
-                    engine_load_pct = VALUES(engine_load_pct),
-                    rpm = VALUES(rpm),
-                    coolant_temp_f = VALUES(coolant_temp_f),
-                    coolant_level_pct = VALUES(coolant_level_pct),
-                    gear = VALUES(gear),
-                    brake_active = VALUES(brake_active),
-                    intake_pressure_bar = VALUES(intake_pressure_bar),
-                    intake_temp_f = VALUES(intake_temp_f),
-                    intercooler_temp_f = VALUES(intercooler_temp_f),
-                    fuel_temp_f = VALUES(fuel_temp_f),
-                    fuel_level_pct = VALUES(fuel_level_pct),
-                    fuel_rate_gph = VALUES(fuel_rate_gph),
-                    fuel_pressure_psi = VALUES(fuel_pressure_psi),
-                    ambient_temp_f = VALUES(ambient_temp_f),
-                    barometric_pressure_inhg = VALUES(barometric_pressure_inhg),
-                    voltage = VALUES(voltage),
-                    backup_voltage = VALUES(backup_voltage),
-                    engine_hours = VALUES(engine_hours),
-                    idle_hours = VALUES(idle_hours),
-                    pto_hours = VALUES(pto_hours),
-                    total_idle_fuel_gal = VALUES(total_idle_fuel_gal),
-                    total_fuel_used_gal = VALUES(total_fuel_used_gal),
-                    dtc_count = VALUES(dtc_count),
-                    dtc_code = VALUES(dtc_code),
-                    latitude = VALUES(latitude),
-                    longitude = VALUES(longitude),
-                    speed_mph = VALUES(speed_mph),
-                    altitude_ft = VALUES(altitude_ft),
-                    odometer_mi = VALUES(odometer_mi),
-                    heading_deg = VALUES(heading_deg),
-                    throttle_position_pct = VALUES(throttle_position_pct),
-                    turbo_pressure_psi = VALUES(turbo_pressure_psi),
-                    dpf_pressure_psi = VALUES(dpf_pressure_psi),
-                    dpf_soot_pct = VALUES(dpf_soot_pct),
-                    dpf_ash_pct = VALUES(dpf_ash_pct),
-                    dpf_status = VALUES(dpf_status),
-                    egr_position_pct = VALUES(egr_position_pct),
-                    egr_temp_f = VALUES(egr_temp_f),
-                    alternator_status = VALUES(alternator_status),
-                    transmission_temp_f = VALUES(transmission_temp_f),
-                    transmission_pressure_psi = VALUES(transmission_pressure_psi),
-                    data_age_seconds = VALUES(data_age_seconds)
+                    epoch_time = VALUES(epoch_time),
+                    last_updated = VALUES(last_updated),
+                    sensor_data = VALUES(sensor_data),
+                    obd_speed = VALUES(obd_speed),
+                    engine_brake = VALUES(engine_brake)
             """
 
-            # Calculate data age
-            data_age_seconds = int(time.time()) - sensor_data.get("epoch_time", 0)
-
-            cursor.execute(
-                query,
-                (
-                    metrics["truck_id"],
-                    sensor_data.get("unit_id"),
-                    timestamp,
-                    int(sensor_data.get("epoch_time", 0)),
-                    # Oil (RAW Wialon names)
-                    get_val("oil_press"),
-                    get_val("oil_temp"),
-                    get_val("oil_lvl"),
-                    # DEF
-                    get_val("def_level"),
-                    get_val("def_temp"),
-                    get_val("def_quality"),
-                    # Engine
-                    get_val("engine_load"),
-                    get_val("rpm"),
-                    get_val("cool_temp"),
-                    get_val("cool_lvl"),
-                    # Transmission & Brakes
-                    get_val("gear"),
-                    1 if get_val("brake_switch") else 0,
-                    # Air Intake
-                    get_val("intake_pressure"),
-                    get_val("intk_t"),
-                    get_val("intrclr_t"),
-                    # Fuel
-                    get_val("fuel_t"),
-                    get_val("fuel_lvl"),
-                    get_val("fuel_rate"),
-                    get_val("fuel_press"),
-                    # Environmental
-                    get_val("ambient_temp"),
-                    get_val("barometer"),
-                    # Electrical
-                    get_val("pwr_ext"),
-                    get_val("pwr_int"),
-                    # Operational
-                    get_val("engine_hours"),
-                    get_val("idle_hours"),
-                    get_val("pto_hours"),
-                    get_val("total_idle_fuel"),
-                    get_val("total_fuel_used"),
-                    # DTC
-                    get_val("dtc"),
-                    get_val("dtc_code"),
-                    # GPS
-                    get_val("latitude"),
-                    get_val("longitude"),
-                    get_val("speed"),
-                    get_val("altitude"),
-                    get_val("odom"),  # 🔧 Wialon usa 'odom' no 'odometer'
-                    get_val("course"),
-                    # Advanced sensors
-                    get_val("throttle_pos"),
-                    get_val("turbo_press"),  # 🔧 Wialon usa 'turbo_press' no 'boost'
-                    get_val(
-                        "dpf_press"
-                    ),  # 🔧 Wialon usa 'dpf_press' no 'dpf_diff_press'
-                    get_val("dpf_soot"),
-                    get_val("dpf_ash"),
-                    get_val("dpf_status"),
-                    get_val("egr_pos"),
-                    get_val("egr_temp"),
-                    get_val(
-                        "alternator_status"
-                    ),  # 🔧 Wialon usa 'alternator_status' no 'alternator'
-                    get_val("trans_temp"),
-                    get_val("trans_press"),
-                    # Metadata
-                    data_age_seconds,
-                ),
+            # Valores para el INSERT
+            values = (
+                truck_id,
+                sensor_data.get("unit_id"),
+                epoch_time,
+                last_updated_str,
+                sensor_json,
+                obd_speed_val,
+                engine_brake_val,
             )
+
+            cursor.execute(query, values)
 
             logger.info(f"📋 Updated truck_sensors_cache for {truck_id}")
             return True
@@ -3127,7 +3403,8 @@ def sync_cycle(
                 "def_temp": getattr(truck_data, "def_temp", None),
                 "egr_temp": getattr(truck_data, "egr_temp", None),
                 "cool_temp": truck_data.coolant_temp,  # ✅ RAW Wialon name
-                "intk_t": truck_data.intake_air_temp,  # ✅ RAW Wialon name
+                "intk_t": truck_data.intake_air_temp,  # ✅ RAW Wialon name (Intake temp)
+                "air_temp": truck_data.ambient_temp,  # ✅ RAW Wialon name (Ambient temp)
                 # Pressures
                 "intake_press": getattr(truck_data, "intake_press", None),
                 "intake_pressure": getattr(truck_data, "intake_press", None),  # Alias
@@ -3142,7 +3419,9 @@ def sync_cycle(
                 # Levels & Quality
                 "cool_lvl": getattr(truck_data, "cool_lvl", None),
                 "def_quality": getattr(truck_data, "def_quality", None),
-                "oil_lvl": getattr(truck_data, "oil_lvl", None),
+                "oil_lvl": getattr(
+                    truck_data, "oil_level", None
+                ),  # 🔧 DEC30: Use oil_level attribute
                 # Positions
                 "throttle_pos": getattr(truck_data, "throttle_pos", None),
                 "egr_pos": getattr(truck_data, "egr_pos", None),
@@ -3183,6 +3462,9 @@ def sync_cycle(
                 "harsh_accel": getattr(truck_data, "harsh_accel", None),
                 "harsh_brake": getattr(truck_data, "harsh_brake", None),
                 "harsh_corner": getattr(truck_data, "harsh_corner", None),
+                # 🆕 v6.5.0 DEC30: Additional critical sensors
+                "obd_speed": getattr(truck_data, "obd_speed", None),
+                "engine_brake": getattr(truck_data, "engine_brake", None),
             }
 
             # 🆕 v5.10.0: Process driver behavior detection
@@ -3263,74 +3545,107 @@ def sync_cycle(
                     else None
                 )
             )
+            # 🔧 DEC 26 2025: OLD DTC SYSTEM DISABLED - NOW USING HYBRID DECODER ONLY
+            # The old system (dtc_analyzer.py) has been replaced with the new hybrid system
+            # that provides 100% DTC coverage (781,066 DTCs) with OEM detection
+
+            # 🔧 DEC 26 2025: NEW HYBRID SYSTEM (781,066 DTCs):
+            # Replaces the old dtc_analyzer.py system entirely
             if dtc_to_process:
                 try:
-                    dtc_alerts = process_dtc_from_sensor_data(
-                        truck_id=truck_id,
-                        dtc_value=str(dtc_to_process),
-                        timestamp=truck_data.timestamp,
-                    )
-                    for alert in dtc_alerts:
-                        # 🆕 v5.7.3: Save DTC to database for history/ML
-                        save_dtc_event(
-                            local_conn,
-                            truck_id=truck_id,
-                            alert=alert,
-                            sensor_data=sensor_data,
+                    # Initialize handler (singleton pattern)
+                    if not hasattr(state_manager, "_dtc_handler"):
+                        state_manager._dtc_handler = FuelCopilotDTCHandler()
+
+                    # Parse Wialon DTC string: "100.1,157.3" → [(100,1), (157,3)]
+                    dtc_pairs = parse_wialon_dtc_string(str(dtc_to_process))
+
+                    if not dtc_pairs:
+                        logger.debug(f"No valid DTCs in: {dtc_to_process}")
+                    else:
+                        logger.info(
+                            f"🔍 Processing {len(dtc_pairs)} DTC(s) for {truck_id}: {dtc_to_process}"
                         )
 
-                        if alert.severity == DTCSeverity.CRITICAL:
-                            logger.warning(f"🚨 CRITICAL DTC: {alert.message}")
-                            # 🆕 v5.8.0: Send notification with full Spanish descriptions
-                            if alert.codes:
-                                code = alert.codes[0]  # Primary code
-                                send_dtc_alert(
-                                    truck_id=truck_id,
-                                    dtc_code=code.code,
-                                    severity="CRITICAL",
-                                    description=code.description or alert.message,
-                                    system=getattr(code, "system", "UNKNOWN"),
-                                    recommended_action=getattr(
-                                        code, "recommended_action", None
-                                    ),
-                                    spn=code.spn,
-                                    fmi=code.fmi,
-                                    spn_name_es=getattr(code, "name_es", None),
-                                    fmi_description_es=getattr(
-                                        code, "fmi_description_es", None
-                                    ),
-                                )
-                        elif alert.severity == DTCSeverity.WARNING:
-                            logger.info(
-                                f"⚠️ DTC Warning: {truck_id} - {alert.codes[0].code if alert.codes else 'UNKNOWN'}"
+                    for spn, fmi in dtc_pairs:
+                        # Process with HYBRID decoder
+                        dtc_result = state_manager._dtc_handler.process_wialon_dtc(
+                            truck_id=truck_id, spn=spn, fmi=fmi
+                        )
+
+                        # Save to database with HYBRID info
+                        save_dtc_event_hybrid(
+                            local_conn,
+                            truck_id=truck_id,
+                            dtc_info=dtc_result,
+                        )
+
+                        # 🆕 DEC 30 2025: Send DTC alert to FleetBooster
+                        try:
+                            from fleetbooster_integration import (
+                                send_dtc_alert as send_fb_dtc,
                             )
-                            # 🆕 v5.8.0: Send email with full Spanish descriptions for warnings
-                            if alert.codes:
-                                code = alert.codes[0]
-                                send_dtc_alert(
-                                    truck_id=truck_id,
-                                    dtc_code=code.code,
-                                    severity="WARNING",
-                                    description=code.description or alert.message,
-                                    system=getattr(code, "system", "UNKNOWN"),
-                                    recommended_action=getattr(
-                                        code, "recommended_action", None
-                                    ),
-                                    spn=code.spn,
-                                    fmi=code.fmi,
-                                    spn_name_es=getattr(code, "name_es", None),
-                                    fmi_description_es=getattr(
-                                        code, "fmi_description_es", None
-                                    ),
-                                )
-                except Exception as dtc_error:
-                    logger.debug(f"DTC processing error for {truck_id}: {dtc_error}")
+
+                            send_fb_dtc(
+                                truck_id=truck_id,
+                                dtc_code=dtc_result.get("dtc_code", "UNKNOWN"),
+                                dtc_description=dtc_result.get(
+                                    "description", "Unknown DTC"
+                                ),
+                                severity=dtc_result.get("severity", "WARNING"),
+                                system=dtc_result.get("category", "System"),
+                            )
+                        except Exception as fb_err:
+                            logger.debug(
+                                f"[{truck_id}] FleetBooster DTC alert failed: {fb_err}"
+                            )
+
+                        # Send alerts based on severity
+                        if dtc_result.get("is_critical"):
+                            detailed = (
+                                "✨ DETAILED"
+                                if dtc_result.get("has_detailed_info")
+                                else "📋 COMPLETE"
+                            )
+                            logger.warning(
+                                f"🚨 CRITICAL DTC ({detailed}): {truck_id} - "
+                                f"{dtc_result['dtc_code']} - {dtc_result['description']}"
+                            )
+                            # Send alert with HYBRID system info
+                            send_dtc_alert(truck_id=truck_id, dtc_info=dtc_result)
+
+                        elif dtc_result.get("severity") == "WARNING":
+                            detailed = (
+                                "✨ DETAILED"
+                                if dtc_result.get("has_detailed_info")
+                                else "📋 COMPLETE"
+                            )
+                            logger.info(
+                                f"⚠️ DTC Warning ({detailed}): {truck_id} - "
+                                f"{dtc_result['dtc_code']} - {dtc_result['description']}"
+                            )
+                            # Send email for warnings (SMS only for CRITICAL)
+                            send_dtc_alert(truck_id=truck_id, dtc_info=dtc_result)
+
+                except Exception as hybrid_dtc_error:
+                    logger.error(
+                        f"HYBRID DTC processing error for {truck_id}: {hybrid_dtc_error}",
+                        exc_info=True,
+                    )
 
             # 🆕 v3.12.28 / v5.7.5: Process voltage alerts using pwr_ext (truck battery)
             # NOTE: pwr_int is GPS tracker backup battery (~3.78V), NOT truck voltage
             if truck_data.pwr_ext is not None:
                 try:
-                    is_running = (truck_data.rpm or 0) > 100
+                    # 🔧 v6.5.1 DEC 30 2025: Better engine detection
+                    # Can't rely only on RPM (may be NULL even with engine running)
+                    # Detect running engine by:
+                    # 1. RPM > 100 (if available)
+                    # 2. Voltage > 13.2V (alternator charging = engine must be on)
+                    rpm_running = (truck_data.rpm or 0) > 100
+                    voltage_running = truck_data.pwr_ext > 13.2
+                    is_running = rpm_running or voltage_running
+
                     voltage_alert = analyze_voltage(
                         voltage=truck_data.pwr_ext,  # v5.7.5: Use pwr_ext (truck 12-14V)
                         rpm=truck_data.rpm,
@@ -3513,6 +3828,20 @@ def sync_cycle(
             inserted = save_to_fuel_metrics(local_conn, metrics)
             total_inserted += inserted
 
+            # 🆕 DEC 30 2025: Send fuel level to FleetBooster (every 60 sec)
+            try:
+                send_fuel_level_update(
+                    truck_id=truck_id,
+                    fuel_pct=metrics.get("estimated_pct", metrics.get("sensor_pct", 0)),
+                    fuel_gallons=metrics.get(
+                        "estimated_gallons", metrics.get("sensor_gallons", 0)
+                    ),
+                    fuel_source="kalman" if metrics.get("estimated_pct") else "sensor",
+                    estimated_liters=metrics.get("estimated_liters"),
+                )
+            except Exception as e:
+                logger.debug(f"[{truck_id}] FleetBooster fuel update failed: {e}")
+
             # 🆕 FASES 2A, 2B, 2C: Process through ML pipeline + Event Bus
             try:
                 integration_results = process_2abc_integrations(truck_id, sensor_data)
@@ -3525,6 +3854,11 @@ def sync_cycle(
                     )
             except Exception as e:
                 logger.warning(f"[{truck_id}] 2ABC integration error: {e}")
+
+            # 🆕 DEC 30 2025: Add calculated fuel_lvl_pct and fuel_lvl_gal to sensor_data
+            # This allows update_sensors_cache to save the converted % and gal values
+            sensor_data["fuel_lvl_pct"] = metrics.get("sensor_pct")
+            sensor_data["fuel_lvl_gal"] = metrics.get("sensor_gallons")
 
             # 🆕 v6.4.1: Update sensors cache (replaces sensor_cache_updater.py)
             update_sensors_cache(local_conn, metrics, sensor_data)

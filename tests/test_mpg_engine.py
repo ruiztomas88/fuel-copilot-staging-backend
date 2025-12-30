@@ -37,9 +37,11 @@ class TestMPGConfig:
         """Test default configuration values - v3.12.18 updated"""
         config = MPGConfig()
         assert config.min_miles == 5.0  # v3.12.18: Reduced from 10.0 for faster updates
-        assert config.min_fuel_gal == 0.75  # v3.12.18: Reduced for faster updates
-        assert config.min_mpg == 3.5  # Physical min for Class 8
-        assert config.max_mpg == 9.0  # Physical max for Class 8
+        assert (
+            config.min_fuel_gal == 1.5
+        )  # v3.12.18: Increased from 0.75 to reduce sensor noise
+        assert config.min_mpg == 3.8  # Physical min for Class 8 - updated
+        assert config.max_mpg == 8.2  # Physical max for Class 8 - updated
         assert config.ema_alpha == 0.4  # v3.10.7: Reduced for smoother readings
         assert config.fallback_mpg == 5.7  # v4.0: Updated fallback
 

@@ -14,16 +14,17 @@ Features:
 - JWT_SECRET_KEY required in production
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
-from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
-import jwt
-import bcrypt
-import secrets
-import os
 import logging
+import os
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
+
+import bcrypt
+import jwt
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -114,18 +115,19 @@ def _get_user_password(user: str, env_var: str, dev_default: str) -> str:
     return password
 
 
-# Pre-hash passwords at startup (bcrypt is slow by design)
-_admin_password = _get_user_password("admin", "ADMIN_PASSWORD", "FuelAdmin2025!")
-_skylord_password = _get_user_password("skylord", "SKYLORD_PASSWORD", "Skylord2025!")
-_skylord_viewer_password = _get_user_password(
-    "skylord_viewer", "SKYLORD_VIEWER_PASSWORD", "SkylordView2025"
-)
+# 🔐 HARDCODED bcrypt hashes for development (2025-12-28)
+# These are pre-generated for the default passwords:
+#   admin: FuelAdmin2025!
+#   skylord: Skylord2025!
+#   skylord_viewer: SkylordView2025
+#
+# DO NOT regenerate these on every startup to avoid hash mismatch issues
+# If you need to change passwords, set env vars and regenerate hashes manually
 
-# Store hashed passwords
 _password_hashes = {
-    "admin": hash_password(_admin_password),
-    "skylord": hash_password(_skylord_password),
-    "skylord_viewer": hash_password(_skylord_viewer_password),
+    "admin": "$2b$12$x3W1/rtu8LRjbiDZ9q.YReVVCmy/Rdk0/ZmDCs0UAXc2bnJh2Sfka",  # FuelAdmin2025!
+    "skylord": "$2b$12$Ac0E6m0sVBrmEjdczUulAO9LkrY89LpeEgXEU5Wu2jduiZhjvJfUi",  # Skylord2025!
+    "skylord_viewer": "$2b$12$SiJ9i85XDVZDcITztyeWpe3tkxVoNhD7pbZfcBL5Ba/cOAwC65rqi",  # SkylordView2025
 }
 
 # Pre-configured users (migrate to MySQL carriers table later)
@@ -168,9 +170,14 @@ USERS_DB: Dict[str, Dict] = {
 # ============================================================================
 def authenticate_user(username: str, password: str) -> Optional[Dict]:
     """Authenticate user with username and password (bcrypt)"""
+    logger.info(
+        f"🔍 Login attempt: username='{username}', password_length={len(password)}"
+    )
+
     user = USERS_DB.get(username)
     if not user:
         logger.warning(f"🔒 Login failed: user '{username}' not found")
+        logger.warning(f"   Available users: {list(USERS_DB.keys())}")
         return None
 
     if not user.get("active", False):
@@ -178,7 +185,14 @@ def authenticate_user(username: str, password: str) -> Optional[Dict]:
         return None
 
     # 🔐 v5.3.3: Use bcrypt verification
-    if not verify_password(password, user["password_hash"]):
+    logger.info(f"🔍 Verifying password for '{username}'...")
+    logger.info(f"   Password received: {repr(password[:10])}... (first 10 chars)")
+    logger.info(f"   Password hash: {user['password_hash'][:60]}...")
+
+    password_valid = verify_password(password, user["password_hash"])
+    logger.info(f"   Password verification result: {password_valid}")
+
+    if not password_valid:
         logger.warning(f"🔒 Login failed: wrong password for '{username}'")
         return None
 

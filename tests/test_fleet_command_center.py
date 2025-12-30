@@ -10,27 +10,27 @@ Tests the algorithmic improvements:
 - Historical trend tracking
 """
 
-import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
-import uuid
 import sys
+import uuid
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, PropertyMock, patch
+
+import pytest
 
 from fleet_command_center import (
-    FleetCommandCenter,
-    Priority,
-    IssueCategory,
-    ActionType,
     ActionItem,
-    FleetHealthScore,
-    UrgencySummary,
+    ActionType,
     CommandCenterData,
+    FleetCommandCenter,
+    FleetHealthScore,
+    IssueCategory,
+    Priority,
     SensorStatus,
+    UrgencySummary,
     _calculate_trend,
     _trend_history,
     _trend_lock,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTION FOR MOCKING
@@ -79,7 +79,7 @@ class TestFleetCommandCenterV11:
 
     def test_version_is_1_5_0(self, fcc):
         """Verify we're testing v1.5.0"""
-        assert fcc.VERSION == "1.6.0"
+        assert fcc.VERSION == "1.8.0"
 
     # ═══════════════════════════════════════════════════════════════════════════════
     # UUID ACTION ID TESTS
@@ -517,14 +517,14 @@ class TestCacheConfiguration:
 
     def test_cache_ttl_constants_exist(self):
         """Cache TTL constants should be defined"""
-        from fleet_command_center import CACHE_TTL_DASHBOARD, CACHE_TTL_ACTIONS
+        from fleet_command_center import CACHE_TTL_ACTIONS, CACHE_TTL_DASHBOARD
 
         assert CACHE_TTL_DASHBOARD == 30
         assert CACHE_TTL_ACTIONS == 15
 
     def test_cache_key_constants_exist(self):
         """Cache key constants should be defined"""
-        from fleet_command_center import CACHE_KEY_DASHBOARD, CACHE_KEY_ACTIONS
+        from fleet_command_center import CACHE_KEY_ACTIONS, CACHE_KEY_DASHBOARD
 
         assert "command_center" in CACHE_KEY_DASHBOARD
         assert "command_center" in CACHE_KEY_ACTIONS
@@ -736,16 +736,18 @@ class TestThreadSafety:
 
     def test_trend_history_is_deque(self):
         """_trend_history should be a deque with maxlen"""
-        from fleet_command_center import _trend_history
         from collections import deque
+
+        from fleet_command_center import _trend_history
 
         assert isinstance(_trend_history, deque)
         assert _trend_history.maxlen == 1000
 
     def test_trend_lock_exists(self):
         """Thread lock should exist for trend operations"""
-        from fleet_command_center import _trend_lock
         import threading
+
+        from fleet_command_center import _trend_lock
 
         assert isinstance(_trend_lock, type(threading.Lock()))
 
@@ -774,7 +776,7 @@ class TestVersionV15:
     def test_version_is_1_5_0(self):
         """Verify version is 1.5.0"""
         fcc = FleetCommandCenter()
-        assert fcc.VERSION == "1.6.0"
+        assert fcc.VERSION == "1.8.0"
 
 
 class TestV13ExponentialDecay:
@@ -4386,6 +4388,7 @@ class TestTrendHistoryHelper:
     def test_trend_history_exists(self):
         """Trend history should be accessible"""
         from collections import deque
+
         from fleet_command_center import _trend_history
 
         # _trend_history is a deque, not a list
@@ -4661,8 +4664,9 @@ class TestTrendLock:
 
     def test_trend_lock_exists(self):
         """Trend lock should exist for thread safety"""
-        from fleet_command_center import _trend_lock
         import threading
+
+        from fleet_command_center import _trend_lock
 
         assert isinstance(_trend_lock, type(threading.Lock()))
 
@@ -4683,9 +4687,10 @@ class TestDashboardEndpoint:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -4730,9 +4735,10 @@ class TestActionsEndpoint:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -4808,9 +4814,10 @@ class TestTruckSummaryEndpoint:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -4845,9 +4852,10 @@ class TestInsightsEndpoint:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -4875,9 +4883,10 @@ class TestHealthCheckEndpoint:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -4910,9 +4919,10 @@ class TestTrendsEndpoint:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -4955,9 +4965,10 @@ class TestRecordTrendEndpoint:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -4993,9 +5004,10 @@ class TestActionsWithCategoryFilter:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5041,9 +5053,10 @@ class TestTruckPriorityDetermination:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5282,9 +5295,10 @@ class TestEndpointErrorHandling:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5342,9 +5356,10 @@ class TestTrendsEndpointWithEmptyHistory:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5369,9 +5384,10 @@ class TestInsightsDataQuality:
 
     @pytest.fixture
     def client(self):
-        from fastapi.testclient import TestClient
-        from fleet_command_center import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5770,9 +5786,10 @@ class TestActionsEndpointFilters:
 
     def test_filter_by_category_motor(self, fcc):
         """Test filtering actions by Motor category"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5806,9 +5823,10 @@ class TestActionsEndpointFilters:
 
     def test_filter_by_category_transmision(self, fcc):
         """Test filtering actions by Transmisión category"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5844,9 +5862,10 @@ class TestTruckSummaryPriorityDetermination:
 
     def test_truck_with_critical_priority(self):
         """Truck with CRÍTICO action should have CRÍTICO priority"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5874,9 +5893,10 @@ class TestTruckSummaryPriorityDetermination:
 
     def test_truck_with_alto_priority(self):
         """Truck with ALTO action (no CRÍTICO) should have ALTO priority"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5901,9 +5921,10 @@ class TestTruckSummaryPriorityDetermination:
 
     def test_truck_with_medio_priority(self):
         """Truck with MEDIO action (no higher) should have MEDIO priority"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5927,9 +5948,10 @@ class TestTruckSummaryPriorityDetermination:
 
     def test_truck_with_bajo_priority(self):
         """Truck with BAJO action (no higher) should have BAJO priority"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5957,9 +5979,10 @@ class TestTruckSummaryPriorityDetermination:
 
     def test_truck_with_no_actions_is_ok(self):
         """Truck with no actions should have OK priority"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -5993,9 +6016,10 @@ class TestTrendsEndpoint:
 
     def test_trends_with_no_history(self):
         """Trends endpoint should initialize history if empty"""
-        from fleet_command_center import router, _trend_history
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import _trend_history, router
 
         app = FastAPI()
         app.include_router(router)
@@ -6023,10 +6047,12 @@ class TestTrendsEndpoint:
 
     def test_trends_with_existing_history(self):
         """Trends endpoint should use existing history"""
-        from fleet_command_center import router, _trend_history, _trend_lock
-        from fastapi.testclient import TestClient
-        from fastapi import FastAPI
         from datetime import datetime, timezone
+
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import _trend_history, _trend_lock, router
 
         app = FastAPI()
         app.include_router(router)
@@ -6055,10 +6081,12 @@ class TestTrendsEndpoint:
 
     def test_trends_improving_health(self):
         """Test trends detection when health is improving"""
-        from fleet_command_center import router, _trend_history, _trend_lock
-        from fastapi.testclient import TestClient
+        from datetime import datetime, timedelta, timezone
+
         from fastapi import FastAPI
-        from datetime import datetime, timezone, timedelta
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import _trend_history, _trend_lock, router
 
         app = FastAPI()
         app.include_router(router)
@@ -6092,10 +6120,12 @@ class TestTrendsEndpoint:
 
     def test_trends_declining_health(self):
         """Test trends detection when health is declining"""
-        from fleet_command_center import router, _trend_history, _trend_lock
-        from fastapi.testclient import TestClient
+        from datetime import datetime, timedelta, timezone
+
         from fastapi import FastAPI
-        from datetime import datetime, timezone, timedelta
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import _trend_history, _trend_lock, router
 
         app = FastAPI()
         app.include_router(router)
@@ -6131,9 +6161,10 @@ class TestTrendsRecordEndpoint:
 
     def test_record_trend_snapshot(self):
         """Test recording a trend snapshot"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -6162,9 +6193,10 @@ class TestInsightsEndpoint:
 
     def test_get_fleet_insights(self):
         """Test getting fleet insights"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -6200,9 +6232,10 @@ class TestHealthCheckEndpoint:
 
     def test_health_check_returns_ok(self):
         """Health check should return status OK"""
-        from fleet_command_center import router, get_command_center
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import get_command_center, router
 
         app = FastAPI()
         app.include_router(router)
@@ -6270,9 +6303,10 @@ class TestEndpointErrorHandling:
 
     def test_actions_endpoint_error_handling(self):
         """Test actions endpoint handles errors gracefully"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -6286,9 +6320,10 @@ class TestEndpointErrorHandling:
 
     def test_truck_summary_error_handling(self):
         """Test truck summary endpoint handles errors gracefully"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -6302,9 +6337,10 @@ class TestEndpointErrorHandling:
 
     def test_insights_endpoint_error_handling(self):
         """Test insights endpoint handles errors gracefully"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)
@@ -6318,9 +6354,10 @@ class TestEndpointErrorHandling:
 
     def test_trends_endpoint_error_handling(self):
         """Test trends endpoint handles errors gracefully"""
-        from fleet_command_center import router, _trend_history, _trend_lock
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import _trend_history, _trend_lock, router
 
         app = FastAPI()
         app.include_router(router)
@@ -6338,9 +6375,10 @@ class TestEndpointErrorHandling:
 
     def test_trends_record_error_handling(self):
         """Test trends record endpoint handles errors gracefully"""
-        from fleet_command_center import router
-        from fastapi.testclient import TestClient
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from fleet_command_center import router
 
         app = FastAPI()
         app.include_router(router)

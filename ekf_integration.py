@@ -65,12 +65,13 @@ class EKFManager:
                     logger.warning(f"⚠️ No se pudo cargar estado anterior: {e}")
 
             # Crear estimador
+            # Nota: previous_state ya no es parámetro del __init__
+            # El estado se maneja internamente por EKFEstimatorWrapper
             estimator = EKFEstimatorWrapper(
                 truck_id=truck_id,
                 capacity_liters=capacity_liters,
                 config={"tank_shape": tank_shape},
                 use_sensor_fusion=use_sensor_fusion,
-                previous_state=previous_state,
             )
 
             self.estimators[truck_id] = estimator

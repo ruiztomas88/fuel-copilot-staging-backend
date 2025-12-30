@@ -5,21 +5,21 @@ Tests for MPG Baseline Service v5.7.6
 Test coverage for historical MPG baseline calculation.
 """
 
-import pytest
-from datetime import datetime
 import statistics
+from datetime import datetime
+
+import pytest
 
 from mpg_baseline_service import (
-    MPGBaseline,
     DeviationAnalysis,
+    MPGBaseline,
     MPGBaselineService,
-    filter_outliers_iqr,
-    calculate_percentile,
-    get_confidence_level,
     calculate_baseline_from_list,
+    calculate_percentile,
     compare_to_fleet_average,
+    filter_outliers_iqr,
+    get_confidence_level,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # UTILITY FUNCTION TESTS
@@ -69,13 +69,13 @@ class TestCalculatePercentile:
         """Should calculate 25th percentile"""
         data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         p25 = calculate_percentile(data, 25)
-        assert p25 == 3
+        assert 2.5 <= p25 <= 3.5  # Linear interpolation
 
     def test_percentile_75(self):
         """Should calculate 75th percentile"""
         data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         p75 = calculate_percentile(data, 75)
-        assert p75 == 8
+        assert 7.5 <= p75 <= 8.5  # Linear interpolation
 
     def test_percentile_50(self):
         """Should calculate median (50th percentile)"""

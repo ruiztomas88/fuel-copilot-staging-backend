@@ -1,12 +1,15 @@
 #!/bin/bash
+# Script wrapper para iniciar el backend con la configuración correcta
 
+# Cambiar al directorio del backend
 cd /Users/tomasruiz/Desktop/Fuel-Analytics-Backend
-source venv/bin/activate
 
-# Primero, verificar que no hay otro servidor corriendo
-lsof -ti :8000 | xargs kill -9 2>/dev/null
-sleep 1
+# Configurar variables de entorno
+export PATH="/opt/anaconda3/bin:$PATH"
+export PYTHONPATH="/Users/tomasruiz/Desktop/Fuel-Analytics-Backend"
+export PYTHONUNBUFFERED=1
+export DEV_MODE=false
 
-# Iniciar uvicorn directamente
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# Ejecutar el backend (sin reload para producción)
+exec /opt/anaconda3/bin/python main.py
 

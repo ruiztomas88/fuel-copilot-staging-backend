@@ -1,9 +1,14 @@
 """
-J1939 DTC Database - Catálogo Expandido v5.8.0
+J1939 DTC Database - Catálogo Expandido v5.9.0
 ═══════════════════════════════════════════════════════════════════════════════
 
 Comprehensive J1939 DTC (Diagnostic Trouble Code) database for Class 8 trucks.
 Includes descriptions in Spanish for fleet operations in Latin America.
+
+🆕 v5.9.0: Integrated with detailed SPN decoder (spn_decoder.py)
+- 111 SPNs with DETAILED explanations
+- Intelligent fallback for unknown SPNs
+- OEM-specific code detection
 
 Structure:
 - SPN (Suspect Parameter Number): Identifies component/signal
@@ -14,16 +19,29 @@ Sources:
 - Official MondoTracking/Pacific Track Documentation
 - Cummins, Detroit Diesel, Paccar manufacturer codes
 - Real-world fleet data from Fuel Analytics operations
+- 🆕 Detailed SPN database with actionable information
 
 Author: Fuel Analytics Team
-Version: 5.8.0
-Updated: December 2025 - Full SPN/FMI from official documentation
+Version: 5.9.0
+Updated: December 26, 2025 - Integrated detailed SPN decoder
 """
 
 import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+# 🆕 v5.9.0: Import detailed SPN decoder
+try:
+    from spn_decoder import FuelCopilotSPNHandler, SPNDecoder
+
+    SPN_DECODER_AVAILABLE = True
+    _spn_decoder = SPNDecoder()
+    _spn_handler = FuelCopilotSPNHandler()
+except ImportError:
+    SPN_DECODER_AVAILABLE = False
+    _spn_decoder = None
+    _spn_handler = None
 
 logger = logging.getLogger(__name__)
 
@@ -1982,6 +2000,178 @@ def get_critical_spns() -> list[int]:
         for spn, info in SPN_DATABASE.items()
         if info.severity == DTCSeverity.CRITICAL
     ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🆕 v5.9.0: ENHANCED SPN LOOKUP WITH DETAILED DECODER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def get_spn_detailed_info(spn: int) -> Optional[dict]:
+    """
+    🆕 v5.9.0: Get DETAILED information for an SPN using the new decoder
+
+    This provides much more comprehensive information than the basic
+    SPN_DATABASE, including:
+    - Detailed explanations of what the code means
+    - Normal vs abnormal values
+    - Step-by-step troubleshooting
+    - Cost estimates for repairs
+
+    Args:
+        spn: SPN number
+
+    Returns:
+        Dictionary with detailed info, or None if decoder not available
+
+    Example:
+        >>> info = get_spn_detailed_info(523002)
+        >>> print(info['detailed_explanation'])
+        "CORRUPCIÓN MEMORIA ICU - CRITICAL. Dashboard EEPROM corrupted..."
+    """
+    if not SPN_DECODER_AVAILABLE or _spn_decoder is None:
+        logger.debug(
+            f"SPN decoder not available, falling back to basic info for SPN {spn}"
+        )
+        return None
+
+    try:
+        spn_info = _spn_decoder.decode(spn)
+        return {
+            "spn": spn_info.spn,
+            "description": spn_info.description,
+            "detailed_explanation": spn_info.detailed_explanation,
+            "category": spn_info.category,
+            "unit": spn_info.unit,
+            "min_value": spn_info.min_value,
+            "max_value": spn_info.max_value,
+            "priority": spn_info.priority,
+            "oem": spn_info.oem,
+            "is_critical": spn_info.is_critical(),
+            "is_proprietary": spn_info.is_proprietary(),
+        }
+    except Exception as e:
+        logger.error(f"Error decoding SPN {spn} with detailed decoder: {e}")
+        return None
+
+
+def process_spn_for_alert(spn: int, value: Optional[float] = None) -> dict:
+    """
+    🆕 v5.9.0: Process SPN for alert generation with detailed information
+
+    Combines basic DTC database with detailed decoder for comprehensive alerts.
+
+    Args:
+        spn: SPN number
+        value: Optional sensor value
+
+    Returns:
+        Dictionary with complete alert information
+
+    Example:
+        >>> result = process_spn_for_alert(523002)
+        >>> if result['should_alert']:
+        >>>     send_alert(result['message'])
+    """
+    # Get basic info from existing database
+    basic_info = get_spn_info(spn)
+
+    # Try to get detailed info from new decoder
+    detailed_info = get_spn_detailed_info(spn)
+
+    # Combine both sources
+    result = {
+        "spn": spn,
+        "has_detailed_info": detailed_info is not None,
+    }
+
+    if detailed_info:
+        # Use detailed decoder as primary source
+        result.update(
+            {
+                "description": detailed_info["description"],
+                "detailed_explanation": detailed_info["detailed_explanation"],
+                "category": detailed_info["category"],
+                "priority": detailed_info["priority"],
+                "is_critical": detailed_info["is_critical"],
+                "should_alert": detailed_info["is_critical"],
+                "alert_level": (
+                    "CRITICAL" if detailed_info["is_critical"] else "WARNING"
+                ),
+                "oem": detailed_info["oem"],
+            }
+        )
+
+        # Add value validation if provided
+        if value is not None:
+            result["value"] = value
+            if detailed_info["unit"]:
+                result["formatted_value"] = f"{value} {detailed_info['unit']}"
+            else:
+                result["formatted_value"] = str(value)
+
+            # Check if value is in valid range
+            if (
+                detailed_info["min_value"] is not None
+                and detailed_info["max_value"] is not None
+            ):
+                is_valid = (
+                    detailed_info["min_value"] <= value <= detailed_info["max_value"]
+                )
+                result["value_valid"] = is_valid
+                if not is_valid:
+                    result["value_warning"] = (
+                        f"Value {value} is outside normal range "
+                        f"({detailed_info['min_value']}-{detailed_info['max_value']} {detailed_info['unit']})"
+                    )
+
+    elif basic_info:
+        # Fallback to basic database
+        result.update(
+            {
+                "description": basic_info.name_es,
+                "detailed_explanation": basic_info.description_es,
+                "category": basic_info.system.value,
+                "is_critical": basic_info.severity == DTCSeverity.CRITICAL,
+                "should_alert": basic_info.severity == DTCSeverity.CRITICAL,
+                "alert_level": basic_info.severity.value.upper(),
+                "action": basic_info.action_es,
+            }
+        )
+
+    else:
+        # Unknown SPN - minimal info
+        result.update(
+            {
+                "description": f"Unknown SPN {spn}",
+                "detailed_explanation": f"SPN {spn} no está en la base de datos. Consultar manual del fabricante.",
+                "category": "Unknown",
+                "is_critical": False,
+                "should_alert": False,
+                "alert_level": "INFO",
+            }
+        )
+
+    return result
+
+
+def get_decoder_statistics() -> dict:
+    """
+    🆕 v5.9.0: Get statistics from detailed SPN decoder
+
+    Returns:
+        Statistics dictionary with SPN counts by OEM, category, priority
+    """
+    if not SPN_DECODER_AVAILABLE or _spn_decoder is None:
+        return {"available": False, "message": "Detailed SPN decoder not available"}
+
+    try:
+        stats = _spn_decoder.get_statistics()
+        stats["available"] = True
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting decoder statistics: {e}")
+        return {"available": False, "error": str(e)}
 
 
 def get_database_stats() -> dict:

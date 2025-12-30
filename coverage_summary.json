@@ -1,0 +1,37 @@
+{
+  "results": {
+    "database_mysql": {
+      "coverage": 0,
+      "status": "\u274c",
+      "time": 6.142610311508179
+    },
+    "mpg_engine": {
+      "coverage": 0,
+      "status": "\u274c",
+      "time": 1.816356897354126
+    },
+    "alert_service": {
+      "coverage": 0,
+      "status": "\u274c",
+      "time": 1.3176820278167725
+    },
+    "driver_behavior_engine": {
+      "coverage": 0,
+      "status": "\u274c",
+      "time": 1.2622358798980713
+    },
+    "dtc_database": {
+      "coverage": 0,
+      "status": "\u274c",
+      "time": 1.1787168979644775
+    },
+    "predictive_maintenance_v3": {
+      "coverage": 0,
+      "status": "\u274c",
+      "time": 1.1279799938201904
+    }
+  },
+  "average": 0.0,
+  "target": 90.0,
+  "timestamp": 1766936000.3530471
+}

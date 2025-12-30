@@ -8,6 +8,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import Enum
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -16,6 +17,16 @@ from pymysql.cursors import DictCursor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+class EventType(Enum):
+    """Driver event types for scoring"""
+
+    OVERSPEED = "overspeed"
+    LONG_IDLE = "long_idle"
+    HARSH_BRAKING = "harsh_braking"
+    HARSH_ACCELERATION = "harsh_acceleration"
+    LOW_MPG = "low_mpg"
 
 
 @dataclass
@@ -421,3 +432,9 @@ def get_driver_scoring_engine(db_connection=None) -> DriverScoringEngine:
             db_connection=db_connection
         )
     return _driver_scoring_engine_instance
+
+
+# Alias for compatibility
+def get_scoring_engine(db_connection=None) -> DriverScoringEngine:
+    """Alias for get_driver_scoring_engine"""
+    return get_driver_scoring_engine(db_connection)

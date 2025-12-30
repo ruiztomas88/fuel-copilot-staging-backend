@@ -13,9 +13,10 @@
 @date December 2025
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
-from datetime import timedelta
 import logging
+from datetime import timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, status
 
 logger = logging.getLogger(__name__)
 
@@ -27,23 +28,23 @@ router = APIRouter(
 # Import auth dependencies
 try:
     from auth import (
+        USERS_DB,
+        Token,
+        TokenData,
+        UserLogin,
         authenticate_user,
         create_access_token,
         require_auth,
-        Token,
-        UserLogin,
-        TokenData,
-        USERS_DB,
     )
 except ImportError:
     from ..auth import (
+        USERS_DB,
+        Token,
+        TokenData,
+        UserLogin,
         authenticate_user,
         create_access_token,
         require_auth,
-        Token,
-        UserLogin,
-        TokenData,
-        USERS_DB,
     )
 
 ACCESS_TOKEN_EXPIRE_HOURS = 24
@@ -59,6 +60,12 @@ async def login(credentials: UserLogin):
     - skylord / Skylord2025! (carrier_admin - skylord only)
     - skylord_viewer / SkylordView2025 (viewer - skylord read-only)
     """
+    logger.info(
+        f"🔍 Login endpoint received: username={repr(credentials.username)}, password_length={len(credentials.password)}"
+    )
+    logger.info(f"   Password first 10 chars: {repr(credentials.password[:10])}")
+    logger.info(f"   Password last 4 chars: {repr(credentials.password[-4:])}")
+
     user = authenticate_user(credentials.username, credentials.password)
     if not user:
         raise HTTPException(

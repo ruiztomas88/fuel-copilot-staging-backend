@@ -336,20 +336,24 @@ def get_refuel_history(
     """
 
     # First, try to get from refuel_events table (where detected refuels are saved)
+    # 🔧 DEC 26 FIX: Fixed column names to match actual table schema
+    # - timestamp_utc -> refuel_time
+    # - fuel_after -> after_pct
+    # - fuel_before -> before_pct
     refuel_events_query = text(
         """
         SELECT 
             truck_id,
-            timestamp_utc,
+            refuel_time as timestamp_utc,
             gallons_added as refuel_gallons,
-            fuel_after as fuel_level_after_pct,
-            fuel_before as fuel_level_before_pct,
+            after_pct as fuel_level_after_pct,
+            before_pct as fuel_level_before_pct,
             refuel_type,
             confidence
         FROM refuel_events
-        WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
+        WHERE refuel_time > NOW() - INTERVAL :days_back DAY
         {truck_filter}
-        ORDER BY timestamp_utc DESC
+        ORDER BY refuel_time DESC
     """.format(
             truck_filter="AND truck_id = :truck_id" if truck_id else ""
         )
@@ -388,17 +392,26 @@ def get_refuel_history(
                     else:
                         fuel_after_pct = fuel_after
 
+                    # 🔧 DEC 26 FIX: Match field names to RefuelEvent model in trucks_router.py
                     refuel_event = {
                         "truck_id": row["truck_id"],
                         "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S"),
                         "date": ts.strftime("%Y-%m-%d"),
                         "time": ts.strftime("%H:%M:%S"),
-                        "gallons": round(gallons, 1),
-                        "liters": round(gallons * 3.78541, 1),
-                        "fuel_level_after": (
+                        "gallons": round(gallons, 1),  # Legacy field
+                        "liters": round(gallons * 3.78541, 1),  # Legacy field
+                        "gallons_added": round(gallons, 1),  # New field name
+                        "liters_added": round(gallons * 3.78541, 1),  # New field name
+                        "fuel_before_pct": (
+                            round(fuel_before, 1) if fuel_before > 0 else 0.0
+                        ),
+                        "fuel_after_pct": (
+                            round(fuel_after_pct, 1) if fuel_after_pct > 0 else 0.0
+                        ),
+                        "fuel_level_after": (  # Legacy field
                             round(fuel_after_pct, 1) if fuel_after_pct > 0 else None
                         ),
-                        "fuel_level_before": (
+                        "fuel_level_before": (  # Legacy field
                             round(fuel_before, 1) if fuel_before > 0 else None
                         ),
                         "source": "refuel_events",
@@ -3534,23 +3547,25 @@ def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
 
     # 🔧 v3.12.25: Query from refuel_events table (where detected refuels are saved)
     # This table is populated by wialon_sync_service when it detects refuel events
+    # 🔧 DEC 26 FIX: Use correct column names (refuel_time, after_pct, before_pct)
     refuel_query = text(
         """
         SELECT 
             truck_id,
-            timestamp_utc,
+            refuel_time as timestamp_utc,
             gallons_added as refuel_gallons,
-            fuel_after,
-            fuel_before,
+            after_pct as fuel_after,
+            before_pct as fuel_before,
             refuel_type,
             confidence
         FROM refuel_events
-        WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
-        ORDER BY timestamp_utc DESC
+        WHERE refuel_time > NOW() - INTERVAL :days_back DAY
+        ORDER BY refuel_time DESC
     """
     )
 
     # Query 2: Summary statistics per truck from refuel_events
+    # 🔧 DEC 26 FIX: Use correct column names
     summary_query = text(
         """
         SELECT 
@@ -3560,25 +3575,26 @@ def get_advanced_refuel_analytics(days_back: int = 7) -> Dict[str, Any]:
             AVG(gallons_added) as avg_gallons,
             MIN(gallons_added) as min_gallons,
             MAX(gallons_added) as max_gallons,
-            AVG(fuel_after) as avg_fuel_level_after
+            AVG(after_pct) as avg_fuel_level_after
         FROM refuel_events
-        WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
+        WHERE refuel_time > NOW() - INTERVAL :days_back DAY
         GROUP BY truck_id
         ORDER BY total_gallons DESC
     """
     )
 
     # Query 3: Pattern analysis (hour of day, day of week) from refuel_events
+    # 🔧 DEC 26 FIX: Use correct column name
     pattern_query = text(
         """
         SELECT 
-            HOUR(timestamp_utc) as hour_of_day,
-            DAYOFWEEK(timestamp_utc) as day_of_week,
+            HOUR(refuel_time) as hour_of_day,
+            DAYOFWEEK(refuel_time) as day_of_week,
             COUNT(*) as refuel_count,
             SUM(gallons_added) as total_gallons
         FROM refuel_events
-        WHERE timestamp_utc > NOW() - INTERVAL :days_back DAY
-        GROUP BY HOUR(timestamp_utc), DAYOFWEEK(timestamp_utc)
+        WHERE refuel_time > NOW() - INTERVAL :days_back DAY
+        GROUP BY HOUR(refuel_time), DAYOFWEEK(refuel_time)
         ORDER BY hour_of_day
     """
     )

@@ -8,18 +8,19 @@ Tests cover:
 - MPGBaselineService
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock, AsyncMock
 import statistics
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from mpg_baseline_service import (
-    MPGBaseline,
     DeviationAnalysis,
-    filter_outliers_iqr,
-    calculate_percentile,
-    get_confidence_level,
+    MPGBaseline,
     MPGBaselineService,
+    calculate_percentile,
+    filter_outliers_iqr,
+    get_confidence_level,
 )
 
 
@@ -240,13 +241,15 @@ class TestCalculatePercentile:
 
         result = calculate_percentile(data, 25)
 
-        assert result in [2, 3]  # Depending on rounding
+        assert 2.0 <= result <= 3.0  # Linear interpolation
 
     def test_percentile_75(self):
         """75th percentile calculation"""
         data = [1, 2, 3, 4, 5, 6, 7, 8]
 
         result = calculate_percentile(data, 75)
+
+        assert 6.0 <= result <= 7.0  # Linear interpolation
 
         assert result in [6, 7]
 

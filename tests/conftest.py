@@ -11,7 +11,23 @@ import os
 # CRITICAL: Set this BEFORE any other imports
 os.environ["SKIP_RATE_LIMIT"] = "1"
 
+import asyncio
+
 import pytest
+
+# Import all fixtures
+from tests.fixtures.api_fixtures import *  # noqa
+from tests.fixtures.database_fixtures import *  # noqa
+from tests.fixtures.truck_fixtures import *  # noqa
+
+
+# Event loop configuration for async tests
+@pytest.fixture(scope="function")
+def event_loop():
+    """Create a new event loop for each test function"""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 def pytest_configure(config):
@@ -31,8 +47,9 @@ def setup_test_environment():
 @pytest.fixture
 def test_client():
     """Provide a test client for API tests."""
-    from main import app
     from fastapi.testclient import TestClient
+
+    from main import app
 
     return TestClient(app)
 

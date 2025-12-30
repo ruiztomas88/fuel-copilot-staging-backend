@@ -1,0 +1,93 @@
+{
+  "timestamp": "2025-12-28T08:50:44.972116",
+  "duration_seconds": 42.675814,
+  "total_modules": 14,
+  "successful": 0,
+  "failed": 14,
+  "results": [
+    {
+      "module": "auth",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "database_mysql",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "cache_service",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "alert_service",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "alert_system",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "driver_scoring_engine",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "mpg_engine",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "theft_detection_engine",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "predictive_maintenance_engine",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "driver_behavior_engine",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "models",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "api_middleware",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "fleet_command_center",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    },
+    {
+      "module": "wialon_data_loader",
+      "success": false,
+      "coverage": null,
+      "returncode": 4
+    }
+  ]
+}

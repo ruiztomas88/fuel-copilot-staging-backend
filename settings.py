@@ -278,13 +278,14 @@ class FuelSettings:
     )
 
     # Refuel detection
-    # 🔧 v5.19.1: Reduced thresholds to catch more refuels (was 5.0 gal / 10.0%)
-    # Many trucks do partial refuels (10-15 gal) that were being missed
+    # 🔧 v5.20.0: PRODUCTION ALIGNMENT - Match exact thresholds from production
+    # Production uses 10% / 5 gal as baseline (before adaptive learning)
+    # These are conservative defaults that prevent false positives
     min_refuel_gallons: float = field(
-        default_factory=lambda: _get_env_float("MIN_REFUEL_GALLONS", 3.0)
+        default_factory=lambda: _get_env_float("MIN_REFUEL_GALLONS", 5.0)
     )
     min_refuel_jump_pct: float = field(
-        default_factory=lambda: _get_env_float("MIN_REFUEL_JUMP_PCT", 8.0)
+        default_factory=lambda: _get_env_float("MIN_REFUEL_JUMP_PCT", 10.0)
     )
     max_refuel_jump_pct: float = field(
         default_factory=lambda: _get_env_float("MAX_REFUEL_JUMP_PCT", 95.0)

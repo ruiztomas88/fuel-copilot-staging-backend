@@ -1564,29 +1564,58 @@ def send_low_fuel_alert(
 
 def send_dtc_alert(
     truck_id: str,
-    dtc_code: str,
-    severity: str,
-    description: str,
-    system: str = "UNKNOWN",
+    dtc_code: str = None,
+    severity: str = None,
+    description: str = None,
+    system: str = None,
     recommended_action: Optional[str] = None,
     spn: Optional[int] = None,
     fmi: Optional[int] = None,
     spn_name_es: Optional[str] = None,
     fmi_description_es: Optional[str] = None,
+    dtc_info: Optional[Dict] = None,  # 🆕 DEC 26: Accept complete DTC info
 ) -> bool:
-    """🆕 v5.8.0: Quick function to send DTC alert with full Spanish descriptions"""
-    return get_alert_manager().alert_dtc(
-        truck_id,
-        dtc_code,
-        severity,
-        description,
-        system,
-        recommended_action,
-        spn,
-        fmi,
-        spn_name_es,
-        fmi_description_es,
-    )
+    """
+    🆕 v5.8.0: Send DTC alert with full Spanish descriptions
+    🔄 DEC 26 2025: Updated to accept complete DTC info from dtc_decoder
+
+    Can be called either:
+    1. With individual parameters (legacy)
+    2. With dtc_info dict from FuelCopilotDTCHandler.process_wialon_dtc()
+    """
+    if dtc_info:
+        # Use complete DTC info from new decoder
+        # Map new decoder fields to alert function parameters
+        return get_alert_manager().alert_dtc(
+            truck_id=truck_id,
+            dtc_code=dtc_info["dtc_code"],
+            severity=dtc_info["severity"],
+            description=dtc_info.get("full_description") or dtc_info.get("description"),
+            system=dtc_info.get("category", "UNKNOWN"),
+            recommended_action=dtc_info["action_required"],
+            spn=dtc_info.get("spn"),
+            fmi=dtc_info.get("fmi"),
+            spn_name_es=dtc_info.get(
+                "spn_explanation"
+            ),  # 🔧 FIX: Use spn_explanation from decoder
+            fmi_description_es=dtc_info.get(
+                "fmi_explanation"
+            ),  # 🔧 FIX: Use fmi_explanation from decoder
+        )
+    else:
+        # Legacy call with individual parameters
+        return get_alert_manager().alert_dtc(
+            truck_id,
+            dtc_code,
+            severity,
+            description,
+            system,
+            recommended_action,
+            spn,
+            fmi,
+            spn_name_es,
+            fmi_description_es,
+        )
 
 
 def send_voltage_alert(
