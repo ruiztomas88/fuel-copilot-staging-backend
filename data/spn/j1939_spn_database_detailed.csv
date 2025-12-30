@@ -1,0 +1,112 @@
+SPN,Description,Category,Unit,Min,Max,Priority,OEM,Detailed_Explanation
+0,Engine Speed,Engine,RPM,0,8031.875,1,Standard,PRIMARY ENGINE RPM SENSOR - Velocidad actual del motor. Crítico para operación. Si falla: truck no arranca o se apaga.
+27,EGR Valve Position,Emissions,%,0,100,3,Standard,"POSICIÓN VÁLVULA EGR - Controla recirculación de gases. Afecta emisiones NOx. Falla: MIL encendido, mayor consumo."
+51,Throttle Valve Position,Engine,%,0,100,2,Standard,"POSICIÓN ACELERADOR - Apertura de throttle valve. Afecta potencia motor. Falla: pérdida de potencia, respuesta lenta."
+52,Exhaust Gas Temperature,Emissions,°C,-273,1735,2,Standard,TEMPERATURA GASES ESCAPE - Monitorea temperatura post-turbina. Alta temp: riesgo DPF. Crítico para regeneración.
+84,Wheel-Based Vehicle Speed,Vehicle,km/h,0,250.996,1,Standard,"VELOCIDAD DEL VEHÍCULO - Desde sensores de ruedas. Usado para MPG, ELD logs. Falla: velocímetro inoperante."
+91,Accelerator Pedal Position 1,Engine,%,0,100,2,Standard,"POSICIÓN PEDAL ACELERADOR 1 - Sensor principal de pedal. Falla: limp mode, pérdida potencia. Requiere sensor 2 funcional."
+92,Engine Percent Load,Engine,%,0,125,2,Standard,CARGA DEL MOTOR - % de torque vs máximo disponible. Alto: truck trabajando duro. Bajo: coast/descenso. Afecta MPG.
+94,Fuel Delivery Pressure,Fuel,kPa,0,600000,2,Standard,"PRESIÓN RIEL COMBUSTIBLE - Common rail high pressure. Típico: 1600-2000 bar. Baja: pérdida potencia, humo negro."
+96,Fuel Level,Fuel,%,0,100,3,Standard,"NIVEL TANQUE COMBUSTIBLE - % restante en tanque. Sensor capacitivo. Falla: lectura errática, MPG incorrecto."
+97,Water In Fuel Indicator,Fuel,,0,1,3,Standard,AGUA EN COMBUSTIBLE - Detecta contaminación agua. 1=agua detectada. Acción: drenar separador agua INMEDIATAMENTE.
+98,Engine Oil Level,Engine,%,0,100,3,Standard,NIVEL ACEITE MOTOR - % en cárter. Bajo: agregar aceite. Muy alto: posible dilución combustible en aceite.
+100,Engine Oil Pressure,Engine,kPa,0,1000,1,Standard,"PRESIÓN ACEITE MOTOR - CRÍTICO. Mín ralentí: 100kPa, Operación: 350-450kPa. Baja: STOP ENGINE IMMEDIATELY. Daño catastrófico."
+102,Intake Manifold Pressure,Engine,kPa,0,500,2,Standard,"PRESIÓN BOOST - Turbo boost pressure. Normal: 150-250kPa. Alto: overboost, riesgo motor. Bajo: pérdida potencia."
+105,Intake Manifold Temperature,Engine,°C,-40,210,2,Standard,"TEMPERATURA MANIFOLD - Aire post-intercooler. Ideal: 40-60°C. Alto: pérdida eficiencia, detonation risk."
+107,Air Filter Differential Pressure,Engine,kPa,0,12.5,3,Standard,"RESTRICCIÓN FILTRO AIRE - Delta P across filter. >6kPa: filtro sucio, cambiar. Afecta potencia y consumo."
+108,Barometric Pressure,Environment,kPa,0,125,3,Standard,PRESIÓN ATMOSFÉRICA - Ajusta performance por altitud. Nivel mar: 101kPa. Montaña: 80kPa. Afecta turbo boost.
+110,Engine Coolant Temperature,Engine,°C,-40,210,1,Standard,TEMPERATURA REFRIGERANTE - CRÍTICO. Normal: 82-93°C. >100°C: STOP. <70°C: motor no calentó. Afecta emisiones/MPG.
+111,Coolant Level,Engine,%,0,100,2,Standard,"NIVEL REFRIGERANTE - % en sistema. Bajo: agregar coolant, buscar fugas. Crítico: prevenir overheating."
+132,Engine Intake Air Mass Flow Rate,Engine,kg/h,0,3212.75,3,Standard,FLUJO AIRE MOTOR - MAF sensor. Usado para cálculo combustible. Afecta potencia y emisiones. Sensor sucio: problemas.
+158,Battery Potential,Electrical,V,0,3212.75,2,Standard,VOLTAJE BATERÍA - Sistema 12V: normal 12.6-14.4V. <12V: batería baja. >15V: alternador sobrecarga. Crítico arranque.
+161,Transmission Current Range,Transmission,,0,255,2,Standard,GEAR ACTUAL TRANSMISIÓN - Cambio engranado actualmente. Automática: 1-18 gears. Manual: driver selected.
+162,Transmission Selected Range,Transmission,,0,255,2,Standard,GEAR SELECCIONADO - Cambio que driver/ECU solicitó. Puede diferir de actual durante shift.
+163,Transmission Actual Gear Ratio,Transmission,,0,64.255,2,Standard,RELACIÓN CAMBIO ACTUAL - Gear ratio engranado. Bajo: velocidad. Alto: torque. Afecta RPM vs velocidad.
+167,Alternator Current,Electrical,A,0,250.996,3,Standard,CORRIENTE ALTERNADOR - Amps generados. Alto: carga eléctrica alta. Monitorear vs capacidad alternador.
+168,Charging System Potential,Electrical,V,0,3212.75,2,Standard,VOLTAJE SISTEMA CARGA - Output alternador. Debe ser 13.5-14.5V con motor on. Bajo/alto: alternador falla.
+171,Ambient Air Temperature,Environment,°C,-40,210,3,Standard,"TEMPERATURA AMBIENTE - Outside air temp. Afecta performance motor, A/C, DEF freeze risk <-11°C."
+172,Air Inlet Temperature,Engine,°C,-273,1735,2,Standard,"TEMPERATURA AIRE ADMISIÓN - Pre-turbo air temp. Alto: menor densidad aire, menos potencia."
+175,Engine Oil Temperature,Engine,°C,-273,1735,2,Standard,TEMPERATURA ACEITE MOTOR - Ideal: 93-110°C. >121°C: aceite degrada rápido. <82°C: no warming up completo.
+177,Transmission Oil Temperature,Transmission,°C,-273,1735,2,Standard,"TEMPERATURA ATF TRANSMISIÓN - Normal: 80-95°C. >121°C: CRITICAL - pull over, dejar enfriar. Daña transmisión."
+183,Engine Fuel Rate,Fuel,L/h,0,3212.75,1,Standard,CONSUMO COMBUSTIBLE INSTANTÁNEO - Litros/hora actual. Ralentí: 3-5 L/h. Highway: 25-40 L/h. Clave para MPG.
+184,Engine Instantaneous Fuel Economy,Fuel,km/L,0,125.5,2,Standard,MPG INSTANTÁNEO - Eficiencia actual. Class 8 loaded: 1.8-2.8 km/L (4-7 MPG). Monitor para driving efficiency.
+185,Engine Average Fuel Economy,Fuel,km/L,0,125.5,2,Standard,MPG PROMEDIO - Eficiencia acumulada trip. Resetea con ignition. Target Class 8: 2.1-2.5 km/L (5-6.5 MPG).
+190,Engine Speed,Engine,RPM,0,8031.875,1,Standard,RPM MOTOR - Duplicate of SPN 0. Ralentí: 600-750 RPM. Highway cruise: 1400-1600 RPM. Peak power: 1800-2100 RPM.
+191,Transmission Output Shaft Speed,Transmission,RPM,0,8031.875,2,Standard,RPM EJE SALIDA TRANSMISIÓN - Speed a driveshaft. Usado calcular gear ratio y velocidad vehículo.
+245,Total Vehicle Distance,Vehicle,km,0,526385151.875,2,Standard,"ODÓMETRO - Distancia total vida vehículo. Legal: no reseteable. Usado PM schedules, resale value."
+247,Total Engine Hours,Engine,hours,0,210554060.75,2,Standard,"HORÓMETRO MOTOR - Horas operación motor. Usado PM schedules. Típico: 1,000 hrs/año para OTR."
+249,Total Engine Idle Hours,Engine,hours,0,210554060.75,2,Standard,"HORAS RALENTÍ - Tiempo en idle. Alto %: mal para motor, waste fuel. Target: <10% total engine hours."
+250,Total Fuel Used,Fuel,L,0,2105540607.5,1,Standard,COMBUSTIBLE TOTAL USADO - Lifetime fuel consumption. Crítico para calcular MPG real y costos operación.
+251,Trip Fuel,Fuel,L,0,8031.875,2,Standard,COMBUSTIBLE TRIP - Resettable fuel counter. Usado calcular MPG por viaje/driver.
+411,EGR Mass Flow Rate,Emissions,kg/h,0,3212.75,3,Standard,FLUJO MASA EGR - Gases recirculados por hora. Alto: más NOx reduction pero más soot. Control fino emisiones.
+412,EGR Temperature,Emissions,°C,-273,1735,3,Standard,TEMPERATURA EGR - Gases recirculados. Alto: EGR cooler puede fallar. Monitorear fouling.
+441,Ambient Air Pressure,Environment,kPa,0,125,3,Standard,"PRESIÓN AMBIENTE - Usado ajustar boost targets por altitud. Nivel mar: 101kPa. 10,000ft: 70kPa."
+512,Driver Demand Engine Percent Torque,Engine,%,-125,125,2,Standard,TORQUE SOLICITADO DRIVER - % pedal request. Negativo: engine braking. Positivo: aceleración. 100%: pedal a fondo.
+513,Actual Engine Percent Torque,Engine,%,-125,125,1,Standard,TORQUE ACTUAL MOTOR - % torque real producido. Puede ser menor que requested si derate activo o límite RPM.
+543,DPF Differential Pressure,Emissions,kPa,0,12.5,2,Standard,RESTRICCIÓN DPF - Delta P across filter. <3kPa: limpio. 3-6kPa: moderado. >6kPa: REGENERACIÓN REQUERIDA.
+544,DPF Intake Pressure,Emissions,kPa,0,500,3,Standard,PRESIÓN ENTRADA DPF - Exhaust pressure pre-filter. Monitorear con delta P para determinar soot load.
+558,Accelerator Pedal Position 1,Engine,%,0,100,2,Standard,"POSICIÓN PEDAL 1 - Primary APP sensor. Redundante con 559. Mismatch: limp mode. 0%: idle, 100%: WOT."
+559,Accelerator Pedal Position 2,Engine,%,0,100,3,Standard,POSICIÓN PEDAL 2 - Secondary APP sensor. Must match 558 within 10%. Safety feature prevent runaway.
+569,DPF Status,Emissions,,0,255,2,Standard,"ESTADO DPF - Filter status. 0: OK, 1: Regen needed, 2: Regen active, 3: Fault. Monitor para regen timing."
+570,DPF Active Regeneration Status,Emissions,,0,255,2,Standard,"REGEN ACTIVA DPF - 0: Not active, 1: Active. Durante regen: temp alta, fuel penalty 1-2 MPG."
+571,DPF Passive Regeneration Status,Emissions,,0,255,3,Standard,REGEN PASIVA DPF - Ocurre highway speeds. No fuel penalty. Ideal cleaning method. Temps 600°C+.
+597,Brake Application Pressure,Brakes,kPa,0,1000,2,Standard,PRESIÓN APLICACIÓN FRENO - Service brake pressure. 0: no brakes. 700kPa: full service brake. Monitor fade.
+598,Brake Primary Pressure,Brakes,kPa,0,1600,1,Standard,PRESIÓN CIRCUITO PRIMARIO FRENO - CRÍTICO. Mín: 550kPa para operar. <400kPa: LOW AIR WARNING. STOP.
+599,Brake Secondary Pressure,Brakes,kPa,0,1600,2,Standard,PRESIÓN CIRCUITO SECUNDARIO FRENO - Backup system. Si primary o secondary <400kPa: STOP SAFELY.
+80206,Volvo Proprietary Code 80206,Unknown,,,,1,Volvo,CÓDIGO PROPIETARIO VOLVO - Sin documentación pública. Contact Volvo dealer con VCADS para diagnosis. Posible powertrain.
+84037,Volvo Proprietary Code 84037,Unknown,,,,1,Volvo,CÓDIGO PROPIETARIO VOLVO - Sin documentación pública. Usar Volvo VCADS tool en dealer para interpretar.
+85000,Paccar MX-13 Engine Control,Engine,,,,1,Paccar,"ECU MOTOR PACCAR MX-13 - Engine computer fault. Usado en Kenworth/Peterbilt. Check power, flash. Use Paccar Davie."
+90000,Mack MP7/MP8 Engine Control,Engine,,,,1,Mack,"ECU MOTOR MACK - MP7 o MP8 engine controller. Check wiring, reflash. Use Mack Premium Tech Tool."
+100000,International N13 Engine,Engine,,,,1,International,"ECU MOTOR INTERNATIONAL N13 - Navistar engine computer. Check communication, flash. Use Diamond Logic."
+520190,ICU Display Issue,Electrical,,,,1,Freightliner,"FALLA DISPLAY CLUSTER - Pantalla dashboard no funciona. Causa: ICU module fault, wiring. Acción: reset ECU, verificar voltage."
+520191,ICU Backlighting,Electrical,,,,2,Freightliner,"LUZ FONDO CLUSTER - Backlight dim/out. Causa: LED failure, voltage issue. No crítico pero unsafe noche."
+520192,ICU Communication Error,Electrical,,,,1,Freightliner,"ERROR CAN ICU - Cluster no comunica con ECU. Resultado: gauges inoperantes. Check CAN wiring, termination."
+520193,ICU Gauge Motor Fault,Electrical,,,,2,Freightliner,MOTOR AGUJA CLUSTER - Stepper motor speedometer/tach stuck. Reemplazo ICU o recalibration.
+520194,ICU Warning Light Fault,Electrical,,,,1,Freightliner,LUZ WARNING STUCK - MIL/check engine light stuck on/off. Crítico: puede ocultar faults reales.
+520195,ICU Memory Error,Electrical,,,,1,Freightliner,ERROR MEMORIA ICU - EEPROM corruption. Perdida settings. Flash ICU module o reemplazo.
+520196,sSAM Module Fault,Electrical,,,,1,Freightliner,"FALLA MÓDULO sSAM - Signal Acquisition Module. Controla switches, inputs. Múltiples electrical gremlins."
+520197,sSAM Switch Bus Problem,Electrical,,,,1,Freightliner,"BUS SWITCHES sSAM - Hazard lights, turn signals no funcionan. Check sSAM power, CAN communication."
+520198,sSAM Communication Error,Electrical,,,,1,Freightliner,"ERROR COMUNICACIÓN sSAM - Module offline on CAN. Verificar wiring harness, ground connections."
+520199,Transmission Communication Error,Transmission,,,,1,Freightliner,"ERROR CAN TRANSMISIÓN - TCM no comunica con ECU. Resultado: limp mode, no shifts. Check CAN wiring J1939."
+520200,Transmission Shift Control,Transmission,,,,2,Freightliner,"CONTROL CAMBIOS - Solenoid shift fault. Síntomas: harsh shifts, wrong gear. Check ATF level/quality."
+520201,Transmission Control Module Fault,Transmission,,,,1,Freightliner,"FALLA TCM - Transmission computer dead. Resultado: no movement, limp mode. Verificar power, reflash, replace."
+520202,Transmission Temp Sensor,Transmission,,,,2,Freightliner,SENSOR TEMPERATURA ATF - Reading erratic/fault. Puede trigger false overheat warnings. Verificar wiring.
+520211,ABS Module Communication,Safety,,,,1,Freightliner,"ERROR CAN ABS - ABS computer offline. Resultado: ABS disabled, warning light. Frenos funcionan (sin ABS)."
+520212,ABS Wheel Speed Sensor,Safety,,,,2,Freightliner,"SENSOR VELOCIDAD RUEDA - WSS fault specific wheel. ABS disabled esa wheel. Check sensor gap, wiring, tone ring."
+520213,ABS System Fault,Safety,,,,1,Freightliner,"FALLA SISTEMA ABS - ABS completamente disabled. Solo service brakes. Check valve body, ECU, hydraulics."
+520217,Electronic Stability Control,Safety,,,,1,Freightliner,"FALLA ESC - Roll Stability Control disabled. Mayor riesgo rollover en curvas. Check yaw sensor, ECU."
+520272,ESC Function Parameter,Safety,,,,1,Freightliner,"PARÁMETRO ESC - ESC calibration issue o disabled. Verificar configuración ECU, recalibrate yaw sensor."
+521000,CPC Common Powertrain Controller,Engine,,,,1,Detroit,"ECU PRINCIPAL DD - Main engine computer fault. Motor puede no arrancar o run in limp mode. Check power, ground, flash."
+521001,CPC3 Engine Control Module,Engine,,,,1,Detroit,"CPC3 ECU GHG17 - DD13/DD15/DD16 GHG17 engine computer. Fault: limp mode. Verificar software version, reflash."
+521002,CPC3 Communication Error,Engine,,,,1,Detroit,"ERROR CAN CPC3 - ECU no comunica J1939. Check CAN wiring, termination, ECU power. Engine may not start."
+521003,CPC3 Powertrain Controller,Engine,,,,1,Detroit,"FALLA CPC3 - ECU hardware fault. Replace module, recalibrate. Backup ECU parameters antes replace."
+521010,Engine Protection Active,Engine,,,,1,Detroit,"PROTECCIÓN MOTOR ACTIVA - Derate mode. Causa: overheat, low oil, etc. Chequear coolant, oil. FIX IMMEDIATELY."
+521011,Engine Protection Approaching,Engine,,,,1,Detroit,"PROTECCIÓN MOTOR CERCA - Warning de derate próximo. Coolant/oil approaching limit. Monitorear gauges, pull over si empeora."
+521020,Engine Oil Pressure Low,Engine,,,,1,Detroit,"PRESIÓN ACEITE BAJA DD - CRITICAL. <170kPa: derate. <100kPa: SHUTDOWN. Check oil level, pump, bearings. STOP ENGINE."
+521021,Engine Coolant Temp High,Engine,,,,1,Detroit,"TEMPERATURA REFRIGERANTE ALTA - >100°C: warning. >105°C: derate. >110°C: SHUTDOWN. Check coolant, thermostat, fan."
+521030,Turbocharger Boost Pressure,Engine,,,,2,Detroit,"PRESIÓN TURBO DD - Underboost o overboost. Check turbo actuator, wastegate, intake leaks. Pérdida potencia."
+521040,SCR System Fault,Emissions,,,,1,Detroit,"FALLA SISTEMA SCR - NOx reduction compromised. DEF dosing issue, SCR catalyst, NOx sensors. DEL/check engine."
+521041,SCR Catalyst Efficiency Low,Emissions,,,,1,Detroit,"EFICIENCIA SCR BAJA - NOx conversion <80%. Causa: DEF quality, SCR catalyst degraded. Replace SCR can."
+521046,DEF Tank Empty,Emissions,,,,1,Detroit,TANQUE DEF VACÍO - No DEF fluid. Resultado: 5 MPH derate después 50 millas. FILL DEF IMMEDIATELY.
+521049,MCM SCR Efficiency Low,Emissions,,,,1,Detroit,"EFICIENCIA SCR GHG17 BAJA - NOx reduction insufficient. Check DEF quality, dosing valve, SCR catalyst. Derate possible."
+521050,MCM DEF Quality Poor,Emissions,,,,1,Detroit,"CALIDAD DEF MALA - DEF contaminated o concentration wrong. Drain tank, fill with FRESH DEF 32.5%. Derate risk."
+521052,MCM Aftertreatment System,Emissions,,,,1,Detroit,SISTEMA AFTERTREATMENT GHG17 - General fault DPF/DOC/SCR. Check all emission components. Derate likely.
+521060,DPF Soot Load Exceeded,Emissions,,,,1,Detroit,"CARGA SOOT DPF EXCEDIDA - >100% load. PARKED REGEN REQUIRED. Cannot defer. Stop safely, initiate regen."
+521061,DPF Ash Load High,Emissions,,,,1,Detroit,CENIZA DPF ALTA - DPF service required. Ash removal at dealer. Cannot be regenerated. Schedule PM.
+521080,Fuel System Pressure Low,Fuel,,,,1,Detroit,"PRESIÓN RIEL COMBUSTIBLE BAJA - <1000 bar. Pérdida potencia. Check fuel pump, pressure regulator, leaks."
+521120,Crankshaft Position Sensor,Engine,,,,1,Detroit,"SENSOR POSICIÓN CIGÜEÑAL - No signal. Engine no start. Check sensor gap (0.5-1.5mm), wiring, reluctor wheel."
+521121,Camshaft Position Sensor,Engine,,,,1,Detroit,"SENSOR POSICIÓN ÁRBOL LEVAS - Fault. Engine may not start o run rough. Check sensor, wiring, timing gear."
+521133,Engine System Fault DD13,Engine,,,,1,Detroit,"FALLA SISTEMA DD13 - Múltiples faults activos. Scan all DTCs. Common: sensor faults, ECU issues. Diagnose each."
+521800,Engine ECU Communication,Engine,,,,1,Detroit,"ERROR COMUNICACIÓN ECU - CAN network failure. Check J1939 wiring, termination, ECU power. Engine may not run."
+521860,Engine Multiple CAN Faults,Engine,,,,1,Detroit,"MÚLTIPLES FALLAS CAN - Bus errors widespread. Check ALL CAN wiring, terminators, grounds. Electrical gremlin."
+522215,Body Controller Short Circuit,Electrical,,,,1,Freightliner,"CORTO BCM - Body Control Module short circuit. Fuse blow, múltiples electrical faults. Check wiring harness."
+523000,ICU Instrument Cluster Unit,Electrical,,,,1,Freightliner,"FALLA GENERAL ICU - Main dashboard controller fault. Todos gauges, warnings affected. Replace ICU module."
+523001,ICU Communication Error,Electrical,,,,1,Freightliner,"ERROR CAN CLUSTER - ICU offline on network. Gauges dead. Check CAN high/low wiring, termination resistors."
+523002,ICU EEPROM Checksum Error,Electrical,,,,1,Freightliner,"CORRUPCIÓN MEMORIA ICU - CRITICAL. Dashboard EEPROM corrupted. Settings lost, gauges erráticos. REFLASH/REPLACE ICU."
+523003,ICU Display Module,Electrical,,,,2,Freightliner,FALLA DISPLAY ICU - LCD/LED screen fault. Display blank o pixelated. Replace display o ICU completo.
+523010,Front Radar Blockage,Safety,,,,1,Freightliner,"RADAR FRONTAL BLOQUEADO - ACC/FCW disabled. Causa: dirt, snow, ice. Limpiar radar sensor parrilla frontal."
+523011,Front Radar Communication,Safety,,,,1,Freightliner,"ERROR CAN RADAR - Radar sensor offline. ACC disabled. Check radar power, CAN wiring, radar module."
+524042,Front Radar Data Error,Safety,,,,1,Freightliner,"DATOS RADAR INVÁLIDOS - Radar sensor fault. ACC/FCW unreliable. Recalibrate radar, check alignment."
+600010,Volvo Engine Control Module,Engine,,,,1,Volvo,"ECU MOTOR VOLVO - VED (Volvo Engine Diagnostic) module fault. Check ECU power, J1939, reflash. Use VCADS."
+600020,Volvo I-Shift Transmission,Transmission,,,,1,Volvo,"TCM I-SHIFT - Transmission control fault. Check shifter, clutch actuator, TCM communication. VCADS scan."
+600030,Volvo AEBS System,Safety,,,,1,Volvo,"SISTEMA FRENADO EMERGENCIA - Automatic Emergency Braking fault. Radar/camera issue. Check sensors, recalibrate."
